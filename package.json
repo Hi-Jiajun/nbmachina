@@ -10,6 +10,7 @@
     "analyze:midi": "node src/analyze/parse-midi-and-audio.mjs",
     "analyze:chroma": "node src/analyze/chroma.mjs",
     "arrange": "node src/arrange/arrange-notes.mjs",
+    "arrange:velocity": "node src/arrange/velocity.mjs",
     "layout": "node src/layout/single-row-layout.mjs",
     "emit:playback": "node src/emit/datapack-playback.mjs",
     "emit:redo": "node src/emit/redo-chain.mjs",

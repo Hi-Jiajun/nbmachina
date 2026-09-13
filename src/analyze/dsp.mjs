@@ -285,3 +285,61 @@ export const fileExists = (p) => {
     return false;
   }
 };
+
+/* -------------------------------------------------------------------- 统计 */
+
+/** Pearson 相关系数（任一序列方差为 0 时返回 0） */
+export function pearson(xs, ys) {
+  const n = Math.min(xs.length, ys.length);
+  if (n === 0) return 0;
+  let mx = 0;
+  let my = 0;
+  for (let i = 0; i < n; i++) {
+    mx += xs[i];
+    my += ys[i];
+  }
+  mx /= n;
+  my /= n;
+  let sxy = 0;
+  let sxx = 0;
+  let syy = 0;
+  for (let i = 0; i < n; i++) {
+    const dx = xs[i] - mx;
+    const dy = ys[i] - my;
+    sxy += dx * dy;
+    sxx += dx * dx;
+    syy += dy * dy;
+  }
+  return sxx <= 0 || syy <= 0 ? 0 : sxy / Math.sqrt(sxx * syy);
+}
+
+/** 平均秩（并列取平均），供 Spearman 用 */
+export function averageRanks(xs) {
+  const order = xs.map((v, i) => [v, i]).sort((a, b) => a[0] - b[0]);
+  const ranks = new Array(xs.length);
+  let i = 0;
+  while (i < order.length) {
+    let j = i;
+    while (j + 1 < order.length && order[j + 1][0] === order[i][0]) j++;
+    const rank = (i + j) / 2 + 1;
+    for (let k = i; k <= j; k++) ranks[order[k][1]] = rank;
+    i = j + 1;
+  }
+  return ranks;
+}
+
+/** Spearman 秩相关（对单调但非线性的映射更稳健） */
+export function spearman(xs, ys) {
+  return pearson(averageRanks(xs), averageRanks(ys));
+}
+
+/** 升序数组的分位数（线性插值；p ∈ [0,1]） */
+export function percentile(sortedAsc, p) {
+  const n = sortedAsc.length;
+  if (n === 0) return 0;
+  if (n === 1) return sortedAsc[0];
+  const x = Math.min(1, Math.max(0, p)) * (n - 1);
+  const lo = Math.floor(x);
+  const hi = Math.ceil(x);
+  return sortedAsc[lo] + (sortedAsc[hi] - sortedAsc[lo]) * (x - lo);
+}
