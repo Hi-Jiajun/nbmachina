@@ -269,6 +269,8 @@ if (invokedDirectly) {
   const maxA = Math.max(...audio);
   const maxC = Math.max(...chart);
   const fmt = (v, m) => [...v].map((x, pc) => `${midiName(pc + 60)}:${(x / m).toFixed(2)}`).join(' ');
+  const audioRel = [...audio].map((v) => v / maxA);
+  const chartRel = [...chart].map((v) => v / maxC);
 
   console.log(`chroma：${wavPath}（${seconds.toFixed(1)}s，${sampleRate}Hz）`);
   console.log(`  口径：${g.meta.frameSize} 点 ${g.meta.frameSec.toFixed(3)}s 窗 / ${g.meta.hop} 点 hop /`
@@ -276,11 +278,14 @@ if (invokedDirectly) {
     + `（${g.meta.frames} 帧${g.meta.sampled ? `，1/${g.meta.frameStep} 抽样` : ''}）`);
   console.log(`  音频音级占比（各值 ÷ 最大音级）：${fmt(audio, maxA)}`);
   console.log(`  谱面音级占比（count 权重）：      ${fmt(chart, maxC)}`);
-  const zero = [...chart.keys()].filter((pc) => chart[pc] === 0);
   console.log(`  余弦相似度（shift 0）：${best.cos.toFixed(4)}`);
   console.log(`  最佳移调：+${best.shift} 半音 → 余弦 ${best.cos.toFixed(4)}`);
-  console.log(`  谱面零能量音级 ${zero.length} 个：${zero.map((pc) => midiName(pc + 60)).join(' ') || '无'}`
-    + `（这些音级在音频里的占比：${zero.map((pc) => (audio[pc] / maxA).toFixed(2)).join(' ') || '-'}）`);
+  // 音级吸附的直接判据：音频里明显存在（>10% 最大音级）、谱面却压到不足其一半的音级
+  const suppressed = [...audio.keys()].filter((pc) => audioRel[pc] > 0.1 && chartRel[pc] < 0.5 * audioRel[pc]);
+  const mass = suppressed.reduce((a, pc) => a + chart[pc], 0);
+  console.log(`  被压制音级（谱面占比 < 音频的一半）${suppressed.length} 个：`
+    + `${suppressed.map((pc) => `${midiName(pc + 60)} 音频${audioRel[pc].toFixed(2)}/谱面${chartRel[pc].toFixed(2)}`).join('，') || '无'}`
+    + `（合计占谱面质量 ${(100 * mass).toFixed(1)}%）`);
   if (outPath) {
     fs.writeFileSync(outPath, JSON.stringify({
       meta: { wavPath, notesPath, ...g.meta },

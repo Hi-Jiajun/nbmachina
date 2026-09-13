@@ -253,7 +253,8 @@ if (invokedDirectly) {
   const rOld = oldVolume.length === newVel.length ? pearson(newVel, oldVolume) : null;
   const s = meta.summary;
   console.log(`力度换口径：${inPath}（${meta.notes} 颗音，${seconds.toFixed(1)}s 音频）`);
-  console.log(`  口径：${(meta.windowSec * 1000).toFixed(0)}ms Hann 窗 / 基频 |X(f0)|² / 音高取 ${meta.midiColumn} 列`
+  const windows = Object.entries(meta.windows).map(([v, w]) => `${v} ${(w * 1000).toFixed(0)}ms`).join(' / ');
+  console.log(`  口径：Hann 窗（${windows}）/ 基频 |X(f0)|² / 音高取 ${meta.midiColumn} 列`
     + ` / 能量 p${meta.percentileLow * 100}-p${meta.percentileHigh * 100} → ${meta.floor}..${meta.ceiling}`);
   console.log(`  能量参考：p10=${meta.energyP10.toExponential(3)} p90=${meta.energyP90.toExponential(3)}`);
   console.log(`  判定：measured ${s.measured}（地板 ${s.atFloor}、天花板 ${s.atCeiling}、均值 ${s.mean}）`
