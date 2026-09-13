@@ -1,0 +1,8 @@
+# nbforge undo-preimage v1
+# at 2026-09-14T03:42:00.000Z
+# notes build/styx_helix_machine.csv
+# cells 2
+[console] 900 84 -160 :: 900, 84, -160 has the following block data: {components: {}, x: 900, y: 84, z: -160, id: "minecraft:chest"}
+[console] 900 85 -160 :: 900, 85, -160 has the following block data: {components: {}, x: 900, y: 85, z: -160, id: "minecraft:barrel"}
+[cell] 900 84 -160 deck minecraft:chest[facing=north] region-nbt
+[cell] 900 85 -160 note minecraft:sand region-nbt

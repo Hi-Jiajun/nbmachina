@@ -1,0 +1,12 @@
+# nbforge undo-preimage v1
+# at 2026-09-14T03:41:00.000Z
+# notes build/styx_helix_machine.csv
+# cells 3
+[console] 700 83 -160 :: That position is not loaded
+[console] 700 84 -160 :: 700, 84, -160 has the following block data: {components: {}, x: 700, y: 84, z: -160, id: "minecraft:chest"}
+[console] 700 85 -160 :: Something entirely unexpected
+[cell] 700 83 -160 lamp minecraft:redstone_lamp[lit=false] region-nbt not-loaded
+[cell] 700 84 -160 deck - missing missing-chunk
+[cell] 700 85 -160 note minecraft:stone region-nbt
+[cell] 700 86 -160 trigger
+[garbage] this line is not part of the format

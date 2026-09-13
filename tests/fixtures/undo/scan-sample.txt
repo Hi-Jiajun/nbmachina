@@ -1,0 +1,17 @@
+# nbforge undo-preimage v1
+# at 2026-09-14T03:40:00.000Z
+# notes build/styx_helix_machine.csv
+# cells 6
+# 说明: [console] 行为 /data get block 的原始回包；[cell] 行为前像（region NBT 只读解析）
+[console] 480 83 -160 :: The target block is not a block entity
+[console] 480 84 -160 :: That position is not loaded
+[console] 480 85 -160 :: That position is out of this world!
+[console] 480 86 -160 :: 480, 86, -160 has the following block data: {components: {}, x: 480, y: 86, z: -160, id: "minecraft:chest"}
+[console] 500 83 -160 :: The target block is not a block entity
+[console] 500 84 -160 :: The target block is not a block entity
+[cell] 480 83 -160 lamp minecraft:redstone_lamp[lit=false] region-nbt
+[cell] 480 84 -160 deck minecraft:sand region-nbt
+[cell] 480 85 -160 note minecraft:air region-nbt
+[cell] 480 86 -160 trigger minecraft:chest[facing=north] region-nbt
+[cell] 500 83 -160 lamp minecraft:air region-nbt
+[cell] 500 84 -160 deck minecraft:oak_planks region-nbt
