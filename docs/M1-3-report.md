@@ -59,6 +59,7 @@ TDD：两个测试文件都是**先跑红灯**（`ERR_MODULE_NOT_FOUND`）再写
 ## 2. 命令与原始输出
 
 （在 `nbforge/` 下执行；`build/` 在上层目录，故写作 `../build/`。）
+（两条新脚本：`npm run analyze:onsets` = 检测器 CLI，`npm run arrange:recover` = 补漏 CLI。）
 
 ### 2.1 单测（先红后绿）
 
