@@ -356,16 +356,18 @@ git commit -m "feat(arrange): 长音/延音（音频估持续 → 同音高每 2
 - package.json：npm run arrange:sustain"
 ```
 
-短哈希（模块/测试/报告/`package.json` 同一个提交）：
+短哈希（模块 / 测试 / 本报告 / `package.json` 在同一个提交）：
 
 ```bash
 $ git log --oneline -1 -- src/arrange/sustain.mjs
-a30e9af feat(arrange): 长音/延音（音频估持续 → 同音高每 2 步重触发，撞格 0）
+84c2328 feat(arrange): 长音/延音（音频估持续 → 同音高每 2 步重触发，撞格 0）
 
-$ git show --stat --oneline HEAD
-a30e9af feat(arrange): 长音/延音（音频估持续 → 同音高每 2 步重触发，撞格 0）
+$ git show --stat --oneline 84c2328
+84c2328 feat(arrange): 长音/延音（音频估持续 → 同音高每 2 步重触发，撞格 0）
  docs/M1-2-report.md     | 363 +++++
  package.json            |   1 +
  src/arrange/sustain.mjs | 575 ++++++
  tests/sustain.test.mjs  | 337 +++++
 ```
+
+（提交后本文件又补了这一节，所以上表是 `84c2328` 的统计；`git log --oneline -1 -- src/arrange/sustain.mjs` 可复现。）
