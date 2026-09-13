@@ -26,7 +26,7 @@
 
 | 文件 | 作用 | 测试 |
 |---|---|---|
-| `src/arrange/velocity.mjs`（改） | 新增 accent 口径：`DEFAULT_ACCENT_CONFIG` / `accentConfig` / `measureBandAttack` / `measureAccent` / `accentCsv` / `accentCsvText`；CLI 加 `--accent`（+ `--level-weight` / `--attack-radius` / `--attack-weight` / `--attack-power` / `--map-low` / `--map-high`）。**旧口径不动**，仍是默认路径 | `tests/velocity-accent.test.mjs`（6 条）+ 原有 `tests/velocity.test.mjs`（11 条）逐条不变 |
+| `src/arrange/velocity.mjs`（改） | 新增 accent 口径：`DEFAULT_ACCENT_CONFIG` / `accentConfig` / `measureBandAttack` / `measureAccent` / `accentCsv` / `accentCsvText`；CLI 加 `--accent`（+ `--level-weight` / `--attack-radius` / `--attack-weight` / `--attack-power` / `--map-low` / `--map-high`）。**旧口径不动**，仍是默认路径 | `tests/velocity-accent.test.mjs`（6 条）+ 原有 `tests/velocity.test.mjs`（10 条）逐条不变 |
 | `tests/velocity-accent.test.mjs`（新） | 合成 4 条（单调 / 静音 / 同步内不同 / CSV 契约）+ 真实数据 2 条（半径效果、两条验收数） | 本次 TDD：先红灯（`does not provide an export named 'DEFAULT_ACCENT_CONFIG'`）再绿 |
 | `build/velocity_accent.csv` | **交付谱面**：原 7 列逐字符保留 + 追加 `velocity` / `velocityRaw` / `velocityReason`，2802 行 | §3.2 |
 | `build/velocity_accent_report.json`、`build/score_report_m15_accent.json` | accent 逐音明细（level/attack/z/门限）与 `score.mjs` 原始评分 JSON | §3.2、§3.3 |
