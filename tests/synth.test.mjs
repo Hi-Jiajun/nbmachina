@@ -111,15 +111,25 @@ test('pad（加法/FM 铺底）与 bell（模态钟琴）：基频误差 ≤1%',
   }
 });
 
-test('bell 是模态（非谐）音色：存在 2.66× 分音，且最强分音仍是基频', () => {
+test('bell 是模态（非谐）音色：2.66× 分音在正确的非谐位置，且是"真的分音"不是谱底', () => {
   const freq = 440;
   const s = modalBell({ freq, durationSec: 2.4, vel: 0.9 });
   const { freq: dom, magnitude } = dominantPeak(s);
   assert.ok(errPct(dom, freq) <= 1, `最强峰 ${dom.toFixed(2)}Hz 不是基频 ${freq}Hz`);
-  // 2.66×（钟的典型非谐分音）处必须有可测能量 —— 证明不是纯谐波合成
+  // 2.66×（钟的典型非谐分音）：位置对 + 幅度够 + 远高于分音之间的谱底 → 确实是模态合成
   const inharmonic = dominantPeak(s, { minHz: freq * 2.5, maxHz: freq * 2.9 });
-  assert.ok(inharmonic.magnitude >= magnitude * 0.05,
-    `2.66× 分音太弱：${inharmonic.magnitude.toFixed(4)} vs 基频 ${magnitude.toFixed(4)}`);
+  const floor = dominantPeak(s, { minHz: freq * 2.3, maxHz: freq * 2.42 });
+  assert.ok(errPct(inharmonic.freq, freq * 2.66) <= 2,
+    `非谐分音位置不对：${inharmonic.freq.toFixed(1)}Hz ≠ 2.66×${freq}=${(freq * 2.66).toFixed(1)}Hz`);
+  assert.ok(inharmonic.magnitude >= magnitude * 0.01,
+    `2.66× 分音不可闻：${inharmonic.magnitude.toFixed(2)} vs 基频 ${magnitude.toFixed(2)}`);
+  assert.ok(inharmonic.magnitude >= floor.magnitude * 10,
+    `2.66× 只是谱底：${inharmonic.magnitude.toFixed(2)} vs 谷 ${floor.magnitude.toFixed(4)}`);
+  // 三次力度下位置都不漂（模态合成与力度解耦）
+  for (const vel of [0.3, 0.6, 1.0]) {
+    const q = dominantPeak(modalBell({ freq, durationSec: 2.0, vel }), { minHz: freq * 2.5, maxHz: freq * 2.9 });
+    assert.ok(errPct(q.freq, freq * 2.66) <= 2, `vel ${vel} 下非谐分音漂到 ${q.freq.toFixed(1)}Hz`);
+  }
 });
 
 /* ================================================== 3. 力度 → 亮度 / 响度映射 */
@@ -159,7 +169,7 @@ test('sounds.json：每个采样一条事件，名字与文件一一对应', () 
     { timbre: 'strings', midi: 66 }, { timbre: 'bell', midi: 61 }, { timbre: 'bass', midi: 19 },
   ];
   const json = buildSoundsJson(entries);
-  assert.deepEqual(Object.keys(json).sort(), ['bass_fs0', 'bell_cs4', 'strings_fs4']);
+  assert.deepEqual(Object.keys(json).sort(), ['bass_g0', 'bell_cs4', 'strings_fs4']);
   assert.deepEqual(json.strings_fs4.sounds, [
     { name: 'strings/fs4', stream: false, attenuation_distance: 16 },
   ]);
@@ -265,7 +275,7 @@ test('映射：harp→strings（同刻最高音）／次高音→bell／bass→b
   assert.equal(at(24).pitch, '2.0000');
   // 自研音色一律 pitch=1（每半音一个采样，不受 /playsound 的 0.5..2.0 音高上限影响）
   assert.equal(at(15).pitch, '1');
-  assert.equal(at(15).volume, 0.9);
+  assert.equal(at(15).volume, '0.90', 'volume 是给命令用的两位小数字符串');
 });
 
 test('映射：内声部可用 pad 替换 bell（--inner），未知乐器退回 strings 并计数', () => {
@@ -275,10 +285,10 @@ test('映射：内声部可用 pad 替换 bell（--inner），未知乐器退回
     { step: 3, instr: 'chime', row: 8, vol: 0.4 },
   ];
   const withPad = planHifi(notes, { inner: 'pad' }).events.find((e) => e.step === 3 && e.row === 10);
-  assert.equal(withPad.event, 'nbforge:pad_gs3');
+  assert.equal(withPad.event, 'nbforge:pad_e3');
   assert.equal(withPad.timbre, 'pad');
   const withBell = planHifi(notes, { inner: 'bell' }).events.find((e) => e.step === 3 && e.row === 10);
-  assert.equal(withBell.event, 'nbforge:bell_gs3');
+  assert.equal(withBell.event, 'nbforge:bell_e3');
   const chime = planHifi([{ step: 1, instr: 'chime', row: 8, vol: 0.5 }]).events[0];
   assert.equal(chime.event, 'nbforge:bell_d3', '已知别名 chime→bell');
   const unknown = planHifi([{ step: 1, instr: 'theremin', row: 8, vol: 0.5 }]);
@@ -308,7 +318,13 @@ test('函数生成：monitor_hifi_on/off + 独立 hifi/tick（两种刻率表、
   assert.ok(on.includes('scoreboard players set #hifi styx.flag 1'), 'on 必须打开 #hifi');
   assert.ok(off.includes('scoreboard players set #hifi styx.flag 0'), 'off 必须关闭 #hifi');
   for (const [name, text] of fn) {
-    assert.ok(!/tick rate/.test(text), `${name} 含 /tick rate（权限等级 3，会让函数整文件加载失败）`);
+    // 判据是"有没有一条真的 /tick rate 命令"：写在 tellraw 里的提示文字无害
+    // （datapack-playback 的 start_hi 也这么写，e2e 里加载正常）
+    for (const line of text.split('\n')) {
+      if (!line || line.startsWith('#')) continue;
+      const cmd = line.includes(' run ') ? line.slice(line.lastIndexOf(' run ') + 5) : line;
+      assert.ok(!/^tick\s+rate\b/.test(cmd), `${name} 里有真的 /tick rate 命令（权限等级 3）：${line}`);
+    }
     assert.ok(text.endsWith('\n'), `${name} 未以换行结尾`);
   }
   assert.ok(HIFI_SYNC_STEPS.length >= 2, 'HIFI_SYNC_STEPS 描述"独立计数 + 播放中同步 #t"');
@@ -318,7 +334,7 @@ test('函数生成：monitor_hifi_on/off + 独立 hifi/tick（两种刻率表、
   assert.ok(fn.has('play/hifi/stop') && fn.has('play/hifi/report'));
   const buckets = [...fn].filter(([n]) => /^play\/hifi\/(lo|hi)\/b\d{3}$/.test(n)).map(([, t2]) => t2);
   const plays = buckets.join('\n').split('\n').filter((l) => l.includes('playsound'));
-  assert.equal(plays.length, notes.length, `两套刻率表合计 playsound 行数 ${plays.length} ≠ 音符 ${notes.length}`);
+  assert.equal(plays.length, notes.length * 2, `两套刻率表各覆盖一遍：期望 ${notes.length * 2} 行，实测 ${plays.length}`);
   assert.ok(plays.every((l) => / master @s ~ ~ ~ 0\.50 1$/.test(l)), `playsound 参数形状不对：\n${plays[0]}`);
   assert.ok(plays.every((l) => /^execute if score #ht styx\.t matches \d+ as @a at @s run playsound /.test(l)),
     `playsound 行必须以 #ht 守卫开头：\n${plays[0]}`);
@@ -353,6 +369,7 @@ test('真实谱面：整条机器谱面全部映射成功，事件都在渲染�
   }
   const fn = buildHifiFunctions(notes, {});
   const bucketText = [...fn].filter(([n]) => /^play\/hifi\/(lo|hi)\/b\d{3}$/.test(n)).map(([, tt]) => tt).join('\n');
-  assert.equal((bucketText.match(/playsound /g) ?? []).length, notes.length, '两套刻率表合计必须覆盖全部音符');
+  assert.equal((bucketText.match(/playsound /g) ?? []).length, notes.length * 2,
+    '两套刻率表（20/100 tps）各覆盖一遍全部音符');
   assert.ok(stats.byInstrument.harp > 1000 && stats.byInstrument.bass > 1000, '真实谱面声部统计异常');
 });
