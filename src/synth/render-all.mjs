@@ -5,6 +5,8 @@
 //   [--vel 0.8]            采样烘死的力度层（默认 0.8 = 中强）
 //   [--quality 4]          libvorbis -q:a（默认 4）
 //   [--no-wav]             转完 ogg 后删掉 WAV 中间件（默认保留，方便人工核对）
+// 相对路径（`--out build/audio_nbforge`）按 **minecraft 工程根** 解析（= 本仓库的上一级），
+// 与其他模块（datapack-playback 等）的 <BUILD> 约定一致。
 //
 // 产物：
 //   <out>/wav/<音色>/<音名>.wav        16bit PCM 44.1kHz 单声道（无损中间件）
@@ -23,7 +25,7 @@ import { encodeOgg, ffmpegAvailable } from './ogg.mjs';
 import { SAMPLE_RATE, peak, rms } from './synth.mjs';
 import { dominantPeak, spectralCentroid } from './spectrum.mjs';
 import {
-  REFERENCE_VEL, TIMBRES, listRenderJobs, noteFileName, registerSize, renderVoice,
+  REFERENCE_VEL, REGISTERS, TIMBRES, listRenderJobs, noteFileName, registerSize, renderVoice,
 } from './voices.mjs';
 
 const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
@@ -31,12 +33,20 @@ const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const flag = (n) => argv.includes(`--${n}`);
 
-const OUT = opt('out', path.join(BUILD, 'audio_nbforge'));
+/** 相对路径按 minecraft 工程根解析（`--out build/audio_nbforge` → <minecraft>/build/audio_nbforge） */
+const MC_ROOT = path.resolve(BUILD, '..');
+const resolvePath = (p) => (path.isAbsolute(p) ? p : path.resolve(MC_ROOT, p));
+const OUT = resolvePath(opt('out', path.join(BUILD, 'audio_nbforge')));
 const ONLY = (opt('only', '') || TIMBRES.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
 const VEL = Number(opt('vel', REFERENCE_VEL));
 const QUALITY = Number(opt('quality', 4));
 const DEMO_VELS = [0.35, 0.65, 1.0];
-const DEMO_MIDIS = [54, 66]; // F#3 / F#4：中低与中高各一个，力度差异最好判定
+/** 力度试听用的两个音：取该音色音域的中段与上方八度（每个音色都在自己音域内，bass 不会被顶出去） */
+const demoMidisOf = (timbre) => {
+  const [lo, hi] = REGISTERS[timbre];
+  const a = Math.round((lo + hi) / 2);
+  return [a, Math.min(hi, a + 12)];
+};
 
 for (const t of ONLY) if (!TIMBRES.includes(t)) throw new Error(`未知音色：${t}（可用：${TIMBRES.join(',')}）`);
 const hasFfmpeg = ffmpegAvailable();
@@ -106,7 +116,7 @@ if (hasFfmpeg) {
   fs.mkdirSync(demoDir, { recursive: true });
   const tmp = path.join(demoDir, '_tmp.wav');
   for (const timbre of ONLY) {
-    for (const midi of DEMO_MIDIS) {
+    for (const midi of demoMidisOf(timbre)) {
       for (const vel of DEMO_VELS) {
         const samples = renderVoice(timbre, midi, { vel });
         fs.writeFileSync(tmp, encodeWav({ samples, sampleRate: SAMPLE_RATE }));
@@ -176,7 +186,7 @@ for (const t of timbres) {
 if (velocity.length) {
   console.log('\n力度→亮度（谱心 Hz，越高越亮）：');
   for (const timbre of ONLY) {
-    for (const midi of DEMO_MIDIS) {
+    for (const midi of demoMidisOf(timbre)) {
       const row = velocity.filter((v) => v.timbre === timbre && v.midi === midi)
         .map((v) => `vel${v.vel}:${v.centroidHz.toFixed(0)}Hz/${v.rms.toFixed(3)}`).join('  ');
       console.log(`  ${timbre} ${noteFileName(midi)}  ${row}`);

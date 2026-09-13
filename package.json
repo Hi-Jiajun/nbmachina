@@ -30,6 +30,9 @@
     "verify": "node src/verify/score.mjs",
     "test": "node --test \"tests/*.test.mjs\"",
     "arrange:all": "node src/arrange/arrange-all.mjs",
-    "project:new": "node src/core/new-project.mjs"
+    "project:new": "node src/core/new-project.mjs",
+    "synth:render": "node src/synth/render-all.mjs --out build/audio_nbforge",
+    "emit:pack": "node src/emit/resource-pack.mjs",
+    "emit:hifi": "node src/emit/playsound-hifi.mjs"
   }
 }

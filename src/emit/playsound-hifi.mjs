@@ -311,9 +311,10 @@ export function wiringState(datapackDir = DP) {
 function main() {
   const argv = process.argv.slice(2);
   const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
-  const notesCsv = opt('notes', fs.existsSync(`${BUILD}/machine_pipeline.csv`)
+  const resolvePath = (p) => (path.isAbsolute(p) ? p : path.resolve(BUILD, '..', p));
+  const notesCsv = resolvePath(opt('notes', fs.existsSync(`${BUILD}/machine_pipeline.csv`)
     ? `${BUILD}/machine_pipeline.csv`
-    : `${BUILD}/styx_helix_machine.csv`);
+    : `${BUILD}/styx_helix_machine.csv`));
   const bassOctave = Number(opt('bass-octave', 1));
   const inner = opt('inner', 'bell');
   const vel = Number(opt('vel', REFERENCE_VEL));

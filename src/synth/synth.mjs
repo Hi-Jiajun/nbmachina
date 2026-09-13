@@ -264,19 +264,24 @@ export function karplusStrong({
   const g = Math.min(0.9999, 10 ** (-3 / (freq * t60)));
 
   const n = Math.max(8, Math.round((durationSec ?? t60) * sampleRate));
-  const buf = Float64Array.from(exc);
+  // 延迟线长度必须是 L+1：小数延迟要在"延迟 L"与"延迟 L+1"两个抽头之间插值。
+  // 只用 L 个槽（曾经的写法）会让第二个抽头落在"延迟 1"上 —— 环路里混进近距抽头，
+  // frac 接近 0 或 1 的音（midi 48/61/74/77）会退化成亚音频漂移，基频直接错到 6%~97%。
+  const M = L + 1;
+  const buf = new Float64Array(M);
+  for (let i = 0; i < M; i++) buf[i] = exc[i % L];
   const out = new Float64Array(n);
   let w = 0;
   let prev = 0;
   for (let i = 0; i < n; i++) {
-    const i1 = w; // 延迟 L
-    const i2 = (w - 1 + L) % L; // 延迟 L+1
+    const i1 = (w - L + M) % M; // 延迟 L
+    const i2 = (w - L - 1 + M) % M; // 延迟 L+1
     const s = buf[i1] * (1 - frac) + buf[i2] * frac;
     out[i] = s;
     const y = h0 * s + h1 * prev;
     prev = s;
     buf[w] = y * g;
-    w = (w + 1) % L;
+    w = (w + 1) % M;
   }
 
   // 低频支撑：叠加同频正弦（低音在监听设备上放不出来的补偿；由 voices.mjs 决定是否启用）
