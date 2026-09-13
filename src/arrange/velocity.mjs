@@ -13,9 +13,14 @@
 //   ① 只用基频，不加 2f0/3f0。加谐波会让"相邻八度的同一个音级"互相污染：
 //      C4 的 2 次谐波正好是 C5 的基频，于是只响了 C5 时 C4 也会拿到一半能量。
 //      要对照可传 `voices: { melody: { harmonicWeights: [1, 0.5, 0.25] } }`（CLI 的 --comb）。
-//   ② 无证据（窗内 RMS < minRms）→ 力度 0，而不是地板 0.35：这里不是"很轻地弹了一下"，
+//   ② 低音声部的窗取 **120ms**（一个步进），旋律取 100ms。原因：44.1kHz 下 100ms 窗的频率
+//      分辨率是 10Hz，而低音区一个半音只有 4.3–6.9Hz（E2=82.4Hz 的半音 = 4.9Hz）——相邻半音
+//      完全落在主瓣里，前一颗音的衰减尾巴（0.12s 后仍有 71% 幅度）会把能量算到这颗音头上。
+//      合成贝斯线（0.12s 步进）实测：100ms 窗 r=0.57、120ms 窗 r=0.85、300ms 窗 r=0.91；
+//      再长就会把下一颗音的攻击算进来，所以取 120ms（= 正好到下一颗音的起始）。
+//   ③ 无证据（窗内 RMS < minRms）→ 力度 0，而不是地板 0.35：这里不是"很轻地弹了一下"，
 //      而是"音频里听不出这颗音"。地板 0.35 只留给"有能量但落在 p10 以下"的音。
-//   ③ 分位数跨度为 0（全部能量相同，或只有一颗音）→ 统一退到地板，不凭空给天花板。
+//   ④ 分位数跨度为 0（全部能量相同，或只有一颗音）→ 统一退到地板，不凭空给天花板。
 //
 // 重要限制：这个口径量在**给定的八度**上。若输入的八度本身是错的（v3 的贝斯大面积如此），
 // 力度也会跟着错。流水线顺序应是 T3 修八度 → T5 换力度（CLI 传 `--midi-column newMidi`）。
@@ -72,10 +77,10 @@ export const DEFAULT_VELOCITY_CONFIG = {
   percentileHigh: 0.9,
   midiColumn: 'midi',    // 'midi' 用输入音高；'newMidi' 用 T3 修复后的音高
   voices: {
-    melody: { harmonicWeights: [1] },
-    inner: { harmonicWeights: [1] },
-    bass: { harmonicWeights: [1] },
-    perc: { harmonicWeights: [1] },
+    melody: { harmonicWeights: [1], windowSec: 0.1 },
+    inner: { harmonicWeights: [1], windowSec: 0.1 },
+    bass: { harmonicWeights: [1], windowSec: 0.12 },
+    perc: { harmonicWeights: [1], windowSec: 0.1 },
   },
 };
 
@@ -121,6 +126,7 @@ export function measureVelocity({ samples, sampleRate, notes, config = {} }) {
   for (const n of notes) {
     const voice = voiceOfInstrument(n.instrument);
     const vcfg = cfg.voices[voice] ?? cfg.voices.melody;
+    const windowSec = vcfg.windowSec ?? cfg.windowSec;
     let midiUsed = n[cfg.midiColumn];
     let reason = 'measured';
     if (!Number.isFinite(midiUsed)) {
@@ -133,7 +139,7 @@ export function measureVelocity({ samples, sampleRate, notes, config = {} }) {
       midi: midiUsed,
       timeSec: n.timeSec,
       a4: cfg.a4,
-      windowSec: cfg.windowSec,
+      windowSec,
       harmonicWeights: vcfg.harmonicWeights,
     });
     const weak = m.rms < cfg.minRms;
@@ -149,6 +155,7 @@ export function measureVelocity({ samples, sampleRate, notes, config = {} }) {
       f0Hz: Number(m.f0.toFixed(3)),
       energy: m.energy,
       rms: m.rms,
+      windowSec,
       weak,
       reason,
     });
@@ -176,6 +183,7 @@ export function measureVelocity({ samples, sampleRate, notes, config = {} }) {
     percentileLow: cfg.percentileLow,
     percentileHigh: cfg.percentileHigh,
     harmonicWeights: Object.fromEntries(Object.entries(cfg.voices).map(([v, c]) => [v, c.harmonicWeights])),
+    windows: Object.fromEntries(Object.entries(cfg.voices).map(([v, c]) => [v, c.windowSec ?? cfg.windowSec])),
     energyP10: percentile(sorted, cfg.percentileLow),
     energyP90: percentile(sorted, cfg.percentileHigh),
     reasons,

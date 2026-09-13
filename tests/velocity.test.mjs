@@ -134,6 +134,8 @@ test('默认只用基频（避免相邻八度的同音级互相污染）；梳�
   assert.equal(VOICE_OF_INSTRUMENT.harp, 'melody');
   assert.deepEqual(DEFAULT_VELOCITY_CONFIG.voices.melody.harmonicWeights, [1]);
   assert.deepEqual(DEFAULT_VELOCITY_CONFIG.voices.bass.harmonicWeights, [1]);
+  // 低音区一个半音 < 1 个 bin，窗必须比旋律长（实测 100ms→r 0.57、120ms→0.85）
+  assert.ok(DEFAULT_VELOCITY_CONFIG.voices.bass.windowSec > DEFAULT_VELOCITY_CONFIG.voices.melody.windowSec);
   const samples = synth({ seconds: 0.5, events: [{ midi: 45, gain: 0.8, harmonics: [1, 0.7, 0.5, 0.3] }] });
   const notes = [note({ noteId: 0, midi: 45, instrument: 'bass' }), note({ noteId: 1, midi: 45, instrument: 'harp' })];
   const fundamental = measureVelocity({ samples, sampleRate: SR, notes }).results;
