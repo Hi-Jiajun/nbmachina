@@ -8,6 +8,7 @@
   "scripts": {
     "analyze:tempo": "node src/analyze/audio-tempo.mjs",
     "analyze:midi": "node src/analyze/parse-midi-and-audio.mjs",
+    "analyze:chroma": "node src/analyze/chroma.mjs",
     "arrange": "node src/arrange/arrange-notes.mjs",
     "layout": "node src/layout/single-row-layout.mjs",
     "emit:playback": "node src/emit/datapack-playback.mjs",
