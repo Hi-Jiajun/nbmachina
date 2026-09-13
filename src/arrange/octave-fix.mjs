@@ -157,17 +157,6 @@ export function fixOctaves({ csvText, evidence, config = {} }) {
   }
   stats.integerOctavePairs = { before, after };
 
-  const agree = (key) => {
-    const withEv = notes.filter((n) => n.ev && !n.ev.weak);
-    if (!withEv.length) return { n: 0, before: 0, after: 0 };
-    const b = withEv.filter((n) => n.midi === n.ev.bestOctave).length;
-    const a = withEv.filter((n) => n.newMidi === n.ev.bestOctave).length;
-    return {
-      n: withEv.length,
-      before: Number((100 * b / withEv.length).toFixed(2)),
-      after: Number((100 * a / withEv.length).toFixed(2)),
-    };
-  };
   stats.evidenceAgreement = {};
   for (const v of Object.keys(stats.byVoice)) {
     const inV = notes.filter((n) => n.voice === v);
@@ -185,8 +174,16 @@ export function fixOctaves({ csvText, evidence, config = {} }) {
     before: { melody: rangeOf(asBefore, 'melody'), bass: rangeOf(asBefore, 'bass') },
     after: { melody: rangeOf(notes, 'melody'), bass: rangeOf(notes, 'bass') },
   };
-  stats.registerName = stats.register;
-  stats.agreeOverall = agree();
+  {  // 全声部合计（只统计"有效证据"的音）
+    const withEv = notes.filter((n) => n.ev && !n.ev.weak);
+    const b = withEv.filter((n) => n.midi === n.ev.bestOctave).length;
+    const a = withEv.filter((n) => n.newMidi === n.ev.bestOctave).length;
+    stats.agreeOverall = {
+      n: withEv.length,
+      before: withEv.length ? Number((100 * b / withEv.length).toFixed(2)) : 0,
+      after: withEv.length ? Number((100 * a / withEv.length).toFixed(2)) : 0,
+    };
+  }
   stats.degradations = degradations.length;
   stats.degradationsByReason = degradations.reduce((acc, d) => {
     acc[d.reason] = (acc[d.reason] ?? 0) + 1;
