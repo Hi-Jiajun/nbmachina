@@ -1,9 +1,9 @@
 {
-  "at": "2026-09-13T20:03:51.741Z",
+  "at": "2026-09-13T20:06:36.384Z",
   "mode": "lo",
   "tps": 20,
   "ticks": 600,
-  "notesCsv": "C:\\Users\\hiliang\\Documents\\minecraft\\build\\machine_final_dedup.csv",
+  "notesCsv": "C:\\Users\\hiliang\\Documents\\minecraft\\build\\machine_pipeline.csv",
   "baseline": {
     "t": 15,
     "on": 1,
@@ -44,22 +44,22 @@
     }
   ],
   "expected": {
-    "hits": 289,
-    "bass": 179,
+    "hits": 295,
+    "bass": 185,
     "harp": 110
   },
   "actual": {
     "t": 616,
-    "hits": 296,
+    "hits": 302,
     "mh": 114,
-    "mb": 182,
-    "mspt": 8.7
+    "mb": 188,
+    "mspt": 7.4
   },
   "delta": {
     "t": 601,
-    "hits": 289,
+    "hits": 295,
     "mh": 110,
-    "mb": 179
+    "mb": 185
   },
   "loadErrors": 0,
   "fatal": null,
@@ -80,9 +80,9 @@
       "detail": "基线 15 → 616（+601）"
     },
     {
-      "name": "#hits 增量 = 期望 289（差 ≤1）",
+      "name": "#hits 增量 = 期望 295（差 ≤1）",
       "ok": true,
-      "detail": "实际 289"
+      "detail": "实际 295"
     },
     {
       "name": "监听 钢琴 增量 = 期望 110",
@@ -90,9 +90,9 @@
       "detail": "实际 110"
     },
     {
-      "name": "监听 贝斯 增量 = 期望 179",
+      "name": "监听 贝斯 增量 = 期望 185",
       "ok": true,
-      "detail": "实际 179"
+      "detail": "实际 185"
     },
     {
       "name": "0 条 Failed to load function",
@@ -102,7 +102,7 @@
     {
       "name": "MSPT ≤ 50（20 tps 的单刻预算）",
       "ok": true,
-      "detail": "8.7 ms"
+      "detail": "7.4 ms"
     }
   ]
 }
