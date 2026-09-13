@@ -40,6 +40,7 @@ npm run verify -- --octave-evidence build/analysis_octave.json   # → build/sco
 | `notes_dedup.csv`（T4） | 0.888 | 0.936 | 0.879 | 0.400 | 0.986 | 0.8367 | 去撞格丢 291 颗（相对基线漏音 9.4%） |
 | v3 + `velocity_fixed.csv`（T5 口径） | 0.888 | 0.936 | 0.844 | 1.000⁽*⁾ | 0.987 | 0.9183 | 力度换成窄带能量口径 |
 | `notes_fixed_v3.csv`（T2/T3）+ 重算力度 | 0.888 | 0.936 | **0.954** | 0.999⁽*⁾ | 0.985 | **0.9453** | 八度 0.844 → 0.954（贝斯 0.779 → 0.941） |
+| `styx_helix_machine.csv`（T3+重折行+T5+T4，机器实际用的谱面） | 0.888 | 0.936 | **0.965** | 0.990⁽*⁾ | 0.985 | **0.9467** | 见 §5；这是**进机器的那一版** |
 
 ⁽*⁾ 力度相关在这两行是**链路自检**（力度由同一描述子生成），不能读成"力度变好 0.6"。
 可比的真提升是八度那一项。
@@ -63,3 +64,24 @@ npm run verify -- --octave-evidence build/analysis_octave.json   # → build/sco
 2. **力度相关项不能单独引用**：它可能是循环的，必须同时看 `vsOnsetStrength`（非循环诊断）。
 3. **起音 F1 只能在同一个检测器版本内横向比较**（换检测器参数要重跑全部对照，并在这里备注）。
 4. **改了口径就要写下来**：任何 `DEFAULT_*` 常量的改动都会让这份基线失效，请在新报告里注明并重算。
+
+## 5. T7：进机器的那一版谱面 + 无头端到端结论（2026-09-14）
+
+**产线**（四步，全部零依赖、可单独重跑）：
+
+```bash
+node src/arrange/fold.mjs            --in build/notes_fixed_v3.csv --out build/notes_refold.csv   # ① 按修好的 midi 重折 0..24 行
+node src/arrange/velocity.mjs        --in build/notes_refold.csv   --out build/notes_vel.csv       # ② 力度换口径（T5）
+node src/arrange/dedupe.mjs          --in build/notes_vel.csv      --out build/styx_helix_machine.csv  # ③ 去撞格（T4）
+node src/emit/datapack-playback.mjs  --notes build/styx_helix_machine.csv                          # ④ 生成数据包函数
+# 一步版（前三步等价，volume := velocity）：
+node src/arrange/machine-pipeline.mjs
+```
+
+| 项 | 值 |
+|---|---|
+| 机器谱面 | `build/styx_helix_machine.csv`（3099 → 去撞格后 **2802** 颗音，撞格 281 → **0**） |
+| 客观分 | **0.9467**（基线 0.8223，+0.124；八度 0.844 → 0.965） |
+| 端到端 | `node src/test/run-headless.mjs --notes build/styx_helix_machine.csv --mode lo --ticks 600` → 全部通过，`#hits` 265/265、0 条加载失败、MSPT 6.6 ms |
+| 两种刻率 | `styx:play/start`（20 tps，默认）与 `styx:play/start_hi`（100 tps 精确网格）；`styx:redo` / `styx:redo_hi` 对应一键重做 |
+| 证据 | `tests/e2e.md`（三次运行的刻窗口/触发数/MSPT），原始日志 `testserver/e2e-{lo,hi}.log` |

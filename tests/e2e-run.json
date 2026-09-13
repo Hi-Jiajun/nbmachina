@@ -1,0 +1,75 @@
+{
+  "at": "2026-09-13T17:00:06.102Z",
+  "mode": "lo",
+  "tps": 20,
+  "ticks": 600,
+  "notesCsv": "C:\\Users\\hiliang\\Documents\\minecraft\\build\\styx_helix_machine.csv",
+  "baseline": {
+    "t": 15,
+    "on": 1,
+    "hits": 7,
+    "mh": 4,
+    "mb": 3
+  },
+  "expected": {
+    "hits": 265,
+    "bass": 163,
+    "harp": 102
+  },
+  "actual": {
+    "t": 616,
+    "hits": 272,
+    "mh": 106,
+    "mb": 166,
+    "mspt": 6.6
+  },
+  "delta": {
+    "t": 601,
+    "hits": 265,
+    "mh": 102,
+    "mb": 163
+  },
+  "loadErrors": 0,
+  "fatal": null,
+  "checks": [
+    {
+      "name": "音符盒/乐器方块/灯/触发位抽查",
+      "ok": true
+    },
+    {
+      "name": "function styx:play/start 执行成功（#on = 1）",
+      "ok": true,
+      "detail": "#on=1、#t=15"
+    },
+    {
+      "name": "#t 推进 = 600（允许 +1，sprint 收尾）",
+      "ok": true,
+      "detail": "基线 15 → 616（+601）"
+    },
+    {
+      "name": "#hits 增量 = 期望 265（差 ≤1）",
+      "ok": true,
+      "detail": "实际 265"
+    },
+    {
+      "name": "监听 钢琴 增量 = 期望 102",
+      "ok": true,
+      "detail": "实际 102"
+    },
+    {
+      "name": "监听 贝斯 增量 = 期望 163",
+      "ok": true,
+      "detail": "实际 163"
+    },
+    {
+      "name": "0 条 Failed to load function",
+      "ok": true,
+      "detail": "实际 0"
+    },
+    {
+      "name": "MSPT ≤ 50（20 tps 的单刻预算）",
+      "ok": true,
+      "detail": "6.6 ms"
+    }
+  ]
+}
