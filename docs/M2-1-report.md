@@ -181,13 +181,15 @@ build/nbforge_resources.zip                    ★ 交付件（2.09MB，可复�
 * **自检**：sounds.json 里每个 `name` 都必须指向 zip 内真实存在的文件（测试逐条交叉校验）；
   另外抽 4 音色 × 3 音（音域两端 + 中间）把 ogg **解码回来**重测基频（误差 ≤1%）。
 
-**安装（本机现状，如实说明）**：`testserver/resourcepacks/` 目录不存在 → 按任务书"若存在该目录"没有复制；
-客户端实例目录 `C:\Program Files\PCL2\.minecraft\versions\1.21.10-Fabric 0.19.5\resourcepacks\` 存在但
-**复制被拒绝（EPERM，Program Files 需要提权）**，所以本次**没有自动装到客户端**。两种可用做法：
+**安装（本机现状，如实说明）**：
 
-1. 手动（或提权）把 `build/nbforge_resources.zip` 放进该实例的 `resourcepacks\`，进游戏"选项→资源包"启用；
-2. 让测试服下发：`testserver/server.properties` 里 `resource-pack=file:///C:/Users/hiliang/Documents/minecraft/build/nbforge_resources.zip`
-   （客户端连上自动下载；**本次没有改**，留给根代理决定，避免影响别人的 e2e 运行）。
+* `testserver/resourcepacks/` 已就位两份：`nbforge_resources/`（解包目录，供人工检查结构）+
+  `nbforge_resources.zip`（2.09MB，供"服务端下发"用）。服务端下发只需在 `testserver/server.properties` 里加
+  `resource-pack=file:///C:/Users/hiliang/Documents/minecraft/testserver/resourcepacks/nbforge_resources.zip`，
+  客户端连上会自动下载 —— **本次没有改 server.properties**（避免影响其他人的 e2e 运行），留给根代理/用户决定。
+* 客户端实例目录 `C:\Program Files\PCL2\.minecraft\versions\1.21.10-Fabric 0.19.5\resourcepacks\` 存在，
+  但**复制被拒绝（EPERM，Program Files 需要提权）**，所以**没有自动装到客户端**（CLI 会打印这条失败原因）。
+  手动做法：把 `build/nbforge_resources.zip` 放进该实例的 `resourcepacks\`，进游戏"选项→资源包"启用。
 
 ---
 
