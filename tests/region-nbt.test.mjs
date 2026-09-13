@@ -54,6 +54,49 @@ function synthSection(sectionY, sandAt, lampAt) {
   );
 }
 
+/**
+ * 复刻 testserver 实测的那种 section：palette 22 条（>16 → bits=5），
+ * data **342** 个 long = 每个 long 只放 12 个条目（末尾 4 位不用）的"填充"打包。
+ * 紧凑打包同样 5 bits 只要 320 个 long —— 两者不能混。
+ */
+function synthPaddedSection(sectionY, at, idx) {
+  const palette = [comp(cStr('Name', 'minecraft:air')), comp(cStr('Name', 'minecraft:redstone_lamp'), ent(10, 'Properties', comp(cStr('lit', 'false'))))];
+  for (let i = 0; i < 20; i++) {
+    palette.push(comp(cStr('Name', 'minecraft:note_block'), ent(10, 'Properties', comp(cStr('instrument', 'harp'), cStr('note', String(i)), cStr('powered', 'false')))));
+  }
+  const bits = 5, per = Math.floor(64 / bits);
+  const longs = new Array(Math.ceil(4096 / per)).fill(0n);
+  const i = (at[1] << 8) | (at[2] << 4) | at[0];
+  longs[Math.floor(i / per)] |= BigInt(idx) << BigInt((i % per) * bits);
+  assert.equal(longs.length, 342, '填充打包 5 bits = 342 个 long（紧凑是 320）');
+  return comp(
+    cByte('Y', sectionY),
+    ent(10, 'block_states', comp(cList('palette', 10, palette), cLongArr('data', longs))),
+  );
+}
+
+function writeRegionSections(dir, cx, cz, sections, compress = 1) {
+  const chunkRoot = Buffer.concat([
+    Buffer.from([10]), str(''),
+    comp(
+      cInt('DataVersion', 4556),
+      cInt('xPos', cx),
+      cInt('zPos', cz),
+      cList('sections', 10, sections),
+    ),
+  ]);
+  const payload = compress === 2 ? zlib.deflateSync(chunkRoot) : zlib.gzipSync(chunkRoot);
+  const sectors = Math.ceil((payload.length + 5) / 4096);
+  const header = Buffer.alloc(8192);
+  const i = (cx & 31) + (cz & 31) * 32;
+  header[i * 4] = 0; header[i * 4 + 1] = 0; header[i * 4 + 2] = 2; header[i * 4 + 3] = sectors;
+  const body = Buffer.alloc(sectors * 4096);
+  body.writeInt32BE(payload.length + 1, 0);
+  body[4] = compress;
+  payload.copy(body, 5);
+  fs.writeFileSync(path.join(dir, `r.${cx >> 5}.${cz >> 5}.mca`), Buffer.concat([header, body]));
+}
+
 /** 写一个只有 1 个区块的 region 文件；compress: 1=gzip / 2=zlib */
 function writeRegion(dir, cx, cz, compress = 1) {
   const chunkRoot = Buffer.concat([
@@ -113,5 +156,33 @@ test('region 解析：gzip 与 zlib 两种压缩都能解', () => {
   withTempRegion((dir) => {
     writeRegion(dir, 30, -14, 2);
     assert.equal(createRegionReader(dir).blockAt(481, 82, -221).name, 'minecraft:sand');
+  });
+});
+
+test('region 解析：palette >16 条的 section 用"填充"打包也要读对（实测 testserver 就是这种）', () => {
+  withTempRegion((dir) => {
+    // 区块 (45,-10)：世界坐标 x 720..735 / z -160..-145，section Y=5 → y 80..95
+    writeRegionSections(dir, 45, -10, [synthPaddedSection(5, [4, 3, 2], 1)]);
+    const r = createRegionReader(dir);
+    assert.deepEqual(
+      r.blockAt(45 * 16 + 4, 5 * 16 + 3, -10 * 16 + 2),
+      { name: 'minecraft:redstone_lamp', properties: { lit: 'false' } },
+      '填充打包下这一格是红石灯（用紧凑打包解会读成索引 0 = 空气）',
+    );
+    assert.deepEqual(r.blockAt(45 * 16 + 0, 5 * 16 + 0, -10 * 16 + 0), { name: 'minecraft:air', properties: {} });
+    assert.equal(r.stats.modes.padded, 1);
+    assert.equal(r.stats.modes.compact, 0);
+    assert.equal(r.paletteAt(45 * 16 + 4, 5 * 16 + 3, -10 * 16 + 2).length, 22);
+  });
+});
+
+test('region 解析：section 的 Y 是**有符号** byte（y<0 的 section 也要能定位）', () => {
+  withTempRegion((dir) => {
+    // Y=-4 → 世界 y -64..-49（区块 (30,-14)）
+    writeRegionSections(dir, 30, -14, [synthSection(-4, [1, 2, 3], [4, 5, 6])]);
+    const r = createRegionReader(dir);
+    assert.equal(r.blockAt(480 + 1, -64 + 2, -224 + 3).name, 'minecraft:sand');
+    assert.equal(r.blockAt(480 + 4, -64 + 5, -224 + 6).name, 'minecraft:redstone_lamp');
+    assert.deepEqual(r.blockAt(480, 100, -224), { name: 'minecraft:air', properties: {} }, '别的高度仍是空气');
   });
 });

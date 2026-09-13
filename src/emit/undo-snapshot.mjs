@@ -234,6 +234,9 @@ export function buildUndoArtifacts(snapshot, opts = {}) {
     'scoreboard players set #bad styx.undo 0',
     ...verifyParts.map((_, i) => `function styx:undo/d${pad(i + 1)}`),
     `tellraw @a {"text":"[Styx] undo 逐格对账：不匹配 ","color":"gray","extra":[{"score":{"name":"#bad","objective":"styx.undo"},"color":"yellow"},{"text":" / ${restore.length} 格（0 = diff 0）","color":"gray"}]}`,
+    // 无头服没有玩家，tellraw @a 会静默失败 —— 所以对账结论还要用 say 打一份到日志里（有玩家时也看得见）
+    `execute if score #bad styx.undo matches 0 run say [Styx] undo 逐格对账通过：${restore.length}/${restore.length} 格与扫描前像一致（diff 0）`,
+    'execute if score #bad styx.undo matches 1.. run say [Styx] undo 逐格对账不通过：#bad > 0，逐格坐标见 styx:undo/where',
     '',
   ].join('\n');
 
@@ -242,7 +245,7 @@ export function buildUndoArtifacts(snapshot, opts = {}) {
     whereParts.forEach((cells, i) => {
       files[`undo/w${pad(i + 1)}.mcfunction`] = [
         `# 坐标诊断分片 ${i + 1}/${whereParts.length}：只在不匹配时打印坐标`,
-        ...cells.map((c) => `execute unless block ${c.x} ${c.y} ${c.z} ${formatStateToken(c.state)} run tellraw @a {"text":"[undo/diff] ${c.x} ${c.y} ${c.z} 期望 ${formatStateToken(c.state)}","color":"red"}`),
+        ...cells.map((c) => `execute unless block ${c.x} ${c.y} ${c.z} ${formatStateToken(c.state)} run say [undo/diff] ${c.x} ${c.y} ${c.z} 期望 ${formatStateToken(c.state)}`),
         '',
       ].join('\n');
     });

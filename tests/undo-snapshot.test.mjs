@@ -126,6 +126,8 @@ test('buildUndoArtifacts：逐格 setblock 还原 + 可执行的逐格对账函�
   assert.ok(dpart.includes('execute unless block 480 83 -160 minecraft:redstone_lamp[lit=false] run scoreboard players add #bad styx.undo 1'),
     '逐格对账：每格都要有 unless block 断言，差 0 才叫还原');
   assert.ok(verify.includes('"score":{"name":"#bad","objective":"styx.undo"}'), '对账结果以计数器收口');
+  assert.ok(verify.includes('run say [Styx] undo 逐格对账通过'), '无头服没有玩家，结论要用 say 打进日志');
+  assert.ok(verify.includes('run say [Styx] undo 逐格对账不通过'), '不通过时也要留痕（指向 styx:undo/where）');
 
   assert.equal(report.complete, true);
   assert.equal(report.output.setblockLines, 6);
@@ -153,7 +155,8 @@ test('buildUndoArtifacts：--where 才生成逐格坐标诊断函数（默认不
   const s = parseScanLog(fx('scan-sample.txt'));
   assert.equal(buildUndoArtifacts(s).files['undo/w001.mcfunction'], undefined);
   const w = buildUndoArtifacts(s, { where: true });
-  assert.ok(w.files['undo/w001.mcfunction'].includes('execute unless block 480 84 -160 minecraft:sand run tellraw @a'));
+  // say 而不是 tellraw @a：无头服没有玩家，tellraw @a 打不进日志（实测）
+  assert.ok(w.files['undo/w001.mcfunction'].includes('execute unless block 480 84 -160 minecraft:sand run say [undo/diff] 480 84 -160'));
   assert.ok(w.files['undo/where.mcfunction'].includes('function styx:undo/w001'));
 });
 

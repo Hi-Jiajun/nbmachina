@@ -13,12 +13,13 @@ import zlib from 'node:zlib';
 class NbtReader {
   constructor(buf) { this.d = buf; this.p = 0; }
   u1() { return this.d[this.p++]; }
+  i1() { const v = this.d.readInt8(this.p); this.p += 1; return v; }
   i2() { const v = this.d.readInt16BE(this.p); this.p += 2; return v; }
   i4() { const v = this.d.readInt32BE(this.p); this.p += 4; return v; }
   str() { const n = this.d.readUInt16BE(this.p); this.p += 2; const s = this.d.toString('utf8', this.p, this.p + n); this.p += n; return s; }
   val(t) {
     switch (t) {
-      case 1: return this.u1();
+      case 1: return this.i1(); // TAG_Byte 是**有符号**的（section 的 Y 会出现 -4..-1）
       case 2: return this.i2();
       case 3: return this.i4();
       case 4: { const v = this.d.readBigInt64BE(this.p); this.p += 8; return v; }
@@ -44,6 +45,43 @@ export function readNbt(buf) {
 }
 
 const AIR = { name: 'minecraft:air', properties: {} };
+const SECTION_VOLUME = 4096;
+
+/**
+ * 一个 section 的方块索引是**按 long 打包**的，两种写法实测都存在，必须按 data 长度判别：
+ *   紧凑（条目可跨 long）：ceil(4096*bits/64) 个 long
+ *   填充（每个 long 只放 floor(64/bits) 个条目，末尾几位不用）：ceil(4096/floor(64/bits)) 个 long
+ * 实测本机 testserver（DataVersion 4556）的 section：palette 22 条 → data 342 个 long = **填充**
+ * （紧凑应为 320），用紧凑解会把 y83 的红石灯读成空气（见 docs/M1-6-report.md 的取证）。
+ * bits ≤ 4（palette ≤ 16 条）时两种写法等价，所以早期只踩到 palette > 16 的段。
+ */
+function decodeSection(bs) {
+  const palette = bs.palette.map(paletteEntry);
+  const bits = palette.length <= 1 ? 0 : Math.max(4, Math.ceil(Math.log2(palette.length)));
+  const data = (bs.data ?? []).map((v) => BigInt.asUintN(64, BigInt(v)));
+  const per = bits ? Math.floor(64 / bits) : 0;
+  const paddedLen = bits ? Math.ceil(SECTION_VOLUME / per) : 0;
+  const compactLen = bits ? Math.ceil((SECTION_VOLUME * bits) / 64) : 0;
+  const mode = bits && data.length === paddedLen ? 'padded' : 'compact';
+  return { palette, bits, data, mode, compactLen, paddedLen };
+}
+
+function indexAt(sec, lx, ly, lz) {
+  if (!sec.bits) return 0;
+  const i = (ly << 8) | (lz << 4) | lx;
+  if (sec.mode === 'padded') {
+    const per = Math.floor(64 / sec.bits);
+    const w = Math.floor(i / per), off = (i % per) * sec.bits;
+    if (w >= sec.data.length) return 0;
+    return Number((sec.data[w] >> BigInt(off)) & ((1n << BigInt(sec.bits)) - 1n));
+  }
+  const bit = BigInt(i * sec.bits);
+  const w = Number(bit >> 6n), off = Number(bit & 63n);
+  if (w >= sec.data.length) return 0;
+  let v = sec.data[w] >> BigInt(off);
+  if (off + sec.bits > 64 && w + 1 < sec.data.length) v |= sec.data[w + 1] << BigInt(64 - off);
+  return Number(v & ((1n << BigInt(sec.bits)) - 1n));
+}
 
 /** palette 里的条目（{Name, Properties}）→ 统一形态 {name, properties}（properties 按 key 排序） */
 function paletteEntry(e) {
@@ -65,7 +103,7 @@ export function sortProps(props) {
  */
 export function createRegionReader(regionDir) {
   const cache = new Map(); // "cx,cz" -> sections Map | null
-  const stats = { chunksRead: 0, chunksMissing: 0, chunksCached: 0 };
+  const stats = { chunksRead: 0, chunksMissing: 0, chunksCached: 0, modes: { padded: 0, compact: 0 } };
 
   function readRawChunk(cx, cz) {
     const file = path.join(regionDir, `r.${cx >> 5}.${cz >> 5}.mca`);
@@ -103,9 +141,9 @@ export function createRegionReader(regionDir) {
       for (const sec of root.sections ?? []) {
         const bs = sec.block_states;
         if (!bs?.palette) continue;
-        const palette = bs.palette.map(paletteEntry);
-        const bits = palette.length === 1 ? 0 : Math.max(4, Math.ceil(Math.log2(palette.length)));
-        map.set(sec.Y, { palette, bits, data: (bs.data ?? []).map((v) => BigInt.asUintN(64, BigInt(v))) });
+        const dec = decodeSection(bs);
+        if (dec.bits) stats.modes[dec.mode]++;
+        map.set(sec.Y, dec);
       }
     } else {
       stats.chunksMissing++;
@@ -120,20 +158,24 @@ export function createRegionReader(regionDir) {
     const sec = sections.get(y >> 4);
     if (!sec) return { ...AIR };
     const lx = x & 15, ly = y & 15, lz = z & 15;
-    let idx = 0;
-    if (sec.bits) {
-      const li = ((ly << 8) | (lz << 4) | lx);
-      const bit = BigInt(li * sec.bits);
-      const word = Number(bit >> 6n);
-      const off = Number(bit & 63n);
-      if (word >= sec.data.length) return { ...AIR };
-      let v = sec.data[word] >> BigInt(off);
-      if (off + sec.bits > 64 && word + 1 < sec.data.length) v |= sec.data[word + 1] << BigInt(64 - off);
-      idx = Number(v & ((1n << BigInt(sec.bits)) - 1n));
-    }
+    const idx = indexAt(sec, lx, ly, lz);
     const e = sec.palette[idx];
     return e ? { name: e.name, properties: { ...e.properties } } : { ...AIR };
   }
 
-  return { blockAt, stats, chunkOf: (x, z) => (sectionsOf(x >> 4, z >> 4) ? 'present' : 'missing') };
+  /** 该格所在 section 的 palette（候选方块清单）：诊断"存档说 X、现场其实是什么"时用得上 */
+  function paletteAt(x, y, z) {
+    const sections = sectionsOf(x >> 4, z >> 4);
+    if (!sections) return [];
+    const sec = sections.get(y >> 4);
+    if (!sec) return [AIR];
+    return sec.palette.map((e) => ({ name: e.name, properties: { ...e.properties } }));
+  }
+
+  return {
+    blockAt,
+    paletteAt,
+    stats,
+    chunkOf: (x, z) => (sectionsOf(x >> 4, z >> 4) ? 'present' : 'missing'),
+  };
 }
