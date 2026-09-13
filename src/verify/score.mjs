@@ -39,8 +39,6 @@ import {
   notesChroma,
 } from '../analyze/chroma.mjs';
 import {
-  fftInPlace,
-  hannWindow,
   midiName,
   narrowbandEnergy,
   pcOf,
@@ -55,11 +53,8 @@ import {
 import {
   DEFAULT_ONSET_DETECT_CONFIG,
   bandEnvelope,
-  bandFluxes,
   detectBandOnsets,
   legacyOnsets,
-  mergeBandPeaks,
-  pickBandPeaks,
 } from '../analyze/onset-detect.mjs';
 import { VOICE_OF_INSTRUMENT } from '../arrange/velocity.mjs';
 
