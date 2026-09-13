@@ -261,6 +261,26 @@ test('确定性：同一段音频两次检测逐字段相同', () => {
   assert.deepEqual(a.events, b.events);
 });
 
+test('连续 16 分格（0.12s 一个踩镲）不能被并成一个峰：16 下至少认出 13 下', () => {
+  // 谱面网格就是 0.12s/step，所以"相邻两下 0.12s"是这一层必须能吃下的最密情形
+  const pattern = Array.from({ length: 16 }, (_, i) => ({ timeSec: 0.3 + i * 0.12, kind: 'hat' }));
+  const { samples, sampleRate } = synthDrums(pattern, { seconds: 4 });
+  const { events } = detectPercussion({ samples, sampleRate });
+  const times = pattern.map((p) => p.timeSec);
+  const hit = events.filter((e) => times.some((t) => Math.abs(t - e.time) <= 0.06));
+  assert.ok(hit.length >= 13, `16 分格只认出 ${hit.length}/16 下`);
+  const wrong = hit.filter((e) => e.kind !== 'hat');
+  assert.equal(wrong.length, 0, `踩镲被误判成：${wrong.map((e) => e.kind).join(',')}`);
+});
+
+test('同时刻的底鼓+军鼓只出一个事件（本机两种本来就占同一格 row 0，不丢信息）', () => {
+  const pattern = [{ timeSec: 0.5, kind: 'kick' }, { timeSec: 0.5, kind: 'snare' }];
+  const { samples, sampleRate } = synthDrums(pattern, { seconds: 2 });
+  const { events } = detectPercussion({ samples, sampleRate });
+  assert.equal(events.length, 1, `同时刻的底鼓+军鼓应合成一个事件，实得 ${events.length}`);
+  assert.ok(['kick', 'snare'].includes(events[0].kind), `不许判成 ${events[0].kind}`);
+});
+
 /* ------------------------------------------- 判别特征（可解释性）单测 */
 
 test('三类判别特征在合成样本上方向正确：底鼓低share / 军鼓噪声性 / 踩镲高share', () => {
