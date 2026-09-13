@@ -21,6 +21,7 @@ import { mapEnergiesToVelocity, velocityCsvText } from '../src/arrange/velocity.
 const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
 const WAV = path.join(BUILD, 'styx_helix_full.wav');
 const V3 = path.join(BUILD, 'styx_helix_notes_v3.csv');
+const MACHINE = path.join(BUILD, 'machine_p1.csv');
 const SR = 44100;
 
 function makeRng(seed) {
@@ -218,8 +219,9 @@ test('真实数据：v3 基线分（五项指标都给出，且旋律八度明�
     m.octaveHit.byVoice.melody.rate > m.octaveHit.byVoice.bass.rate + 0.05,
     `旋律八度 ${m.octaveHit.byVoice.melody.rate} 应明显好于贝斯 ${m.octaveHit.byVoice.bass.rate}`,
   );
-  // 起音检测是保守的：密集段（16 分格）里相邻音的攻击会并成一个峰，实测量级 recall≈0.80
-  assert.ok(m.onsetF1.recall > 0.75, `谱面起音大多应落在音频起音上，实测 recall=${m.onsetF1.recall}`);
+  // 默认检测器 = M1-3 的分频带多分辨率（`--detector legacy` 是 M0 的单带实现，recall≈0.805）
+  assert.equal(m.onsetF1.detector, 'banded');
+  assert.ok(m.onsetF1.recall > 0.9, `谱面起音大多应落在音频起音上，实测 recall=${m.onsetF1.recall}`);
   assert.ok(m.onsetF1.precision > 0.95, `检出的音频起音几乎都该对到谱面上，实测 precision=${m.onsetF1.precision}`);
   if (octaveEvidence) {
     assert.equal(m.octaveHit.agreementWithT2.alignedBy, 'step+time+instrument+midi');
@@ -275,4 +277,25 @@ test('真实数据：换成 velocity_fixed.csv 的力度后，力度包络相关
   assert.equal(oldOne.metrics.velocityCorr.source, 'mix-rms(volume)');
   assert.equal(newOne.metrics.velocityCorr.source, 'narrowband(velocity.csv)');
   assert.ok(rNew > rOld + 0.2, `新口径相关应明显更高：${rOld.toFixed(3)} → ${rNew.toFixed(3)}`);
+});
+
+test('真实数据：M1-3 检测器口径（默认 banded vs --detector legacy）——R 0.805 → 0.974', (t) => {
+  if (!fs.existsSync(WAV) || !fs.existsSync(MACHINE)) return t.skip(`缺少 ${WAV} 或 ${MACHINE}`);
+  const { samples, sampleRate } = readWav(WAV);
+  const csvText = fs.readFileSync(MACHINE, 'utf8');
+  const banded = scoreChart({ csvText, samples, sampleRate });
+  const legacy = scoreChart({ csvText, samples, sampleRate, config: { onset: { detector: 'legacy' } } });
+  assert.equal(banded.metrics.onsetF1.detector, 'banded');
+  assert.equal(legacy.metrics.onsetF1.detector, 'legacy');
+  assert.ok(Math.abs(legacy.metrics.onsetF1.recall - 0.805) < 0.01, `legacy recall=${legacy.metrics.onsetF1.recall} 应复现 M0 的 0.805`);
+  assert.ok(Math.abs(legacy.metrics.onsetF1.value - 0.888) < 0.01, `legacy F1=${legacy.metrics.onsetF1.value} 应复现 M0 的 0.888`);
+  assert.ok(banded.metrics.onsetF1.recall > legacy.metrics.onsetF1.recall + 0.1, '分频带应明显提高 recall');
+  assert.ok(banded.metrics.onsetF1.precision >= 0.95, `precision=${banded.metrics.onsetF1.precision} 应 ≥0.95`);
+  assert.ok(banded.score.objective > legacy.score.objective,
+    `客观分应提高：${legacy.score.objective} → ${banded.score.objective}`);
+  console.log(
+    `    M1-3：legacy R ${legacy.metrics.onsetF1.recall.toFixed(3)}/F1 ${legacy.metrics.onsetF1.value.toFixed(3)}`
+    + `（客观 ${legacy.score.objective.toFixed(4)}）→ banded R ${banded.metrics.onsetF1.recall.toFixed(3)}`
+    + `/F1 ${banded.metrics.onsetF1.value.toFixed(3)}（客观 ${banded.score.objective.toFixed(4)}）`,
+  );
 });

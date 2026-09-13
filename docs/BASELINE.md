@@ -58,12 +58,18 @@ npm run verify -- --octave-evidence build/analysis_octave.json   # → build/sco
    目标：力度与起音强度的相关 > 0.5（否则力度只是"换了个物理量"，仍不是"重音"）。
 3. **起音 recall 0.805**：检测器保守，密集 16 分格段相邻音的攻击合并。目标：per-band 通量把 recall 提上去。
 
+   > **2026-09-14 已修（M1-3）**：换成 `src/analyze/onset-detect.mjs` 的分频带多分辨率检测器后
+   > **R 0.805 → 0.974（P 0.970）**，客观分 +0.021（见 §6 与 `docs/M1-3-report.md`）。
+   > 注意这条改的是**口径**不是谱面：同一份谱面在旧口径下仍是 R 0.805。
+
 ## 4. 对比时的规则（避免自己骗自己）
 
 1. **基准必须同为"去撞格"口径**：拿未去撞格的 v3 当基准、去撞格后的谱面当结果，会被记成 9.4% 漏音（M0-1 §4.2）。
 2. **力度相关项不能单独引用**：它可能是循环的，必须同时看 `vsOnsetStrength`（非循环诊断）。
 3. **起音 F1 只能在同一个检测器版本内横向比较**（换检测器参数要重跑全部对照，并在这里备注）。
 4. **改了口径就要写下来**：任何 `DEFAULT_*` 常量的改动都会让这份基线失效，请在新报告里注明并重算。
+5. **起音指标必须同检测器口径比较**（M1-3 起）：`score.mjs` 的默认检测器是 `banded`，
+   `--detector legacy` 复现 M0 的单带口径。跨口径比 F1/recall 没有意义，见 §6。
 
 ## 5. T7：进机器的那一版谱面 + 无头端到端结论（2026-09-14）
 
@@ -85,3 +91,33 @@ node src/arrange/machine-pipeline.mjs
 | 端到端 | `node src/test/run-headless.mjs --notes build/styx_helix_machine.csv --mode lo --ticks 600` → 全部通过，`#hits` 265/265、0 条加载失败、MSPT 6.6 ms |
 | 两种刻率 | `styx:play/start`（20 tps，默认）与 `styx:play/start_hi`（100 tps 精确网格）；`styx:redo` / `styx:redo_hi` 对应一键重做 |
 | 证据 | `tests/e2e.md`（三次运行的刻窗口/触发数/MSPT），原始日志 `testserver/e2e-{lo,hi}.log` |
+
+## 6. M1-3：起音检测器换口径（2026-09-14）
+
+`score.mjs` 的 ① 起音对齐从"单带 1024 点 / 10ms hop / 全局+自适应局部阈值"换成
+**分频带（6 带）× 多分辨率（逐带 20/10/5ms 帧率）× 窗长补偿 0.5×窗长**。
+按 §4.3/§4.5 的规则，这里把**同一份谱面在新旧口径下的两套数**都留着：
+
+```bash
+npm run verify -- --notes build/machine_p1.csv --octave-evidence build/analysis_octave.json              # 新口径（默认 banded）
+npm run verify -- --notes build/machine_p1.csv --octave-evidence build/analysis_octave.json --detector legacy   # 旧口径（M0）
+```
+
+| 谱面 | 检测器 | ① 起音 F1（P / R） | 音频起音 | 客观分 |
+|---|---|---|---|---|
+| `styx_helix_notes_v3.csv` | legacy | 0.888（0.990 / 0.805） | 1481 | 0.8223 |
+| `styx_helix_notes_v3.csv` | **banded** | **0.972（0.970 / 0.974）** | 1829 | **0.8434** |
+| `styx_helix_machine.csv`（进机器那版） | legacy | 0.888（0.990 / 0.805） | 1481 | 0.9467 |
+| `styx_helix_machine.csv` | **banded** | **0.972（0.970 / 0.974）** | 1829 | **0.9677** |
+| `machine_p1.csv`（M1-1 之后） | legacy | 0.888（0.990 / 0.805） | 1481 | 0.9467 |
+| `machine_p1.csv` | **banded** | **0.972（0.970 / 0.974）** | 1829 | **0.9677** |
+| `notes_recovered.csv`（M1-3 交付） | **banded** | **0.972（0.970 / 0.974）** | 1829 | **0.9677** |
+
+两句读数：
+
+1. **旧口径没变**：`--detector legacy` 逐位复现 M0 的 0.8223 / 0.9467（§1 的表继续有效）。
+2. **新口径下，"起音"这一项不再是短板**（0.888 → 0.972），客观分整体 +0.021；
+   其余四项（chroma/八度/力度/有支撑率）**与检测器无关**，数值不动。
+   `notes_recovered.csv` 与 `machine_p1.csv` 分数相同是**对的**：补漏实测没有补进任何一颗音（`docs/M1-3-report.md` §4）。
+
+**口令**（运行时间也变了）：`score.mjs` 单跑 1.8s → 4.0s，`npm test` 10s → 33s。

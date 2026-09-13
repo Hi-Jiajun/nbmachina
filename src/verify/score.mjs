@@ -5,8 +5,10 @@
 // 没录进来时 overall 一律为 null（不编造一个人耳分）。
 //
 // 五项指标的口径（全部写进 docs/M0-3-report.md）：
-//   ① 起音对齐 F1：音频侧做 1024 点 STFT（10ms hop）的**对数谱通量**峰值拾取（全局阈值 +
-//      自适应局部阈值 + 50ms 最小间隔），谱面侧取不同起音时刻，50ms 容差内最近邻匹配 → F1。
+//   ① 起音对齐 F1：音频侧取起音时刻，谱面侧取不同起音时刻，50ms 容差内最近邻匹配 → F1。
+//      检测器默认 = `analyze/onset-detect.mjs` 的**分频带多分辨率谱通量**检测器（M1-3）；
+//      `--detector legacy` 可切回 M0 的单带实现（1024 点 STFT / 10ms hop / 全局 + 自适应局部阈值）。
+//      两者的 recall 差是 M1-3 的主要结论：0.805 → 0.974（谱面 1821 个起音，容差 50ms）。
 //      注意 P 是**下界**：原曲里有谱面没有的乐器（鼓、人声、弦乐），它们的起音没有谱面
 //      对应，会被算成"误报"。所以报告里同时给 P、R，R（谱面起音被音频认领的比例）才是
 //      "对齐"的主要信号。
@@ -50,6 +52,15 @@ import {
   sliceWindow,
   spearman,
 } from '../analyze/dsp.mjs';
+import {
+  DEFAULT_ONSET_DETECT_CONFIG,
+  bandEnvelope,
+  bandFluxes,
+  detectBandOnsets,
+  legacyOnsets,
+  mergeBandPeaks,
+  pickBandPeaks,
+} from '../analyze/onset-detect.mjs';
 import { VOICE_OF_INSTRUMENT } from '../arrange/velocity.mjs';
 
 export { readNotesCsv, readWav };
@@ -68,6 +79,11 @@ export const DEFAULT_SCORE_WEIGHTS = {
 
 export const DEFAULT_SCORE_CONFIG = {
   onset: {
+    // 检测器：'banded' = analyze/onset-detect.mjs 的分频带多分辨率（M1-3 默认）；
+    //         'legacy' = M0 的单带实现（1024 点 / 10ms hop / 全局+自适应局部阈值）
+    detector: 'banded',
+    banded: {},          // 分频带检测器的覆盖项（见 DEFAULT_ONSET_DETECT_CONFIG）
+    // ↓ 以下只对 legacy 生效（M0 口径原样保留，任何改动都会让 M0-3 的基线不可比）
     frameSize: 1024,
     hop: 441,            // 10ms
     fminHz: 60,
@@ -96,75 +112,41 @@ export const DEFAULT_SCORE_CONFIG = {
 
 /* ------------------------------------------------------------ 起音对齐 F1 */
 
-/** 对数谱通量（onset strength envelope），返回逐帧强度与帧参数 */
+/**
+ * 现有（M0 T6）起音检测器：单带对数谱通量 + 全局阈值 + 自适应局部阈值 + 最小间隔。
+ * 实现已搬到 `analyze/onset-detect.mjs`（`legacyOnsets`）；这里保留同名入口以免破坏
+ * tests/score.test.mjs 与 M0 的对照口径（行为逐字节不变，时间**不做**窗长补偿）。
+ */
 export function onsetEnvelope({ samples, sampleRate, config = {} }) {
   const cfg = { ...DEFAULT_SCORE_CONFIG.onset, ...config };
-  const win = hannWindow(cfg.frameSize);
-  const binHz = sampleRate / cfg.frameSize;
-  const kLo = Math.max(1, Math.ceil(cfg.fminHz / binHz));
-  const kHi = Math.min(cfg.frameSize / 2 - 1, Math.floor(cfg.fmaxHz / binHz));
-  const nBins = kHi - kLo + 1;
-  const frames = samples.length > cfg.frameSize ? Math.floor((samples.length - cfg.frameSize) / cfg.hop) + 1 : 0;
-  const flux = new Float64Array(frames);
-  const re = new Float64Array(cfg.frameSize);
-  const im = new Float64Array(cfg.frameSize);
-  let prev = new Float64Array(nBins);
-
-  for (let fi = 0; fi < frames; fi++) {
-    const start = fi * cfg.hop;
-    for (let i = 0; i < cfg.frameSize; i++) {
-      re[i] = samples[start + i] * win[i];
-      im[i] = 0;
-    }
-    fftInPlace(re, im);
-    const mag = new Float64Array(nBins);
-    let sum = 0;
-    for (let k = 0; k < nBins; k++) {
-      mag[k] = Math.log1p(Math.hypot(re[kLo + k], im[kLo + k]));
-      const d = mag[k] - prev[k];
-      if (d > 0) sum += d;
-    }
-    flux[fi] = sum;
-    prev = mag;
-  }
-  let max = 0;
-  for (const v of flux) max = Math.max(max, v);
-  if (max > 0) for (let i = 0; i < flux.length; i++) flux[i] /= max;
-  return { flux, hopSec: cfg.hop / sampleRate, frameSec: cfg.frameSize / sampleRate, frames, config: cfg };
+  return legacyOnsets({ samples, sampleRate, config: cfg }).env;
 }
 
-/** 峰值拾取：全局阈值 + 自适应局部阈值 + 最小间隔 */
+/** 现有（M0）检测器：见 `onsetEnvelope`；返回 {times, env, globalThreshold, mean, std} */
 export function detectOnsets({ samples, sampleRate, config = {} }) {
-  const env = onsetEnvelope({ samples, sampleRate, config });
-  const cfg = env.config;
-  const { flux } = env;
-  const n = flux.length;
-  const times = [];
-  if (n === 0) return { times, env, globalThreshold: 0, mean: 0, std: 0 };
-  let mean = 0;
-  for (const v of flux) mean += v;
-  mean /= n;
-  let variance = 0;
-  for (const v of flux) variance += (v - mean) * (v - mean);
-  const std = Math.sqrt(variance / n);
-  const globalThreshold = mean + cfg.globalSigma * std;
+  const cfg = { ...DEFAULT_SCORE_CONFIG.onset, ...config };
+  return legacyOnsets({ samples, sampleRate, config: cfg });
+}
 
-  // 从 i=1 起：第 0 帧没有"前一帧"可比，通量恒偏大，直接当峰值会给出一个假的 t≈0 起音
-  let lastT = -Infinity;
-  for (let i = 1; i < n - 1; i++) {
-    if (flux[i] <= globalThreshold) continue;
-    if (!(flux[i] >= flux[i - 1] && flux[i] > flux[i + 1])) continue;
-    const lo = Math.max(0, i - cfg.localMeanWindow);
-    const hi = Math.min(n - 1, i + cfg.localMeanWindow);
-    let sum = 0;
-    for (let j = lo; j <= hi; j++) sum += flux[j];
-    if (flux[i] < (sum / (hi - lo + 1)) * cfg.localDelta) continue;
-    const t = i * env.hopSec;
-    if (t - lastT < cfg.minSepSec) continue;
-    times.push(Number(t.toFixed(4)));
-    lastT = t;
+/**
+ * 按 `config.detector` 分派检测器：
+ *   · 'banded'（默认）：`analyze/onset-detect.mjs` 的分频带多分辨率谱通量（M1-3）
+ *   · 'legacy'：M0 的单带实现（对照用，`--detector legacy`）
+ * 两条路径都返回 `{times, env, detector, detail}`；env 供"力度 vs 起音强度"诊断用
+ * （banded 路径下 env 是"各带归一化通量之和"的宽带包络，见 bandEnvelope）。
+ */
+export function detectOnsetsForScore({ samples, sampleRate, config = {} }) {
+  const cfg = { ...DEFAULT_SCORE_CONFIG.onset, ...config };
+  if (cfg.detector === 'legacy') {
+    const r = legacyOnsets({ samples, sampleRate, config: cfg });
+    return { ...r, detector: 'legacy', detail: null, onsets: null };
   }
-  return { times, env, globalThreshold, mean, std };
+  const r = detectBandOnsets({
+    samples,
+    sampleRate,
+    config: { ...DEFAULT_ONSET_DETECT_CONFIG, ...(cfg.banded ?? {}) },
+  });
+  return { times: r.times, env: r.envelope, detector: 'banded', detail: r.meta, onsets: r.onsets };
 }
 
 /** 两个起音时刻表的最近邻匹配（贪心、距离 ≤ tolSec） */
@@ -368,7 +350,8 @@ export function scoreChart({
 
   /* ① 起音对齐 */
   const chartOnsets = [...new Set(notes.map((n) => n.timeSec))].sort((a, b) => a - b);
-  const { times: audioOnsets, env } = detectOnsets({ samples, sampleRate, config: cfg.onset });
+  const detected = detectOnsetsForScore({ samples, sampleRate, config: cfg.onset });
+  const { times: audioOnsets, env } = detected;
   const onsetF1 = onsetAlignmentF1({ chartTimes: chartOnsets, audioTimes: audioOnsets, tolSec: cfg.onset.tolSec });
 
   /* ② chroma 相似度 */
@@ -536,12 +519,25 @@ export function scoreChart({
   const metrics = {
     onsetF1: {
       value: onsetF1.value,
+      detector: detected.detector,
       precision: Number(onsetF1.precision.toFixed(6)),
       recall: Number(onsetF1.recall.toFixed(6)),
       matched: onsetF1.matched,
       chartOnsets: onsetF1.chartOnsets,
       audioOnsets: onsetF1.audioOnsets,
       tolSec: onsetF1.tolSec,
+      detectorDetail: detected.detail
+        ? {
+          bands: detected.detail.onsetBands,
+          bandProfile: detected.detail.config.bands,
+          mergeSec: detected.detail.config.mergeSec,
+          minBands: detected.detail.config.minBands,
+          minPeakProminence: detected.detail.config.minPeakProminence,
+          minStrength: detected.detail.config.minStrength,
+          minRms: detected.detail.config.minRms,
+          rejected: detected.detail.rejected,
+        }
+        : null,
       caveat: 'precision 是下界：原曲里有谱面没有的乐器（鼓/人声），它们的起音会被算成误报',
     },
     chromaCos: {
@@ -606,6 +602,7 @@ export function scoreChart({
       notes: notes.length,
       voices: Object.keys(byVoice),
       onsetFrameSec: env.frameSec,
+      onsetDetector: detected.detector,
       velocitySource: vel.source,
     },
     metrics,
@@ -686,6 +683,8 @@ if (invokedDirectly) {
   const evPath = typeof args['octave-evidence'] === 'string' ? args['octave-evidence'] : null;
   const weights = typeof args.weights === 'string' ? JSON.parse(args.weights) : {};
   const human = args.human !== undefined ? Number(args.human) : null;
+  const detector = typeof args.detector === 'string' ? args.detector : DEFAULT_SCORE_CONFIG.onset.detector;
+  const config = { onset: { detector } };
 
   const t0 = Date.now();
   const { samples, sampleRate, seconds } = readWav(wavPath);
@@ -698,6 +697,7 @@ if (invokedDirectly) {
     csvText,
     samples,
     sampleRate,
+    config,
     weights,
     human,
     expected,
@@ -712,6 +712,7 @@ if (invokedDirectly) {
       velocityPath: velPath,
       expectedPath,
       octaveEvidencePath: octaveEvidence ? evPath : null,
+      detector,
       ...result.meta,
     },
     weights: result.score.weightsNormalized,
@@ -719,7 +720,7 @@ if (invokedDirectly) {
     score: result.score,
     command: `node src/verify/score.mjs --notes ${notesPath}`
       + `${velPath ? ` --velocity ${velPath}` : ''}${expectedPath ? ` --expected ${expectedPath}` : ''}`
-      + `${evPath ? ` --octave-evidence ${evPath}` : ''}`,
+      + `${evPath ? ` --octave-evidence ${evPath}` : ''}${detector === DEFAULT_SCORE_CONFIG.onset.detector ? '' : ` --detector ${detector}`}`,
     durationMs: Date.now() - t0,
   };
   fs.writeFileSync(outPath, JSON.stringify(report, null, 1) + '\n', 'utf8');
@@ -728,7 +729,8 @@ if (invokedDirectly) {
   const pct = (x) => `${(100 * x).toFixed(1)}%`;
   console.log(`综合评分：${notesPath}（${result.meta.notes} 颗音 vs ${seconds.toFixed(1)}s 音频）`);
   console.log(`  ① 起音对齐 F1 ${m.onsetF1.value.toFixed(3)}（P ${m.onsetF1.precision.toFixed(3)} / R ${m.onsetF1.recall.toFixed(3)}`
-    + `，谱面 ${m.onsetF1.chartOnsets} / 音频 ${m.onsetF1.audioOnsets} 个起音，容差 ${m.onsetF1.tolSec * 1000}ms）`);
+    + `，谱面 ${m.onsetF1.chartOnsets} / 音频 ${m.onsetF1.audioOnsets} 个起音，容差 ${m.onsetF1.tolSec * 1000}ms，`
+    + `检测器 ${m.onsetF1.detector}${m.onsetF1.detectorDetail ? `（${m.onsetF1.detectorDetail.bands} 带）` : ''}）`);
   console.log(`  ② chroma 相似度 ${m.chromaCos.value.toFixed(3)}（局部窗均值 ${m.chromaCos.localMean}，最佳移调 +${m.chromaCos.bestShift}）`
     + `｜被压制音级 ${m.chromaCos.suppressedPcs.join('/') || '无'} 占谱面 ${pct(m.chromaCos.chartMassOnSuppressed)}`);
   console.log(`  ③ 八度命中率 ${m.octaveHit.value.toFixed(3)}（可测 ${m.octaveHit.measurable}/${result.meta.notes}`
