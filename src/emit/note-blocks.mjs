@@ -26,7 +26,9 @@ const readCsv = (p) => {
   const iStep = h.indexOf('step'), iInstr = h.indexOf('instrument'), iRow = h.indexOf('row');
   return lines.slice(1).map((l) => {
     const c = l.split(',');
-    const instr = c[iInstr] === 'bass' ? 'bass' : 'harp';
+    // 保留真实音色（打击乐层用 basedrum/hat），未知值退回 harp
+    const raw = c[iInstr];
+    const instr = ['harp', 'bass', 'basedrum', 'hat'].includes(raw) ? raw : 'harp';
     return { step: +c[iStep], instr, row: +c[iRow] };
   });
 };

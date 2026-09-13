@@ -11,7 +11,12 @@ export function makePos(profile) {
   };
 }
 
-/** 该声部甲板用什么方块（决定音符盒音色，1.21.10 实测：sand→harp、oak_planks→bass） */
-export const DECK_BLOCK = { harp: 'minecraft:sand', bass: 'minecraft:oak_planks' };
+/** 该声部甲板用什么方块（决定音符盒音色，1.21.10 实测：sand→harp、oak_planks→bass、stone→basedrum、glass→hat） */
+export const DECK_BLOCK = {
+  harp: 'minecraft:sand',
+  bass: 'minecraft:oak_planks',
+  basedrum: 'minecraft:stone',
+  hat: 'minecraft:glass',
+};
 
-export const noteBlockOf = (voice, note) => `minecraft:note_block[instrument=${voice === 'bass' ? 'bass' : 'harp'},note=${note},powered=false]`;
+export const noteBlockOf = (voice, note) => `minecraft:note_block[instrument=${DECK_BLOCK[voice] ? voice : 'harp'},note=${note},powered=false]`;

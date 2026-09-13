@@ -42,7 +42,7 @@ const notes = rows.slice(1).map((l) => {
 /* ---------- step/pitch -> 世界坐标（与 note-blocks.mjs 共用同一个规则） ---------- */
 const pos = makePos(ROWS_PROFILE);
 
-const soundName = (i) => `minecraft:block.note_block.${i === 'bass' ? 'bass' : 'harp'}`;
+const soundName = (i) => `minecraft:block.note_block.${['bass', 'basedrum', 'hat'].includes(i) ? i : 'harp'}`;
 const pitchMul = (n) => (2 ** ((n - 12) / 12)).toFixed(4);
 
 // 单排 2352 格超过 forceload 上限（256 区块），所以按 x 分两段自动切换：
