@@ -29,6 +29,7 @@
     "validate:project": "node src/ingest/project-schema.mjs",
     "verify": "node src/verify/score.mjs",
     "test": "node --test \"tests/*.test.mjs\"",
-    "arrange:all": "node src/arrange/arrange-all.mjs"
+    "arrange:all": "node src/arrange/arrange-all.mjs",
+    "project:new": "node src/core/new-project.mjs"
   }
 }
