@@ -9,6 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tickOfStep, buildTickGroups } from '../emit/tick-map.mjs';
+import { makePos, DECK_BLOCK, noteBlockOf } from '../emit/layout-pos.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '../..');
@@ -36,6 +37,8 @@ const notes = rows.slice(1).map((l) => {
   return { step: +c[header.indexOf('step')], instr: c[header.indexOf('instrument')], pitch: +c[header.indexOf('row')] };
 });
 const groups = buildTickGroups(notes, TPS);
+const profile = JSON.parse(fs.readFileSync(`${B}/single_row_profile.json`, 'utf8'));
+const pos = makePos(profile);
 /** 统计 (fromTick, toTick] 区间内的音数（#t 是"已推进到的刻"，区间用开区间左端） */
 function expectedInRange(fromTick, toTick) {
   let hits = 0, bass = 0, harp = 0;
@@ -96,6 +99,7 @@ const check = (name, ok, detail) => { checks.push({ name, ok: !!ok, detail }); c
 let mspt = null, tick = null, hits = null, mh = null, mb = null, fatal = null;
 let exp = { hits: 0, harp: 0, bass: 0 };
 let base = { t: 0, on: null, hits: 0, mh: 0, mb: 0 };
+let posChecks = [];
 
 try {
   if (!(await waitFor(/Done \([\d.]+s\)!/, 300000))) throw new Error('服务器启动超时');
@@ -109,12 +113,30 @@ try {
   await send('function styx:flat_build_v2b', 7000);
   await send('function styx:apply_notes_v3', 22000);
 
-  // 抽查第一颗音（v3 首音：bass, row=9 → z=-160）
-  await send('execute if block 480 85 -160 minecraft:note_block[instrument=bass] run say E2E_NOTE_OK', 500);
-  await send('execute if block 480 84 -160 minecraft:oak_planks run say E2E_UNDER_OK', 500);
-  await send('execute if block 480 83 -160 minecraft:redstone_lamp run say E2E_LAMP_OK', 500);
-  await send('execute if block 480 86 -160 minecraft:air run say E2E_TRIG_FREE_OK', 500);
-  check('音符盒/乐器方块/灯/触发位抽查', ['E2E_NOTE_OK', 'E2E_UNDER_OK', 'E2E_LAMP_OK', 'E2E_TRIG_FREE_OK'].every((m) => said(m)));
+  // 抽查 3 颗音：**位置 + 音色 + 音高 + 灯 + 触发位空闲**五项都要对
+  //   （这一条专门抓"播放器算的坐标"与"apply_notes_v3 摆的音符盒"错位——错位时 #hits 照样涨，但听不到声）
+  const samples = [
+    ['首音', notes[0]],
+    ['首个钢琴', notes.find((n) => n.instr !== 'bass')],
+    ['中段(step≈1248)', notes.slice().sort((a, b) => Math.abs(a.step - 1248) - Math.abs(b.step - 1248))[0]],
+  ].filter(([, n]) => n);
+  posChecks = [];
+  for (let i = 0; i < samples.length; i++) {
+    const [label, n] = samples[i];
+    const { x, y, z } = pos(n.step, n.pitch);
+    const tag = `E2E_POS${i}_OK`;
+    await send(`execute if block ${x} ${y + 1} ${z} ${noteBlockOf(n.instr, n.pitch)} run say ${tag}`, 400);
+    await send(`execute if block ${x} ${y} ${z} ${DECK_BLOCK[n.instr]} run say ${tag}`, 400);
+    await send(`execute if block ${x} ${y - 1} ${z} minecraft:redstone_lamp run say ${tag}`, 400);
+    await send(`execute if block ${x} ${y + 2} ${z} minecraft:air run say ${tag}`, 400);
+    posChecks.push({ label, x, y, z, instr: n.instr, row: n.pitch, tag, ok: null });
+  }
+  // 每个 tag 会被 say 4 次；只要出现 4 次就说明四项全对
+  for (const c of posChecks) {
+    c.ok = (out.match(new RegExp(`\\[Server\\] ${c.tag}`, 'g')) || []).length >= 4;
+  }
+  check(`抽查 ${posChecks.length} 颗音的位置/音色/音高/灯/触发位`, posChecks.every((c) => c.ok),
+    posChecks.map((c) => `${c.label}(x${c.x},z${c.z},${c.instr}${c.row})${c.ok ? '✔' : '✘'}`).join(' '));
 
   // 开播 + 确定性步进
   if (MODE === 'hi') {
@@ -178,6 +200,7 @@ try {
 const report = {
   at: new Date().toISOString(), mode: MODE, tps: TPS, ticks: TICKS, notesCsv: NOTES_CSV,
   baseline: base,
+  positions: posChecks,
   expected: exp,
   actual: { t: tick, hits, mh, mb, mspt },
   delta: { t: tick !== null ? tick - base.t : null, hits: hits !== null ? hits - base.hits : null, mh: mh !== null ? mh - base.mh : null, mb: mb !== null ? mb - base.mb : null },

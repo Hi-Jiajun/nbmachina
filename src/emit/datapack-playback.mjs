@@ -16,6 +16,7 @@ import fs from 'node:fs';
 import {
   STEP_SECONDS, switchTick, buildTickGroups, planBuckets, planBins, callsPerTick, pad,
 } from './tick-map.mjs';
+import { makePos } from './layout-pos.mjs';
 
 const B = 'C:/Users/hiliang/Documents/minecraft/build';
 const DP = `${B}/styx_build/data/styx`;
@@ -38,12 +39,8 @@ const notes = rows.slice(1).map((l) => {
   return { step: +c[iStep], instr: c[iInstr], midi: +c[iMidi], pitch: +c[iRow], vol: +c[iVol] };
 });
 
-/* ---------- step/pitch -> 世界坐标（与结构生成规则一致） ---------- */
-function pos(step, pitch) {
-  const seg = Math.floor(step / 48), lx = step % 48;
-  const r = ROWS_PROFILE[Math.min(seg, ROWS_PROFILE.length - 1)];
-  return { x: r.x0 + lx, y: r.y, z: -172 + pitch + 3 };
-}
+/* ---------- step/pitch -> 世界坐标（与 note-blocks.mjs 共用同一个规则） ---------- */
+const pos = makePos(ROWS_PROFILE);
 
 const soundName = (i) => `minecraft:block.note_block.${i === 'bass' ? 'bass' : 'harp'}`;
 const pitchMul = (n) => (2 ** ((n - 12) / 12)).toFixed(4);
@@ -204,7 +201,7 @@ fs.writeFileSync(`${DP}/function/play/report.mcfunction`, [
 // 自检函数放在 play/ 下，名字就是 styx:play/doctor（与 start_hi、验收脚本里写的引用一致）
 fs.mkdirSync(`${DP}/function/play/doctor`, { recursive: true });
 fs.writeFileSync(`${DP}/function/play/doctor.mcfunction`, [
-  'tellraw @a {"text":"[Styx] 自检开始（≈1 秒）：播放中才能测出刻推进速率","color":"gold"}',
+  'tellraw @a {"text":"[Styx] 自检开始（≈1 秒）。注意：函数无法读出服务器刻率（#t 是按刻递增的），它只能证明 tick 函数在推进；刻率请用 /tick query 看","color":"gold"}',
   'scoreboard players operation #t0 styx.t = #t styx.t',
   'scoreboard players set #dt styx.t 0',
   'execute if score #on styx.flag matches 1 run schedule function styx:play/doctor/check 20t',
@@ -217,10 +214,9 @@ fs.writeFileSync(`${DP}/function/play/doctor.mcfunction`, [
 fs.writeFileSync(`${DP}/function/play/doctor/check.mcfunction`, [
   'scoreboard players operation #dt styx.t = #t styx.t',
   'scoreboard players operation #dt styx.t -= #t0 styx.t',
-  'execute if score #hi styx.flag matches 1 if score #dt styx.t matches 95..105 run tellraw @a {"text":"[Styx/doctor] ✔ 100 tps 模式：20 刻内推进 ","color":"green","extra":[{"score":{"name":"#dt","objective":"styx.t"},"color":"yellow"},{"text":" 刻（预期 100）","color":"green"}]}',
-  'execute if score #hi styx.flag matches 1 unless score #dt styx.t matches 95..105 run tellraw @a {"text":"[Styx/doctor] ✘ 100 tps 模式但 20 刻内只推进 ","color":"red","extra":[{"score":{"name":"#dt","objective":"styx.t"},"color":"yellow"},{"text":" 刻（预期 100）→ 请先在聊天里执行 /tick rate 100 再开播","color":"red"}]}',
-  'execute unless score #hi styx.flag matches 1 if score #dt styx.t matches 19..21 run tellraw @a {"text":"[Styx/doctor] ✔ 20 tps 模式：20 刻内推进 ","color":"green","extra":[{"score":{"name":"#dt","objective":"styx.t"},"color":"yellow"},{"text":" 刻（预期 20）","color":"green"}]}',
-  'execute unless score #hi styx.flag matches 1 unless score #dt styx.t matches 19..21 run tellraw @a {"text":"[Styx/doctor] ✘ 20 tps 模式但 20 刻内推进了 ","color":"red","extra":[{"score":{"name":"#dt","objective":"styx.t"},"color":"yellow"},{"text":" 刻 → 世界刻率不是 20：要精确节奏请 /tick rate 100 + styx:play/start_hi","color":"red"}]}',
+  '# 20 刻内 #t 应 +20（#t 每个服务器刻 +1，与刻率无关；这一条只验"tick 函数确实在跑"）',
+  'execute if score #dt styx.t matches 19..21 run tellraw @a {"text":"[Styx/doctor] ✔ tick 函数推进正常（20 刻内 #t +","color":"green","extra":[{"score":{"name":"#dt","objective":"styx.t"},"color":"yellow"},{"text":"）。实际刻率请再执行 /tick query 核对（模式 #hi=","color":"green"},{"score":{"name":"#hi","objective":"styx.flag"},"color":"yellow"},{"text":"）","color":"green"}]}',
+  'execute unless score #dt styx.t matches 19..21 run tellraw @a {"text":"[Styx/doctor] ✘ tick 函数没在正常推进（20 刻内 #t 只 +","color":"red","extra":[{"score":{"name":"#dt","objective":"styx.t"},"color":"yellow"},{"text":"）→ 依次检查：#on 是否为 1、styx:play/tick 是否挂在 tick 标签、服务器是否卡到掉刻","color":"red"}]}',
 ].join('\n') + '\n', 'utf8');
 
 // 挂到每刻（必须放在 minecraft 命名空间！）
