@@ -57,6 +57,7 @@ import {
   legacyOnsets,
 } from '../analyze/onset-detect.mjs';
 import { VOICE_OF_INSTRUMENT } from '../arrange/velocity.mjs';
+import { resolvePaths } from '../core/paths.mjs';
 
 export { readNotesCsv, readWav };
 
@@ -662,7 +663,7 @@ const invokedDirectly =
   process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('src/verify/score.mjs');
 
 if (invokedDirectly) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+  const P = resolvePaths();
   const argv = process.argv.slice(2);
   const args = {};
   for (let i = 0; i < argv.length; i++) {
@@ -670,9 +671,9 @@ if (invokedDirectly) {
     const next = argv[i + 1];
     args[argv[i].replace(/^--/, '')] = next === undefined || next.startsWith('--') ? true : next;
   }
-  const notesPath = args.notes ?? `${BUILD}/styx_helix_notes_v3.csv`;
-  const wavPath = args.audio ?? `${BUILD}/styx_helix_full.wav`;
-  const outPath = args.out ?? `${BUILD}/score_report.json`;
+  const notesPath = args.notes ?? P.notesV3;
+  const wavPath = args.audio ?? P.audio;
+  const outPath = args.out ?? P.file('score_report.json');
   const velPath = typeof args.velocity === 'string' ? args.velocity : null;
   const expectedPath = typeof args.expected === 'string' ? args.expected : null;
   const evPath = typeof args['octave-evidence'] === 'string' ? args['octave-evidence'] : null;

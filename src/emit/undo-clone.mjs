@@ -3,10 +3,11 @@
 // 也不用把前像存成 1 万条 setblock；每条轨道 48×4×25 = 4800 格（< /clone 上限 32768），49 条共 49 条指令。
 // 产出 styx:backup（改之前跑）与 styx:undo（要回退时跑）。
 import fs from 'node:fs';
+import { resolvePaths } from '../core/paths.mjs';
 
-const B = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
-const DP = `${B}/styx_build/data/styx/function`;
-const profile = JSON.parse(fs.readFileSync(`${B}/single_row_profile.json`, 'utf8'));
+const P = resolvePaths();
+const DP = P.functionsDir;
+const profile = JSON.parse(fs.readFileSync(P.profile, 'utf8'));
 
 const backup = ['# 由 src/emit/undo-clone.mjs 生成：改轨道之前先跑，把每条轨道当前的样子存到轨道上方 +40 格'];
 const undo = ['# 由 src/emit/undo-clone.mjs 生成：把每条轨道逐格还原成 styx:backup 时的样子'];

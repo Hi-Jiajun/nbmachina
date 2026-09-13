@@ -4,8 +4,9 @@
 // 两个入口只差一个 #hiwant：0 = 20 tps 表（默认，开箱即用），1 = 100 tps 表（需先 /tick rate 100）。
 // 为什么不直接在函数里写 tick rate：函数权限等级 2 < `/tick` 需要的 3，写了整文件加载失败（实测）。
 import fs from 'node:fs';
+import { resolvePaths } from '../core/paths.mjs';
 
-const DP = 'C:/Users/hiliang/Documents/minecraft/build/styx_build/data/styx/function';
+const DP = resolvePaths().functionsDir;
 fs.mkdirSync(`${DP}/redo`, { recursive: true });
 
 const w = (name, lines) => fs.writeFileSync(`${DP}/${name}`, lines.join('\n') + '\n', 'utf8');

@@ -247,7 +247,8 @@ const invokedDirectly =
 if (invokedDirectly) {
   const fs = await import('node:fs');
   const { readWav, readNotesCsv, midiName } = await import('./dsp.mjs');
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+  const { resolvePaths } = await import('../core/paths.mjs');
+  const P = resolvePaths();
   const argv = process.argv.slice(2);
   const args = {};
   for (let i = 0; i < argv.length; i++) {
@@ -255,8 +256,8 @@ if (invokedDirectly) {
     const next = argv[i + 1];
     args[argv[i].replace(/^--/, '')] = next === undefined || next.startsWith('--') ? true : next;
   }
-  const wavPath = args.wav ?? `${BUILD}/styx_helix_full.wav`;
-  const notesPath = args.notes ?? `${BUILD}/styx_helix_notes_v3.csv`;
+  const wavPath = args.wav ?? P.audio;
+  const notesPath = args.notes ?? P.notesV3;
   const outPath = typeof args.out === 'string' ? args.out : null;
 
   const t0 = Date.now();

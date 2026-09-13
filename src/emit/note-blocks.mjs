@@ -8,15 +8,16 @@
 //   --old 用来生成"清掉旧坐标"的指令（旧 row 与新 row 不同时先把旧位置清空）
 import fs from 'node:fs';
 import { makePos, DECK_BLOCK, noteBlockOf } from './layout-pos.mjs';
+import { resolvePaths } from '../core/paths.mjs';
 
-const B = 'C:/Users/hiliang/Documents/minecraft/build';
-const DP = `${B}/styx_build/data/styx/function`;
+const P = resolvePaths();
+const DP = P.functionsDir;
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
-const NOTES = opt('notes', `${B}/styx_helix_machine.csv`);
-const OLD = opt('old', `${B}/styx_helix_notes_v3.csv`);
+const NOTES = opt('notes', P.machine);
+const OLD = opt('old', P.notesV3);
 
-const profile = JSON.parse(fs.readFileSync(`${B}/single_row_profile.json`, 'utf8'));
+const profile = JSON.parse(fs.readFileSync(P.profile, 'utf8'));
 const pos = makePos(profile);
 
 const readCsv = (p) => {

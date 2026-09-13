@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolvePaths } from '../core/paths.mjs';
 
 /* ------------------------------------------------------------------ 配置 */
 
@@ -506,7 +507,7 @@ const invokedDirectly =
   process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
 if (invokedDirectly) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+  const P = resolvePaths();
   const argv = process.argv.slice(2);
   const args = {};
   for (let i = 0; i < argv.length; i++) {
@@ -514,9 +515,9 @@ if (invokedDirectly) {
     const next = argv[i + 1];
     args[argv[i].replace(/^--/, '')] = next === undefined || next.startsWith('--') ? true : next;
   }
-  const wavPath = args.wav ?? `${BUILD}/styx_helix_full.wav`;
-  const notesPath = args.notes ?? `${BUILD}/styx_helix_notes.csv`;
-  const outPath = args.out ?? `${BUILD}/analysis_octave.json`;
+  const wavPath = args.wav ?? P.audio;
+  const notesPath = args.notes ?? P.notes;
+  const outPath = args.out ?? P.file('analysis_octave.json');
   const limit = args.limit ? Number(args.limit) : 0;
 
   const { sampleRate, samples, channels, bits } = readWav(wavPath);

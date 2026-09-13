@@ -17,16 +17,17 @@ import {
   STEP_SECONDS, switchTick, buildTickGroups, planBuckets, planBins, callsPerTick, pad,
 } from './tick-map.mjs';
 import { makePos } from './layout-pos.mjs';
+import { resolvePaths } from '../core/paths.mjs';
 
-const B = 'C:/Users/hiliang/Documents/minecraft/build';
-const DP = `${B}/styx_build/data/styx`;
+const P = resolvePaths();
+const DP = P.datapackDir;
 
 const argv = process.argv.slice(2);
 const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : dflt; };
-const NOTES_CSV = opt('notes', `${B}/styx_helix_notes_v3.csv`);
+const NOTES_CSV = opt('notes', P.notesV3);
 
 // 方案 A：单排（49 段一条线），逐段高度从 single_row_profile.json 读
-const ROWS_PROFILE = JSON.parse(fs.readFileSync(`${B}/single_row_profile.json`, 'utf8'));
+const ROWS_PROFILE = JSON.parse(fs.readFileSync(P.profile, 'utf8'));
 
 /* ---------- 读谱面数据：step/声部/midi/机行/力度 ---------- */
 const rows = fs.readFileSync(NOTES_CSV, 'utf8').trim().split(/\r?\n/);
@@ -54,7 +55,7 @@ const MODES = [
 
 fs.rmSync(`${DP}/function/play`, { recursive: true, force: true });
 fs.mkdirSync(`${DP}/function/play`, { recursive: true });
-fs.mkdirSync(`${B}/styx_build/data/minecraft/tags/function`, { recursive: true });
+fs.mkdirSync(P.tagDir, { recursive: true });
 
 const summary = [];
 const allLastPos = new Map(); // "x,y,z" -> pos（stop 时熄灯）
@@ -220,7 +221,7 @@ fs.writeFileSync(`${DP}/function/play/doctor/check.mcfunction`, [
 ].join('\n') + '\n', 'utf8');
 
 // 挂到每刻（必须放在 minecraft 命名空间！）
-fs.writeFileSync(`${B}/styx_build/data/minecraft/tags/function/tick.json`, JSON.stringify({ values: ['styx:play/tick'] }, null, 2) + '\n', 'utf8');
+fs.writeFileSync(`${P.tagDir}/tick.json`, JSON.stringify({ values: ['styx:play/tick'] }, null, 2) + '\n', 'utf8');
 fs.rmSync(`${DP}/tags/function/tick.json`, { force: true });
 
 console.log(`谱面：${NOTES_CSV}`);
