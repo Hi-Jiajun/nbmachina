@@ -16,6 +16,8 @@
     "test:run": "node src/test/run-headless.mjs",
     "scan:terrain": "node src/scan/terrain-profile.mjs",
     "scan:notes": "node src/scan/world-notes-audit.mjs",
+    "analyze:octave": "node src/analyze/octave-evidence.mjs",
+    "arrange:octave": "node src/arrange/octave-fix.mjs",
     "ingest:project": "node src/ingest/project-from-notes-csv.mjs",
     "validate:project": "node src/ingest/project-schema.mjs",
     "test": "node --test \"tests/*.test.mjs\""
