@@ -32,6 +32,7 @@ w('redo/s1.mcfunction', [
 
 // ② 换 v3 音符（第 1 批：x480..1103）
 w('redo/s2.mcfunction', [
+  'function styx:undo/backup1',   // 改这个窗口之前先存回退快照（clone 到轨道上方 +40 格，见 src/emit/undo-clone.mjs）
   'function styx:apply_notes_v3',
   'forceload remove all',
   'forceload add 1104 -176 2359 -136',
@@ -40,6 +41,7 @@ w('redo/s2.mcfunction', [
 
 // ③ 换 v3 音符（第 2 批：x1104..2359）
 w('redo/s3.mcfunction', [
+  'function styx:undo/backup2',
   'function styx:apply_notes_v3',
   'forceload remove all',
   'forceload add 2352 -176 2880 -136',
@@ -48,6 +50,7 @@ w('redo/s3.mcfunction', [
 
 // ④ 换 v3 音符（第 3 批：东段，含爬坡部分）+ 开监听 + 按 #hiwant 选模式开播
 w('redo/s4.mcfunction', [
+  'function styx:undo/backup3',
   'function styx:apply_notes_v3',
   'forceload remove all',
   'scoreboard objectives add styx.flag dummy',
