@@ -1,0 +1,19 @@
+{
+  "meta": {
+    "title": "Fixture Song",
+    "author": "nbforge tests",
+    "license": "CC0-1.0",
+    "source": {
+      "format": "midi",
+      "path": "fixtures/fixture_song.mid",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "voices": ["melody", "bass"],
+  "notes": [
+    { "voice": "melody", "onsetSec": 0.0, "durSec": 0.24, "midi": 72, "velocity": 96 },
+    { "voice": "bass", "onsetSec": 0.0, "durSec": 0.48, "midi": 48, "velocity": 80 }
+  ],
+  "tempoMap": [{ "sec": 0.0, "bpm": 120 }],
+  "annotations": []
+}
