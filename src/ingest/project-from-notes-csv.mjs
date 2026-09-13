@@ -17,7 +17,7 @@ import fs from 'node:fs';
 import crypto from 'node:crypto';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { assertProject } from './project-schema.mjs';
+import { assertProject, VOICES } from './project-schema.mjs';
 
 const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
 
@@ -92,7 +92,9 @@ export function buildProject({
   secPerStep = 0.12,
 } = {}) {
   const notes = csvRowsToProjectNotes(rows, { secPerStep });
-  const voices = [...new Set(notes.map((n) => n.voice))];
+  // 声部顺序固定成 SPEC 的枚举顺序，保证同一份输入永远产出逐字节相同的 JSON
+  const used = new Set(notes.map((n) => n.voice));
+  const voices = VOICES.filter((v) => used.has(v));
   const source = {
     format: 'csv',
     path: relPath(csvPath),
