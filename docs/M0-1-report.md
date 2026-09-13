@@ -30,7 +30,7 @@ c34a95a feat(arrange): 去撞格（撞格 276→0，含合并明细报告）
 | 产物 | 大小 | 说明 |
 |---|---|---|
 | `build/project.json` | 876 KB | 3099 颗音、契约校验通过；来源 sha256 可追溯 |
-| `build/notes_dedup.csv` | 97 KB | 列与 v3 **完全一致**（`step,tick,time_seconds,instrument,midi,row,volume`），可直接喂 layout |
+| `build/notes_dedup.csv` | 97 KB | 列与 v3 **完全一致**（`step,tick,time_seconds,instrument,midi,row,volume`），可直接喂 layout；`src/test/run-headless.mjs` 是按**位置**读这 7 列的（`[step,tick,time,instr,midi,row,vol]`），列顺序不动才换得进去 |
 | `build/dedupe-report.json` | 159 KB | 276 条合并明细（留哪颗 / 弃哪颗 / 依据哪条规则） |
 
 ---
