@@ -8,19 +8,20 @@
 //
 // 用法：node src/arrange/machine-pipeline.mjs [--in <fixed csv>] [--out <machine csv>]
 import fs from 'node:fs';
+import { resolvePaths } from '../core/paths.mjs';
 import { foldRows, parseCsv, toMachineCsv } from './fold.mjs';
 import { readWav, velocityCsvText } from './velocity.mjs';
 import { dedupeCsvText, detectCollisions, readNotesCsv } from './dedupe.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+const P = resolvePaths();
 const argv = process.argv.slice(2);
 const args = {};
 for (let i = 0; i < argv.length; i += 2) args[argv[i].replace(/^--/, '')] = argv[i + 1];
 
-const inPath = args.in ?? `${BUILD}/notes_fixed_v3.csv`;
-const outPath = args.out ?? `${BUILD}/styx_helix_machine.csv`;
-const reportPath = args.report ?? `${BUILD}/machine-report.json`;
-const wavPath = args.audio ?? `${BUILD}/styx_helix_full.wav`;
+const inPath = args.in ?? P.file('notes_fixed_v3.csv');
+const outPath = args.out ?? P.machine;
+const reportPath = args.report ?? P.file('machine-report.json');
+const wavPath = args.audio ?? P.audio;
 
 /* ① 重折 note_block 行 */
 const fixedRows = parseCsv(fs.readFileSync(inPath, 'utf8'));

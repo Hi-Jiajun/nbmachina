@@ -18,6 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolvePaths } from '../core/paths.mjs';
 
 import { detectPercussion } from '../analyze/drums.mjs';
 import { readWav } from '../analyze/dsp.mjs';
@@ -209,7 +210,7 @@ const invokedDirectly =
   process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
 if (invokedDirectly) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+  const P = resolvePaths();
   const argv = process.argv.slice(2);
   const args = {};
   for (let i = 0; i < argv.length; i++) {
@@ -217,13 +218,13 @@ if (invokedDirectly) {
     const next = argv[i + 1];
     args[argv[i].replace(/^--/, '')] = next === undefined || next.startsWith('--') ? true : next;
   }
-  const audioPath = resolveExisting(args.audio ?? `${BUILD}/styx_helix_full.wav`, '音频');
-  const outPath = resolveOut(args.out ?? `${BUILD}/percussion.csv`);
+  const audioPath = resolveExisting(args.audio ?? P.audio, '音频');
+  const outPath = resolveOut(args.out ?? P.file('percussion.csv'));
   const eventsPath = resolveOut(args.events ?? path.join(path.dirname(outPath), 'percussion_events.json'));
-  const onsetsPath = typeof args.onsets === 'string' ? resolveExisting(args.onsets, '起音表') : `${BUILD}/onsets_banded.json`;
+  const onsetsPath = typeof args.onsets === 'string' ? resolveExisting(args.onsets, '起音表') : P.file('onsets_banded.json');
   const chartPath = typeof args.chart === 'string'
     ? resolveExisting(args.chart, '谱面')
-    : resolveExisting(`${BUILD}/notes_recovered.csv`, '谱面');
+    : resolveExisting(P.file('notes_recovered.csv'), '谱面');
 
   const t0 = Date.now();
   const { samples, sampleRate, seconds } = readWav(audioPath);

@@ -25,6 +25,7 @@
 // 重要限制：这个口径量在**给定的八度**上。若输入的八度本身是错的（v3 的贝斯大面积如此），
 // 力度也会跟着错。流水线顺序应是 T3 修八度 → T5 换力度（CLI 传 `--midi-column newMidi`）。
 import fs from 'node:fs';
+import { resolvePaths } from '../core/paths.mjs';
 
 import {
   csvText,
@@ -469,7 +470,7 @@ const invokedDirectly =
   process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('src/arrange/velocity.mjs');
 
 if (invokedDirectly) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+  const P = resolvePaths();
   const argv = process.argv.slice(2);
   const args = {};
   for (let i = 0; i < argv.length; i++) {
@@ -477,10 +478,10 @@ if (invokedDirectly) {
     const next = argv[i + 1];
     args[argv[i].replace(/^--/, '')] = next === undefined || next.startsWith('--') ? true : next;
   }
-  const inPath = args.in ?? `${BUILD}/styx_helix_notes_v3.csv`;
-  const outPath = args.out ?? `${BUILD}/velocity_fixed.csv`;
+  const inPath = args.in ?? P.notesV3;
+  const outPath = args.out ?? P.file('velocity_fixed.csv');
   const reportPath = typeof args.report === 'string' ? args.report : null;
-  const wavPath = args.audio ?? `${BUILD}/styx_helix_full.wav`;
+  const wavPath = args.audio ?? P.audio;
   const numArg = (name) => (args[name] === undefined || args[name] === true ? undefined : Number(args[name]));
   const config = {
     ...(typeof args['midi-column'] === 'string' ? { midiColumn: args['midi-column'] } : {}),

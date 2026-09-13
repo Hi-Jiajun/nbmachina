@@ -14,6 +14,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolvePaths } from '../core/paths.mjs';
 
 /** 声部优先级（高 → 低）：旋律最不可替代，打击乐合并损失最小 */
 export const DEFAULT_VOICE_PRIORITY = ['melody', 'bass', 'inner', 'perc'];
@@ -272,13 +273,13 @@ const invokedDirectly =
   process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
 if (invokedDirectly) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+  const P = resolvePaths();
   const argv = process.argv.slice(2);
   const args = {};
   for (let i = 0; i < argv.length; i += 2) args[argv[i].replace(/^--/, '')] = argv[i + 1];
-  const inPath = args.in ?? `${BUILD}/styx_helix_notes_v3.csv`;
-  const outPath = args.out ?? `${BUILD}/notes_dedup.csv`;
-  const reportPath = args.report ?? `${BUILD}/dedupe-report.json`;
+  const inPath = args.in ?? P.notesV3;
+  const outPath = args.out ?? P.file('notes_dedup.csv');
+  const reportPath = args.report ?? P.file('dedupe-report.json');
 
   const before = readNotesCsv(fs.readFileSync(inPath, 'utf8'));
   const { csv, report } = dedupeCsvText(fs.readFileSync(inPath, 'utf8'));

@@ -18,6 +18,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolvePaths } from '../core/paths.mjs';
 
 import {
   csvText,
@@ -502,7 +503,7 @@ const invokedDirectly =
   process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
 if (invokedDirectly) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+  const P = resolvePaths();
   const argv = process.argv.slice(2);
   const args = {};
   for (let i = 0; i < argv.length; i++) {
@@ -515,10 +516,10 @@ if (invokedDirectly) {
   if (num(args['melody-window']) !== undefined) voices.melody = { windowSec: num(args['melody-window']) };
   if (num(args['inner-window']) !== undefined) voices.inner = { windowSec: num(args['inner-window']) };
   if (num(args['bass-window']) !== undefined) voices.bass = { windowSec: num(args['bass-window']) };
-  const inPath = args.in ?? `${BUILD}/styx_helix_machine.csv`;
-  const outPath = args.out ?? `${BUILD}/machine_sustain.csv`;
-  const reportPath = typeof args.report === 'string' ? args.report : `${BUILD}/sustain-report.json`;
-  const wavPath = args.audio ?? `${BUILD}/styx_helix_full.wav`;
+  const inPath = args.in ?? P.machine;
+  const outPath = args.out ?? P.file('machine_sustain.csv');
+  const reportPath = typeof args.report === 'string' ? args.report : P.file('sustain-report.json');
+  const wavPath = args.audio ?? P.audio;
   const config = {
     ...(num(args.window) !== undefined ? { windowSec: num(args.window) } : {}),
     ...(num(args.hop) !== undefined ? { hopSec: num(args.hop) } : {}),

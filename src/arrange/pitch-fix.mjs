@@ -41,6 +41,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolvePaths } from '../core/paths.mjs';
 
 import {
   NOTE_NAMES,
@@ -401,7 +402,7 @@ const invokedDirectly =
   process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
 if (invokedDirectly) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+  const P = resolvePaths();
   const argv = process.argv.slice(2);
   const args = {};
   for (let i = 0; i < argv.length; i++) {
@@ -409,10 +410,10 @@ if (invokedDirectly) {
     const next = argv[i + 1];
     args[argv[i].replace(/^--/, '')] = next === undefined || next.startsWith('--') ? true : next;
   }
-  const inPath = args.in ?? `${BUILD}/notes_fixed_v3.csv`;
-  const outPath = args.out ?? `${BUILD}/notes_pitchfixed.csv`;
-  const reportPath = args.report ?? `${BUILD}/pitch_fix_report.json`;
-  const wavPath = args.audio ?? `${BUILD}/styx_helix_full.wav`;
+  const inPath = args.in ?? P.file('notes_fixed_v3.csv');
+  const outPath = args.out ?? P.file('notes_pitchfixed.csv');
+  const reportPath = args.report ?? P.file('pitch_fix_report.json');
+  const wavPath = args.audio ?? P.audio;
   const config = {
     ...(args.margin !== undefined ? { margin: Number(args.margin) } : {}),
     ...(args['min-amplitude'] !== undefined ? { minAmplitude: Number(args['min-amplitude']) } : {}),

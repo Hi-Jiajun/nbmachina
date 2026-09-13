@@ -5,6 +5,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { resolvePaths } from '../core/paths.mjs';
 
 export const DEFAULT_CURSORS = { bass: 8, harp: 18 };
 
@@ -61,12 +62,12 @@ export function toMachineCsv(rows, { tps = 100, volumeFallback = 0.35 } = {}) {
 
 const invoked = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 if (invoked) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+  const P = resolvePaths();
   const argv = process.argv.slice(2);
   const args = {};
   for (let i = 0; i < argv.length; i += 2) args[argv[i].replace(/^--/, '')] = argv[i + 1];
-  const inPath = args.in ?? `${BUILD}/notes_fixed_v3.csv`;
-  const outPath = args.out ?? `${BUILD}/notes_refold.csv`;
+  const inPath = args.in ?? P.file('notes_fixed_v3.csv');
+  const outPath = args.out ?? P.file('notes_refold.csv');
   const rows = parseCsv(fs.readFileSync(inPath, 'utf8'));
   const folded = foldRows(rows);
   fs.writeFileSync(outPath, toMachineCsv(folded), 'utf8');
