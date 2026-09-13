@@ -44,6 +44,11 @@ npm run verify -- --octave-evidence build/analysis_octave.json   # → build/sco
 ⁽*⁾ 力度相关在这两行是**链路自检**（力度由同一描述子生成），不能读成"力度变好 0.6"。
 可比的真提升是八度那一项。
 
+> 表里的 `notes_fixed_v3.csv` 是并行任务 M0-2（T2/T3）的产物，写作时 sha256
+> `c454fea3255c594a33a05cdef1a77ee615ad72afacbed769d7b049e9b523e48`；若 M0-2 之后重跑，
+> 请用 `node src/arrange/velocity.mjs --in build/notes_fixed_v3.csv --out build/velocity_fixed_from_octavefix.csv`
+> 重算这一行。`notes_dedup.csv` 同理（M0-1）。
+
 ## 3. 已量出来的三个已知弱项（M1 的靶子）
 
 1. **音级吸附**：调外 5 音级（C/D/F/G/A#）在音频里占最大音级的 0.16–0.57，谱面只有 0.01–0.06（差 3–11 倍），
