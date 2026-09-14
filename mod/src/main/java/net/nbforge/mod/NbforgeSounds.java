@@ -12,6 +12,8 @@ import net.minecraft.util.Identifier;
  * 所以这里查不到注册表条目时回退成动态事件，保证「已有音色表」零改造可用。
  */
 public final class NbforgeSounds {
+	private static final String MOD_NAMESPACE = NbforgeMod.MOD_ID;
+
 	private NbforgeSounds() {
 	}
 
@@ -20,16 +22,45 @@ public final class NbforgeSounds {
 		if (soundId == null) {
 			return null;
 		}
-		SoundEvent registered = Registries.SOUND_EVENT.get(soundId);
-		return registered != null ? registered : SoundEvent.of(soundId);
+		return resolve(soundId);
 	}
 
-	/** 支持 {@code demo_bell}（补 nbforge 命名空间）与 {@code nbforge:strings_e4} 两种写法。 */
+	/**
+	 * 命令层入口（{@code /nbforge note <identifier>}）。
+	 *
+	 * <p>裸名会被 {@code IdentifierArgumentType} 解析成 {@code minecraft:<name>}——这不是用户的本意，
+	 * 所以 {@code minecraft} 命名空间先在注册表里找，找不到再按本 mod 的命名空间试一次；
+	 * 例如 {@code demo_bell} → {@code minecraft:demo_bell}（未注册）→ {@code nbforge:demo_bell}。
+	 */
+	public static SoundEvent resolve(Identifier soundId) {
+		if (soundId == null) {
+			return null;
+		}
+		SoundEvent registered = Registries.SOUND_EVENT.get(soundId);
+		if (registered != null) {
+			return registered; // 注册表命中：本 mod 的 demo_*、以及全部原版音效都走这里
+		}
+		if ("minecraft".equals(soundId.getNamespace())) {
+			// 裸名（`/nbforge note demo_bell`）会被 IdentifierArgumentType 解析成 minecraft:demo_bell
+			Identifier inMod = Identifier.of(MOD_NAMESPACE, soundId.getPath());
+			SoundEvent modRegistered = Registries.SOUND_EVENT.get(inMod);
+			return modRegistered != null ? modRegistered : SoundEvent.of(inMod);
+		}
+		// 其余命名空间（含 nbforge:strings_e4 这类资源包音色）：动态事件，客户端按 id 去 sounds.json 找采样
+		return SoundEvent.of(soundId);
+	}
+
+	/** 字符串写法（自检/控制台脚本用）：支持 {@code demo_bell}、{@code nbforge:strings_e4}，两侧引号会被剥掉。 */
 	public static Identifier parse(String raw) {
 		if (raw == null) {
 			return null;
 		}
 		String trimmed = raw.trim();
+		if (trimmed.length() >= 2
+			&& (trimmed.charAt(0) == '"' || trimmed.charAt(0) == '\'')
+			&& trimmed.charAt(trimmed.length() - 1) == trimmed.charAt(0)) {
+			trimmed = trimmed.substring(1, trimmed.length() - 1).trim(); // 兼容用户写引号的习惯
+		}
 		if (trimmed.isEmpty()) {
 			return null;
 		}

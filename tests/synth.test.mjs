@@ -231,6 +231,11 @@ test('资源包构建：目录结构 + zip 体积 <15MB（用真实采样目录�
   assert.equal(res.sounds, TIMBRES.reduce((n, tt) => n + registerSize(tt), 0), '事件数应等于采样数');
   const mcmeta = JSON.parse(fs.readFileSync(path.join(out, 'nbforge_resources', 'pack.mcmeta'), 'utf8'));
   assert.equal(mcmeta.pack.pack_format, PACK_FORMAT);
+  // 1.21.9+ 的硬要求：声明 >64 的格式号必须同时给 min_format/max_format，否则客户端直接判"已损坏或不兼容"。
+  // 2026-09-14 客户端日志原文：Pack declares support for version newer than 64, but is missing mandatory
+  // fields min_format and max_format（vanilla 内置包也是 min/max 成对出现，见 docs/M3-3-report.md）。
+  assert.equal(mcmeta.pack.min_format, PACK_FORMAT, '缺 min_format 会被客户端判为不兼容');
+  assert.equal(mcmeta.pack.max_format, PACK_FORMAT, '缺 max_format 会被客户端判为不兼容');
   const zip = fs.readFileSync(path.join(out, 'nbforge_resources.zip'));
   assert.ok(zip.length < 15 * 1024 * 1024, `zip ${(zip.length / 1048576).toFixed(2)}MB ≥ 15MB`);
   const names = listZipEntries(zip);

@@ -27,6 +27,10 @@ cd C:\Users\hiliang\Documents\minecraft\nbforge\mod
 音色 id 三种写法都认：`demo_bell`（mod 注册）、`nbforge:demo_bell`、`nbforge:strings_e4`
 （资源包 `nbforge_resources` 里已有的 148 个音色，mod 直接按 id 引用）。
 
+**不要给音色 id 加引号**——参数类型是 `IdentifierArgumentType`（与 vanilla `/playsound` 同款），
+直接 `/nbforge note nbforge:demo_bell 1 1` 即可。注意 `sustain` 是 5 个参数：
+`/nbforge sustain nbforge:demo_pad 0.8 1 60 10`（音色 音量 音高 总刻数 重触发间隔）。
+
 ## 自检
 
 加 `-Dnbforge.selftest=true` 起服（或 `gradlew runServer -Dnbforge.selftest=true`），

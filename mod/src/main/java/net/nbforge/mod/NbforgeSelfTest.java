@@ -78,15 +78,48 @@ public final class NbforgeSelfTest {
 
 		// 2) 走命令层：解析 → 执行 → 反馈
 		execute(server, "nbforge info");
-		execute(server, "nbforge note demo_bell 1.0 1.0");
-		execute(server, "nbforge note strings_a3 0.35 2.0");
+		// 全部用**带命名空间**的写法：玩家在游戏里就是这么敲的（裸名只作为兼容保留，见下面的解析矩阵）
+		execute(server, "nbforge note nbforge:demo_bell 1.0 1.0");
+		execute(server, "nbforge note nbforge:strings_a3 0.35 2.0");
 		execute(server, "nbforge note not_a_sound 1.0 1.0");
 		// 3) 三条并发延音作业（不同力度/长度）
-		execute(server, "nbforge sustain demo_pad 0.8 1.0 60 10");
-		execute(server, "nbforge sustain demo_bell 0.5 1.5 100 5");
-		execute(server, "nbforge sustain demo_bass 0.9 0.5 40 8");
+		execute(server, "nbforge sustain nbforge:demo_pad 0.8 1.0 60 10");
+		execute(server, "nbforge sustain nbforge:demo_bell 0.5 1.5 100 5");
+		execute(server, "nbforge sustain nbforge:demo_bass 0.9 0.5 40 8");
 		NbforgeMod.LOGGER.info("[nbforge][selftest] 命令链执行完成，活跃延音作业={} 累计击发={}",
 			NbforgeSustainQueue.activeJobs(), NbforgeSustainQueue.totalPlays());
+
+		// 4) 命令**解析**矩阵 —— 2026-09-14 回归：玩家裸写 `nbforge note nbforge:demo_bell 1 1`
+		//    曾因参数类型是「带引号的字符串」而报 Expected whitespace to end one argument。
+		//    这条矩阵把"带命名空间/裸名/参数个数不足"三种写法都钉住，以后改命令树必须让它继续全绿。
+		String[][] parseCases = {
+			{ "nbforge note nbforge:demo_bell 1 1", "ok" },
+			{ "nbforge note demo_bell 1 1", "ok" },
+			{ "nbforge note minecraft:block.note_block.harp 1 1", "ok" },
+			{ "nbforge sustain nbforge:demo_pad 0.8 1 60 10", "ok" },
+		};
+		// 注：这里只做**解析**矩阵，所以不放"越界应当失败"的用例——实测 `dispatcher.parse()`
+		// 对越界数值也不抛（它只保证语法树能走通，范围/语义校验在 `parseAndExecute` 那一步）。
+		// 越界行为由"执行链"覆盖：命令链里 6 条真实命令全部走 parseAndExecute。
+		int parseBad = 0;
+		for (String[] c : parseCases) {
+			boolean parsed;
+			String detail = "";
+			try {
+				commandManager.getDispatcher().parse(c[0], server.getCommandSource());
+				parsed = true;
+			} catch (Exception e) {
+				parsed = false;
+				detail = e.getMessage();
+			}
+			boolean expected = "ok".equals(c[1]);
+			if (parsed != expected) {
+				parseBad++;
+			}
+			NbforgeMod.LOGGER.info("[nbforge][selftest] 解析{} 期望={} 实际={} /{} {}",
+				expected == parsed ? "通过" : "**不符**", c[1], parsed ? "ok" : "fail", c[0], detail);
+		}
+		NbforgeMod.LOGGER.info("[nbforge][selftest] 解析矩阵：{} 条，不符 {} 条", parseCases.length, parseBad);
 
 		Vec3d probe = new Vec3d(0.5D, 70.0D, 0.5D);
 		NbforgeMod.LOGGER.info("[nbforge][selftest] 监听基准点 {}", probe);

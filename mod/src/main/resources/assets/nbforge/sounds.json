@@ -3,7 +3,7 @@
 		"subtitle": "subtitles.nbforge.demo_bell",
 		"sounds": [
 			{
-				"name": "bell/a3",
+				"name": "nbforge:bell/a3",
 				"stream": false,
 				"attenuation_distance": 32
 			}
@@ -13,7 +13,7 @@
 		"subtitle": "subtitles.nbforge.demo_pad",
 		"sounds": [
 			{
-				"name": "pad/c4",
+				"name": "nbforge:pad/c4",
 				"stream": false,
 				"attenuation_distance": 32
 			}
@@ -23,7 +23,7 @@
 		"subtitle": "subtitles.nbforge.demo_strings",
 		"sounds": [
 			{
-				"name": "strings/e4",
+				"name": "nbforge:strings/e4",
 				"stream": false,
 				"attenuation_distance": 32
 			}
@@ -33,7 +33,7 @@
 		"subtitle": "subtitles.nbforge.demo_bass",
 		"sounds": [
 			{
-				"name": "bass/a1",
+				"name": "nbforge:bass/a1",
 				"stream": false,
 				"attenuation_distance": 32
 			}

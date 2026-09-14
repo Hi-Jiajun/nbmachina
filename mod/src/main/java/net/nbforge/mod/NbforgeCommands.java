@@ -3,15 +3,16 @@ package net.nbforge.mod;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
-import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.minecraft.command.argument.IdentifierArgumentType;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.sound.SoundCategory;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 
 /**
@@ -23,6 +24,13 @@ import net.minecraft.util.math.Vec3d;
  * /nbforge stopall
  * </pre>
  * 控制台（无玩家）也能执行：位置取命令源的坐标，音源世界取命令源所在世界。
+ *
+ * <p>音色参数用 {@link IdentifierArgumentType}（与 vanilla {@code /playsound} 同一套参数类型）：
+ * 可以裸写 {@code nbforge:demo_bell}。**不要**改回 {@code StringArgumentType.string()}——
+ * 那是"带引号的字符串"，裸写冒号会直接语法报错（2026-09-14 玩家实测 + 副本服复现：
+ * {@code Expected whitespace to end one argument, but found trailing data}）。
+ * 裸名（{@code demo_bell}）会被解析成 {@code minecraft:demo_bell}，由
+ * {@link NbforgeSounds#resolve(net.minecraft.util.Identifier)} 兜回 {@code nbforge} 命名空间。
  */
 public final class NbforgeCommands {
 	private NbforgeCommands() {
@@ -38,7 +46,7 @@ public final class NbforgeCommands {
 			.then(CommandManager.literal("info")
 				.executes(NbforgeCommands::info))
 			.then(CommandManager.literal("note")
-				.then(CommandManager.argument("sound", StringArgumentType.string())
+				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
 					.executes(ctx -> note(ctx, 1.0F, 1.0F))
 					.then(CommandManager.argument("volume", FloatArgumentType.floatArg(0.0F, 8.0F))
 						.executes(ctx -> note(ctx, FloatArgumentType.getFloat(ctx, "volume"), 1.0F))
@@ -47,7 +55,7 @@ public final class NbforgeCommands {
 								FloatArgumentType.getFloat(ctx, "volume"),
 								FloatArgumentType.getFloat(ctx, "pitch")))))))
 			.then(CommandManager.literal("sustain")
-				.then(CommandManager.argument("sound", StringArgumentType.string())
+				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
 					.then(CommandManager.argument("volume", FloatArgumentType.floatArg(0.0F, 8.0F))
 						.then(CommandManager.argument("pitch", FloatArgumentType.floatArg(0.25F, 4.0F))
 							.then(CommandManager.argument("ticks", IntegerArgumentType.integer(1, 1200))
@@ -69,7 +77,7 @@ public final class NbforgeCommands {
 
 	private static int note(CommandContext<ServerCommandSource> ctx, float volume, float pitch) {
 		ServerCommandSource source = ctx.getSource();
-		String raw = StringArgumentType.getString(ctx, "sound");
+		Identifier raw = IdentifierArgumentType.getIdentifier(ctx, "sound");
 		SoundEvent sound = NbforgeSounds.resolve(raw);
 		if (sound == null) {
 			source.sendError(Text.literal("[nbforge] 无法解析音色 id：" + raw));
@@ -89,7 +97,7 @@ public final class NbforgeCommands {
 
 	private static int sustain(CommandContext<ServerCommandSource> ctx) {
 		ServerCommandSource source = ctx.getSource();
-		String raw = StringArgumentType.getString(ctx, "sound");
+		Identifier raw = IdentifierArgumentType.getIdentifier(ctx, "sound");
 		SoundEvent sound = NbforgeSounds.resolve(raw);
 		if (sound == null) {
 			source.sendError(Text.literal("[nbforge] 无法解析音色 id：" + raw));

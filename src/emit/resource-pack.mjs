@@ -1,7 +1,7 @@
 // M2-1 · 把自研采样打成 Minecraft 资源包（1.21.10）
 //
 // 产物：
-//   build/nbforge_resources/pack.mcmeta                      ← pack_format 69
+//   build/nbforge_resources/pack.mcmeta                      ← pack_format 69 + min_format/max_format 69
 //   build/nbforge_resources/assets/nbforge/sounds.json       ← 148 条事件 nbforge:strings_fs4 …
 //   build/nbforge_resources/assets/nbforge/sounds/<音色>/<音名>.ogg
 //   build/nbforge_resources.zip                              ← 同一个包的可分发 zip（可复现）
@@ -9,8 +9,16 @@
 //   若存在客户端实例的 resourcepacks/（PCL2 实例）：把 **zip** 复制进去 —— 这是"真的能听到"的唯一途径
 //   （专用服不会给玩家放音；音色永远由客户端资源包决定）
 //
-// 为什么 pack_format = 69：读的是 testserver/server.jar 里的 version.json（1.21.10 → resource_major 69），
-// 不是猜的；tests/synth.test.mjs 里有一条断言会拿 jar 复核这个常量。
+// 为什么是 69：读的是 version.json 里的 pack_version.resource_major（1.21.10 → 69），不是猜的；
+// tests/synth.test.mjs 有一条断言拿 jar 复核这个常量。
+//
+// 为什么还要 min_format/max_format（2026-09-14 实测，客户端日志原文）：
+//   Couldn't load file/nbforge_resources.zip pack metadata:
+//   Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
+// → 1.21.9+ 的格式号进到"主/次"两段版本后，声明 >64 的包**必须**同时给 min_format/max_format。
+//   vanilla 自己的内置数据包就是这么写的（客户端 jar 里 data/minecraft/datapacks/redstone_experiments/pack.mcmeta：
+//   {"pack":{"description":{...},"max_format":88,"min_format":88}}，88 正是它的 data_major）。
+//   这里三件套都给：pack_format 照顾老读取器，min/max 满足新校验，三者取值一致不会自相矛盾。
 //
 // 用法：node src/emit/resource-pack.mjs [--audio <dir>] [--out <dir>] [--zip <file>] [--no-copy]
 // 相对路径按 minecraft 工程根解析（`--audio build/audio_nbforge`、`testserver/resourcepacks/...`）。
@@ -122,7 +130,9 @@ export function buildResourcePack({
   const soundsDir = path.join(outDir, 'assets', 'nbforge', 'sounds');
   fs.mkdirSync(soundsDir, { recursive: true });
 
-  const mcmeta = { pack: { pack_format: PACK_FORMAT, description } };
+  const mcmeta = {
+    pack: { pack_format: PACK_FORMAT, min_format: PACK_FORMAT, max_format: PACK_FORMAT, description },
+  };
   const mcmetaBuf = Buffer.from(JSON.stringify(mcmeta, null, 2) + '\n', 'utf8');
   const sounds = buildSoundsJson(entries);
   const soundsBuf = Buffer.from(JSON.stringify(sounds, null, 2) + '\n', 'utf8');
