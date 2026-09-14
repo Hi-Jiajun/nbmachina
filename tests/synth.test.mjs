@@ -21,7 +21,7 @@ import {
   noteFileName, registerSize, renderVoice, soundPathOf,
 } from '../src/synth/voices.mjs';
 import { buildZip, crc32, listZipEntries } from '../src/emit/zip-writer.mjs';
-import { PACK_FORMAT, buildResourcePack, buildSoundsJson } from '../src/emit/resource-pack.mjs';
+import { DEMO_ALIASES, PACK_FORMAT, buildResourcePack, buildSoundsJson } from '../src/emit/resource-pack.mjs';
 import { HIFI_SYNC_STEPS, buildHifiFunctions, parseScoreCsv, planHifi } from '../src/emit/playsound-hifi.mjs';
 
 const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
@@ -175,11 +175,21 @@ test('sounds.json：每个采样一条事件，名字与文件一一对应', () 
     { timbre: 'strings', midi: 66 }, { timbre: 'bell', midi: 61 }, { timbre: 'bass', midi: 19 },
   ];
   const json = buildSoundsJson(entries);
-  assert.deepEqual(Object.keys(json).sort(), ['bass_g0', 'bell_cs4', 'strings_fs4']);
+  // 148 个音色事件 + 4 个「后端 A 演示音色」别名（mod 与资源包同命名空间，见 DEMO_ALIASES 注释）
+  assert.deepEqual(Object.keys(json).sort(),
+    ['bass_g0', 'bell_cs4', 'demo_bass', 'demo_bell', 'demo_pad', 'demo_strings', 'strings_fs4']);
   assert.deepEqual(json.strings_fs4.sounds, [
     { name: 'strings/fs4', stream: false, attenuation_distance: 16 },
   ]);
   assert.equal(json.bell_cs4.sounds[0].name, 'bell/cs4');
+  // 别名必须落在**同名音色目录**里（demo_bell → bell/…）；
+  // 至于"文件真的存在"，由下面"zip 里每个 name 都指向真实条目"那条测试在真实产物上兜住。
+  for (const [key, a] of Object.entries(DEMO_ALIASES)) {
+    assert.ok(json[key], `缺 demo 别名 ${key}`);
+    assert.equal(json[key].sounds[0].name, a.path);
+    const timbre = key.slice('demo_'.length);
+    assert.ok(a.path.startsWith(`${timbre}/`), `${key} 应指向 ${timbre}/…，实际 ${a.path}`);
+  }
 });
 
 test('pack.mcmeta：pack_format 来自 testserver/server.jar 的 version.json（1.21.10 → 69）', (t) => {

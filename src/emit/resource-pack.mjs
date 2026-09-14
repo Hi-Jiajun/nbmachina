@@ -72,6 +72,20 @@ export function collectSamples(audioDir, { ext = 'ogg' } = {}) {
   return { entries, missing };
 }
 
+/**
+ * 后端 A（Fabric mod）自带的 `sounds.json` 里定义了 `demo_bell/demo_pad/demo_strings/demo_bass`
+ * 四个演示音色，它们与资源包**同属 `nbforge` 命名空间**。Minecraft 的 SoundManager 会按键合并
+ * 各资源包的 sounds.json（同键高优先级覆盖），所以正常情况下两者共存；但"万一某版本/某加载器
+ * 按整文件覆盖"，mod 的四个 demo_* 就会解析不到 → 装好 mod 却听不见声。
+ * 这里在资源包里补四个**别名**（指向同一批采样，不新增文件），把这种不确定性消掉。
+ */
+export const DEMO_ALIASES = {
+  demo_bell: { path: 'bell/a3', attenuation: 32 },
+  demo_pad: { path: 'pad/c4', attenuation: 32 },
+  demo_strings: { path: 'strings/e4', attenuation: 32 },
+  demo_bass: { path: 'bass/a1', attenuation: 32 },
+};
+
 /** sounds.json：一个采样一条事件；name 用相对路径（命名空间 = sounds.json 所在目录的命名空间 nbforge） */
 export function buildSoundsJson(entries) {
   const out = {};
@@ -79,6 +93,9 @@ export function buildSoundsJson(entries) {
     out[`${e.timbre}_${noteFileName(e.midi)}`] = {
       sounds: [{ name: soundPathOf(e.timbre, e.midi), stream: false, attenuation_distance: 16 }],
     };
+  }
+  for (const [key, a] of Object.entries(DEMO_ALIASES)) {
+    out[key] = { sounds: [{ name: a.path, stream: false, attenuation_distance: a.attenuation }] };
   }
   return out;
 }
