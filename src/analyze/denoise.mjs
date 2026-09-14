@@ -23,7 +23,8 @@ export function spectralDenoise(samples, {
   // 而是**每根频点各自的时间轨迹**：取滑动窗内的最小值（窗口内该频点最安静的瞬间≈噪声），
   // 再乘 margin 当噪声估计。这样"和琴声一起出现、随时间变化的噪声"才估得准（用户反馈：
   // profile 法在尾声有效，但在弱奏句'还不够'）。
-  noiseMode = 'profile',   // 'profile' | 'slidingMin'
+  // ⚠️ 听感判负（2026-09-14，用户：'二级比一级更糟糕'）：slidingMin（等价 noisereduce 非平稳思路）虽然能把安静段噪声再降 11dB，但会带来比一级更差的听感伪影 —— 默认不启用，只作研究留档。
+  noiseMode = 'profile',   // 'profile'（默认，已过听感）| 'slidingMin'（未过听感）
   minWinSec = 1.5,
   minMargin = 1.4,
 } = {}) {
@@ -121,4 +122,5 @@ export function spectralDenoise(samples, {
   for (let i = 0; i < samples.length; i++) res[i] = norm[i] > 1e-6 ? out[i] / norm[i] : samples[i];
   return res;
 }
+
 
