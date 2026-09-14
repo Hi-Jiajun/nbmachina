@@ -8,7 +8,7 @@
 2. 机器状态：数据包已按**新口径**重装（`pack_structures=196`，3053 音含打击乐）。游戏内先 `/function styx:redo` 换上新谱面，`/function styx:undo` 回退，`/function styx:play/doctor` 自检；精确模式要玩家先敲 `/tick rate 100`。
 3. 已完成：M0 全部、M1 六项、M2-1 自研音色、M2-2 通用化、**M2-3 路径收口收尾 + 谱面口径统一**（19/19 步逐字节 A/B 一致；e2e 20 tps 与 100 tps 全绿）。
 4. 进行中：M3-1 内声部/和声层（子代理 `nbforge_inner_voice`）、后端 A Fabric mod 预研（子代理 `nbforge_mod_spike`）。产物按文件到达，不要相信 UI 状态。
-5. 需要用户做的事（攒着一起说）：① 游戏里手动启用 nbforge 资源包；② `/function styx:redo` 换新谱面后**试听**（打击乐+力度是这轮新东西）；③ 自研音色 A/B 与延音听感判定；④ 旧线程里那个还挂着的心跳建议手动删掉。
+5. 需要用户做的事（攒着一起说）：① **把 `build/nbforge_resources.zip` 复制到 `C:\Program Files\PCL2\.minecraft\versions\1.21.10-Fabric 0.19.5\resourcepacks\` 再在游戏里启用**（这步需要管理员：14:27 实测 Copy-Item 报 Access denied，是本轮唯一需要你动手的机械动作）；② `/function styx:redo` 换新谱面后**试听**（打击乐 + 新力度是这轮新东西）；③ 自研音色 A/B 与延音听感判定；④ 旧线程 `01a09a43` 里那个还挂着的心跳建议手动删掉。
 
 ## 日志
 
