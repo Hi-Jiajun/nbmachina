@@ -24,7 +24,7 @@
 // 相对路径按 minecraft 工程根解析（`--audio build/audio_nbforge`、`testserver/resourcepacks/...`）。
 import fs from 'node:fs';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { buildZip } from './zip-writer.mjs';
 import {
@@ -94,6 +94,15 @@ export const DEMO_ALIASES = {
   demo_bass: { path: 'bass/a1', attenuation: 32 },
 };
 
+/**
+ * 静音采样（后端 A 用）：`minecraft:sounds.json` 里没有 `intentionally_empty` 这种现成静音事件
+ * （实测 1.21.10 的 1770 个键里没有它，用它只会刷 "Unable to play empty soundEvent" 警告），
+ * 所以这里随包发一个 0.05 秒的静音 ogg。mod 在 `#hifi=1`（自研音色模式）时把音符盒的声音
+ * 替换成 `nbforge:silent` —— 粒子/动画照旧，但不再有原版 harp/bass 声音跟自研音色叠在一起。
+ */
+export const SILENT_EVENT = 'silent';
+const SILENT_OGG = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'synth', 'assets', 'silent.ogg');
+
 /** sounds.json：一个采样一条事件；name 用相对路径（命名空间 = sounds.json 所在目录的命名空间 nbforge） */
 export function buildSoundsJson(entries) {
   const out = {};
@@ -105,6 +114,7 @@ export function buildSoundsJson(entries) {
   for (const [key, a] of Object.entries(DEMO_ALIASES)) {
     out[key] = { sounds: [{ name: a.path, stream: false, attenuation_distance: a.attenuation }] };
   }
+  out[SILENT_EVENT] = { sounds: [{ name: SILENT_EVENT, stream: false }] };
   return out;
 }
 
@@ -144,6 +154,10 @@ export function buildResourcePack({
     { path: 'assets/nbforge/sounds.json', data: soundsBuf },
   ];
   let bytes = 0;
+  // 静音采样：与 148 个合成采样一起进包（mod 的 #hifi=1 模式用它替换原版音符盒声音）
+  const silentData = fs.readFileSync(SILENT_OGG);
+  fs.writeFileSync(path.join(soundsDir, `${SILENT_EVENT}.ogg`), silentData);
+  zipEntries.push({ path: `assets/nbforge/sounds/${SILENT_EVENT}.ogg`, data: silentData });
   for (const e of entries) {
     const rel = `assets/nbforge/sounds/${e.timbre}/${noteFileName(e.midi)}.${ext}`;
     const dir = path.join(soundsDir, e.timbre);
@@ -164,7 +178,7 @@ export function buildResourcePack({
     copiedTo = copyTo;
   }
   return {
-    sounds: entries.length, bytes, zipBytes: zip.length, outDir, zipPath, copiedTo, missing,
+    sounds: entries.length, extraSamples: 1, bytes, zipBytes: zip.length, outDir, zipPath, copiedTo, missing,
     packFormat: PACK_FORMAT,
     perTimbre: TIMBRES.map((t) => ({ timbre: t, semitones: registerSize(t) })),
   };

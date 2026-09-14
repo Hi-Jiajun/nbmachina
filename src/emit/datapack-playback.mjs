@@ -81,6 +81,10 @@ for (const mode of MODES) {
     for (const t of bucket.ticks) {
       const list = groups.get(t);
       const guard = `execute if score #t styx.t matches ${t} run`;
+      // `#hifi=1`（自研音色模式）时**不触发**音符盒：否则原版 harp/bass 与数据包播的自研音色叠在一起
+      // （玩家实测"音符盒还是原版声音"就是这个叠加）。条件必须写在 `run` **之前**——
+      // `execute ... run unless ... run ...` 是非法语法，会让整个函数加载失败（实测 331 条 Failed to load）。
+      const guardNoHifi = `execute if score #t styx.t matches ${t} unless score #hifi styx.flag matches 1 run`;
       if (!switched && t >= sw) {
         switched = true;
         out.push(`${guard} forceload remove all`);
@@ -92,8 +96,11 @@ for (const mode of MODES) {
       }
       for (const n of list) {
         const { x, y, z } = pos(n.step, n.pitch);
-        out.push(`${guard} setblock ${x} ${y + 2} ${z} minecraft:redstone_block`);
-        out.push(`${guard} setblock ${x} ${y + 2} ${z} minecraft:air`);
+        // M3-4：`#hifi=1`（自研音色模式）时**不触发**音符盒 —— 否则原版 harp/bass 会和
+        // 数据包播的自研音色叠在一起（玩家实测"音符盒还是原版声音"就是这个叠加）。
+        // 音符粒子由 styx:play/hifi/* 用粒子命令补回来，灯与计数照旧。
+        out.push(`${guardNoHifi} setblock ${x} ${y + 2} ${z} minecraft:redstone_block`);
+        out.push(`${guardNoHifi} setblock ${x} ${y + 2} ${z} minecraft:air`);
         out.push(`${guard} scoreboard players add #hits styx.flag 1`);
         out.push(`${guard} setblock ${x} ${y - 1} ${z} minecraft:redstone_lamp[lit=true]`);
         // 监听模式（#mon=1）：在每位玩家自己脚下再放一遍同样的音，保证多远都听得到

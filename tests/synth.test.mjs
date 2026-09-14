@@ -177,7 +177,7 @@ test('sounds.json：每个采样一条事件，名字与文件一一对应', () 
   const json = buildSoundsJson(entries);
   // 148 个音色事件 + 4 个「后端 A 演示音色」别名（mod 与资源包同命名空间，见 DEMO_ALIASES 注释）
   assert.deepEqual(Object.keys(json).sort(),
-    ['bass_g0', 'bell_cs4', 'demo_bass', 'demo_bell', 'demo_pad', 'demo_strings', 'strings_fs4']);
+    ['bass_g0', 'bell_cs4', 'demo_bass', 'demo_bell', 'demo_pad', 'demo_strings', 'silent', 'strings_fs4']);
   assert.deepEqual(json.strings_fs4.sounds, [
     { name: 'strings/fs4', stream: false, attenuation_distance: 16 },
   ]);
@@ -239,8 +239,11 @@ test('资源包构建：目录结构 + zip 体积 <15MB（用真实采样目录�
   const zip = fs.readFileSync(path.join(out, 'nbforge_resources.zip'));
   assert.ok(zip.length < 15 * 1024 * 1024, `zip ${(zip.length / 1048576).toFixed(2)}MB ≥ 15MB`);
   const names = listZipEntries(zip);
-  assert.equal(names.length, res.sounds + 2, `zip 条目 ${names.length} ≠ 采样 ${res.sounds} + pack.mcmeta + sounds.json`);
+  // 采样数 = 148 个合成采样 + 1 个静音采样（后端 A 替换原版音符盒声音用）
+  assert.equal(names.length, res.sounds + res.extraSamples + 2,
+    `zip 条目 ${names.length} ≠ 采样 ${res.sounds}+${res.extraSamples} + pack.mcmeta + sounds.json`);
   assert.ok(names.includes('pack.mcmeta') && names.includes('assets/nbforge/sounds.json'));
+  assert.ok(names.includes('assets/nbforge/sounds/silent.ogg'), '静音采样必须在包里（mod 替换原版音符盒声音要用）');
   assert.ok(names.every((n) => n === 'pack.mcmeta' || n.startsWith('assets/nbforge/')));
   // sounds.json 里每个 name 都必须指向 zip 里真实存在的文件
   const sounds = JSON.parse(fs.readFileSync(path.join(out, 'nbforge_resources', 'assets/nbforge/sounds.json'), 'utf8'));

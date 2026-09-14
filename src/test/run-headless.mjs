@@ -222,6 +222,16 @@ try {
   // 自研音色链：每个音符一条 /playsound，增量应当等于同一窗口的音符数（接不上线时恒为 0）
   check(`自研音色 每刻触发增量 = 期望 ${exp.hits}`, hifiPlays !== null && Math.abs(hifiPlays - base.hifiPlays) >= exp.hits - 1,
     hifiPlays === null ? '读不到 #hifiPlays' : `实际 ${hifiPlays - base.hifiPlays}`);
+  // M3-4：`#hifi=1` 时数据包**不再触发**音符盒（否则原版声音会与自研音色叠在一起）——
+  // 跑到这里触发器位置还必须是空气（前面的位置抽查是在开播前做的，这里补一个开播后的）
+  const triggerStayedAir = [];
+  for (const c of posChecks) {
+    const before = out.length;
+    await send(`execute if block ${c.x} ${c.y + 2} ${c.z} minecraft:air run say E2E_NOHIFI_TRIG_${triggerStayedAir.length}_OK`, 300);
+    triggerStayedAir.push(out.slice(before).includes(`E2E_NOHIFI_TRIG_${triggerStayedAir.length}_OK`));
+  }
+  check('自研音色模式下音符盒未被触发（触发器位置仍为空气）', triggerStayedAir.every(Boolean),
+    `抽查 ${triggerStayedAir.length} 处：${triggerStayedAir.map((ok) => (ok ? '✔' : '✘')).join('')}`);
   const loadErrors = (out.match(/Failed to load function/g) || []).length;
   check('0 条 Failed to load function', loadErrors === 0, `实际 ${loadErrors}`);
   const msptBudget = TPS === 100 ? 10 : 50;

@@ -14,6 +14,15 @@ import net.minecraft.util.Identifier;
 public final class NbforgeSounds {
 	private static final String MOD_NAMESPACE = NbforgeMod.MOD_ID;
 
+	/**
+	 * 静音事件（资源包里的 0.05s 静音采样）。
+	 *
+	 * <p>**目前没有调用方**：原本给 mixin 版"替换掉原版音符盒声音"用，但那版卡在 refmap
+	 * （Loom 没生成 → 注入不生效，见 docs/M3-4-report.md §5）；现在的做法是数据包在 `#hifi=1`
+	 * 时干脆不触发音符盒。保留它是为了 mixin 路线修好后能直接接上（届时可恢复音符粒子由方块本身生成）。
+	 */
+	public static final Identifier SILENT_ID = Identifier.of(MOD_NAMESPACE, "silent");
+
 	private NbforgeSounds() {
 	}
 

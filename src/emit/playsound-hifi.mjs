@@ -25,6 +25,7 @@ import {
 import {
   REFERENCE_VEL, REGISTERS, eventIdOf, hasEvent, midiFromRow, noteFileName,
 } from '../synth/voices.mjs';
+import { makePos } from './layout-pos.mjs';
 import { resolvePaths } from '../core/paths.mjs';
 
 // M2-3：build 目录与数据包目录都走 paths.mjs
@@ -214,6 +215,10 @@ export function buildHifiFunctions(notes, opts = {}) {
   const { events, stats, plan } = planHifi(notes, opts);
   const fn = new Map();
   const counters = Object.values(TIMBRE_COUNTER);
+  // 音符粒子的坐标：`#hifi=1` 时数据包不再触发音符盒（否则原版声音会叠上来），
+  // 所以视觉上由这里补一发 `particle minecraft:note`（位置与 vanilla 的 addParticle 一致）
+  const profile = opts.profile ?? JSON.parse(fs.readFileSync(P.profile, 'utf8'));
+  const pos = makePos(profile);
 
   fn.set('play/monitor_hifi_on', [
     '# 由 src/emit/playsound-hifi.mjs 生成：高保真监听开（自研音色，需要 nbforge 资源包）',
@@ -278,6 +283,10 @@ export function buildHifiFunctions(notes, opts = {}) {
         out.push(`${guard} run scoreboard players add #hifiPlays styx.hifi ${plays.length}`);
         for (const e of plays) {
           if (e.timbre) out.push(`${guard} run scoreboard players add ${TIMBRE_COUNTER[e.timbre]} styx.hifi 1`);
+          const p = pos(e.step, e.row);
+          // 语法：particle <name> <pos> <delta> <speed> <count> [mode]（漏写 count 会让整个函数加载失败）
+          out.push(`${guard} run particle minecraft:note ${p.x + 0.5} ${p.y + 1.2} ${p.z + 0.5} `
+            + `${(e.row / 24).toFixed(3)} 0 0 1 1 normal`);
           out.push(`${guard} as @a at @s run playsound ${e.event} master @s ~ ~ ~ ${e.volume} ${e.pitch}`);
         }
       }
