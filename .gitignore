@@ -3,3 +3,5 @@ node_modules/
 out/
 testserver/
 .DS_Store
+# 预研工具链/临时产物（实际位于仓库外 Documents/minecraft/_toolchain，这里兜底）
+_toolchain/

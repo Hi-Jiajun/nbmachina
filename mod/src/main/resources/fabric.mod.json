@@ -1,0 +1,23 @@
+{
+	"schemaVersion": 1,
+	"id": "nbforge",
+	"version": "${version}",
+	"name": "nbforge backend A",
+	"description": "nbforge 后端 A 骨架：自定义音色事件 + 独立力度/延音 + 服务端命令 /nbforge",
+	"authors": [
+		"nbforge"
+	],
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"main": [
+			"net.nbforge.mod.NbforgeMod"
+		]
+	},
+	"depends": {
+		"fabricloader": ">=0.19.5",
+		"minecraft": "~1.21.10",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}

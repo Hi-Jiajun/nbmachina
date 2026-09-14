@@ -1,0 +1,14 @@
+// 国内网络补充脚本（可选）：把 Maven Central 镜像插到所有仓库最前面。
+//
+// 背景：本机 JDK 21 + Gradle 9.5.1 走代理访问 libraries.minecraft.net 时
+// TLS 握手被中断（curl 同一 URL 正常，HTTP 200），导致 :remapJar 拿不到 LWJGL natives。
+// 用国内镜像兜住这些「Maven Central 上也有」的 Minecraft 运行库即可绕过。
+//
+// 用法：
+//   .\gradlew.bat build --init-script gradle-mirror.init.gradle
+beforeProject { project ->
+	project.repositories.maven {
+		name = 'cnCentralMirror'
+		url = 'https://repo.huaweicloud.com/repository/maven/'
+	}
+}
