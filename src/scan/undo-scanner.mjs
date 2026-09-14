@@ -19,17 +19,21 @@ import crypto from 'node:crypto';
 import { makePos } from '../emit/layout-pos.mjs';
 import { createRegionReader } from './region-nbt.mjs';
 import { parseScanLog, buildUndoArtifacts, formatStateToken, VERSION } from '../emit/undo-snapshot.mjs';
+import { resolvePaths, resolveExternal } from '../core/paths.mjs';
 
-const B = 'C:/Users/hiliang/Documents/minecraft/build';
-const TS = 'C:/Users/hiliang/Documents/minecraft/testserver';
-const JAVA = 'C:/Users/hiliang/AppData/Roaming/.minecraft/runtime/java-runtime-delta/bin/java.exe';
+// M2-3：build/测试服/java 都从 paths.mjs 取（--build/--server/--java 或对应环境变量可覆盖）
+const P = resolvePaths();
+const EX = resolveExternal();
+const B = P.build;
+const TS = EX.server;
+const JAVA = EX.java;
 
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 // 相对路径按"工作区根"（build/ 的上一级）解析：任务里写的 `build/styx_helix_machine.csv` 就是这个意思
 const WORKSPACE = path.resolve(B, '..');
 const resolveIn = (p) => (path.isAbsolute(p) ? p : path.resolve(WORKSPACE, p));
-const NOTES = resolveIn(opt('notes', `${B}/styx_helix_machine.csv`));
+const NOTES = resolveIn(opt('notes', P.machine));
 const TERRAIN = argv.includes('--terrain');
 const DAMAGE = +(opt('damage', '3'));
 const SWEEP_CHUNK = +(opt('sweep-chunk', '400'));

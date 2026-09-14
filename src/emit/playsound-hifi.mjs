@@ -25,9 +25,12 @@ import {
 import {
   REFERENCE_VEL, REGISTERS, eventIdOf, hasEvent, midiFromRow, noteFileName,
 } from '../synth/voices.mjs';
+import { resolvePaths } from '../core/paths.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
-const DP = `${BUILD}/styx_build/data/styx`;
+// M2-3：build 目录与数据包目录都走 paths.mjs
+const P = resolvePaths();
+const BUILD = P.build;
+const DP = P.datapackDir;
 
 /** 计数口径的自述（报告与测试都引用它）：独立自增 + 播放中同步 #t */
 export const HIFI_SYNC_STEPS = [
@@ -314,7 +317,7 @@ function main() {
   const resolvePath = (p) => (path.isAbsolute(p) ? p : path.resolve(BUILD, '..', p));
   const notesCsv = resolvePath(opt('notes', fs.existsSync(`${BUILD}/machine_pipeline.csv`)
     ? `${BUILD}/machine_pipeline.csv`
-    : `${BUILD}/styx_helix_machine.csv`));
+    : P.machine));
   const bassOctave = Number(opt('bass-octave', 1));
   const inner = opt('inner', 'bell');
   const vel = Number(opt('vel', REFERENCE_VEL));

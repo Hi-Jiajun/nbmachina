@@ -3,12 +3,15 @@
 //  ② 时间：step → tick = step×2（150 BPM，正好是 MC 的整数刻网格）——修掉 2.4 刻的抖动
 //  ③ 力度：从原曲 WAV 的对应位置取响度（0.35~1.0）——监听/后续模组用
 import fs from 'node:fs';
+import { resolvePaths } from '../core/paths.mjs';
 
-const B = 'C:/Users/hiliang/Documents/minecraft/build';
-const DP = `${B}/styx_build/data/styx/function`;
+// M2-3：路径走 paths.mjs
+const P = resolvePaths();
+const B = P.build;
+const DP = P.functionsDir;
 
 /* ---------- 读旧 CSV ---------- */
-const rows = fs.readFileSync(`${B}/styx_helix_notes.csv`, 'utf8').trim().split(/\r?\n/).slice(1)
+const rows = fs.readFileSync(P.notes, 'utf8').trim().split(/\r?\n/).slice(1)
   .map((l) => { const [step, time, instr, midi, pitch, shift] = l.split(','); return { step: +step, t: +time, instr, midi: +midi, oldPitch: +pitch, shift: +(shift ?? 0) }; });
 console.log('原始音符:', rows.length);
 
@@ -40,7 +43,7 @@ console.log(`时间轴: 原曲 ${SEC_PER_STEP} 秒/步（125 BPM），播放刻�
 console.log(`         全长 ${(lastTick / PLAY_TPS / 60).toFixed(2)} 分钟（原曲 4:41），总刻数 ${lastTick}`);
 
 /* ---------- ③ 力度：从原曲 WAV 取响度 ---------- */
-const wav = fs.readFileSync(`${B}/styx_helix_full.wav`);
+const wav = fs.readFileSync(P.audio);
 let q = 12, fmt = null, dataOff = 0, dataLen = 0;
 while (q + 8 <= wav.length) {
   const id = wav.toString('ascii', q, q + 4), size = wav.readUInt32LE(q + 4);
@@ -72,7 +75,7 @@ console.log('力度分布示例:', rows.slice(0, 8).map((r) => r.vol.toFixed(2))
 
 /* ---------- 写 v3 CSV ---------- */
 rows.sort((a, b) => a.tick - b.tick || a.pitch - b.pitch);
-fs.writeFileSync(`${B}/styx_helix_notes_v3.csv`,
+fs.writeFileSync(P.notesV3,
   'step,tick,time_seconds,instrument,midi,row,volume\n' +
   rows.map((r) => `${r.step},${r.tick},${r.time150.toFixed(3)},${r.voice},${r.midi},${r.pitch},${r.vol.toFixed(3)}`).join('\n') + '\n', 'utf8');
 
@@ -84,7 +87,7 @@ const b0 = rows.filter((r) => r.voice === 'bass').slice(0, 2);
 console.log(`  新音高 ${b0[0].pitch} → ${b0[1].pitch}（差 ${Math.abs(b0[1].pitch - b0[0].pitch)} 个半音）`);
 
 /* ---------- 生成"改写音符层"的函数 ---------- */
-const profile = JSON.parse(fs.readFileSync(`${B}/single_row_profile.json`, 'utf8'));
+const profile = JSON.parse(fs.readFileSync(P.profile, 'utf8'));
 const lines = ['# 把机器上的音符按 v3 数据重排（移动到新音高行 + 更新音色/音高，清掉旧位置）'];
 let moved = 0;
 for (const r of rows) {

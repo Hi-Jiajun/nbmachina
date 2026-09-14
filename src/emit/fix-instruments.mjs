@@ -7,11 +7,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { resolvePaths } from '../core/paths.mjs';
 
-const B = 'C:/Users/hiliang/Documents/minecraft/build';
-const DIR = `${B}/styx_build/data/styx/structure`;
-const DP = `${B}/styx_build/data/styx/function`;
-const BAK = `${B}/structures_before_instrument_fix`;
+// M2-3：结构/函数/备份目录都走 paths.mjs
+const P = resolvePaths();
+const B = P.build;
+const DIR = P.structuresDir;
+const DP = P.functionsDir;
+const BAK = P.file('structures_before_instrument_fix');
 const HARP_BLOCK = 'minecraft:sand';        // 钢琴
 const BASS_BLOCK = 'minecraft:oak_planks';  // 贝斯
 
@@ -103,7 +106,7 @@ for (let k = 0; k < 49; k++) {
 console.log(`结构已修：${fixed} 个音符下方的甲板换成了 sand/oak_planks（备份在 ${BAK}）`);
 
 /* ---------- 2) 生成就地修复函数（按 CSV，含音高） ---------- */
-const csv = fs.readFileSync(`${B}/styx_helix_notes.csv`, 'utf8').trim().split(/\r?\n/).slice(1);
+const csv = fs.readFileSync(P.notes, 'utf8').trim().split(/\r?\n/).slice(1);
 const lines = ['# 就地修复：把每颗音符下方那格换成对应乐器方块，并重写音符盒的 instrument/note'];
 const seen = new Set();
 let n = 0;

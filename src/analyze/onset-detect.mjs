@@ -22,6 +22,7 @@
 import fs from 'node:fs';
 
 import { fftInPlace, hannWindow, readWav, rmsOf, sliceWindow } from './dsp.mjs';
+import { resolvePaths } from '../core/paths.mjs';
 
 /** 默认频带：一条带 ≈ 一个倍频程；帧率低频 20ms / 中频 10ms / 高频 5ms（多分辨率） */
 export const DEFAULT_ONSET_BANDS = [
@@ -493,15 +494,15 @@ const invokedDirectly =
   process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('src/analyze/onset-detect.mjs');
 
 if (invokedDirectly) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
   const argv = process.argv.slice(2);
+  const P = resolvePaths({ argv });
   const args = {};
   for (let i = 0; i < argv.length; i++) {
     if (!argv[i].startsWith('--')) continue;
     const next = argv[i + 1];
     args[argv[i].replace(/^--/, '')] = next === undefined || next.startsWith('--') ? true : next;
   }
-  const audioPath = args.audio ?? `${BUILD}/styx_helix_full.wav`;
+  const audioPath = args.audio ?? P.audio;
   const outPath = typeof args.out === 'string' ? args.out : null;
   const tolSec = Number(args.tol ?? 0.05);
   const notesPath = typeof args.notes === 'string' ? args.notes : null;

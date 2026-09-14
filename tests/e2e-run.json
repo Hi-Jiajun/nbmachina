@@ -1,11 +1,11 @@
 {
-  "at": "2026-09-13T20:06:36.384Z",
-  "mode": "lo",
-  "tps": 20,
+  "at": "2026-09-14T06:26:00.363Z",
+  "mode": "hi",
+  "tps": 100,
   "ticks": 600,
-  "notesCsv": "C:\\Users\\hiliang\\Documents\\minecraft\\build\\machine_pipeline.csv",
+  "notesCsv": "C:/Users/hiliang/Documents/minecraft/build/machine_pipeline.csv",
   "baseline": {
-    "t": 15,
+    "t": 79,
     "on": 1,
     "hits": 7,
     "mh": 4,
@@ -44,22 +44,22 @@
     }
   ],
   "expected": {
-    "hits": 295,
-    "bass": 185,
-    "harp": 110
+    "hits": 28,
+    "bass": 8,
+    "harp": 20
   },
   "actual": {
-    "t": 616,
-    "hits": 302,
-    "mh": 114,
-    "mb": 188,
-    "mspt": 7.4
+    "t": 680,
+    "hits": 35,
+    "mh": 24,
+    "mb": 11,
+    "mspt": 6.7
   },
   "delta": {
     "t": 601,
-    "hits": 295,
-    "mh": 110,
-    "mb": 185
+    "hits": 28,
+    "mh": 20,
+    "mb": 8
   },
   "loadErrors": 0,
   "fatal": null,
@@ -70,29 +70,34 @@
       "detail": "首音(x480,z-160,bass9)✔ 首个钢琴(x480,z-154,harp15)✔ 中段(step≈1248)(x1728,z-158,harp11)✔"
     },
     {
-      "name": "function styx:play/start 执行成功（#on = 1）",
+      "name": "function styx:play/start_hi 执行成功（#on = 1）",
       "ok": true,
-      "detail": "#on=1、#t=15"
+      "detail": "#on=1、#t=79"
     },
     {
       "name": "#t 推进 = 600（允许 +1，sprint 收尾）",
       "ok": true,
-      "detail": "基线 15 → 616（+601）"
+      "detail": "基线 79 → 680（+601）"
     },
     {
-      "name": "#hits 增量 = 期望 295（差 ≤1）",
+      "name": "#hits 增量 = 期望 28（差 ≤1）",
       "ok": true,
-      "detail": "实际 295"
+      "detail": "实际 28"
     },
     {
-      "name": "监听 钢琴 增量 = 期望 110",
+      "name": "数据包 100 tps 派发表与 --notes 同源（防装错谱面）",
       "ok": true,
-      "detail": "实际 110"
+      "detail": "数据包 28 vs 谱面 28"
     },
     {
-      "name": "监听 贝斯 增量 = 期望 185",
+      "name": "监听 钢琴 增量 = 期望 20",
       "ok": true,
-      "detail": "实际 185"
+      "detail": "实际 20"
+    },
+    {
+      "name": "监听 贝斯 增量 = 期望 8",
+      "ok": true,
+      "detail": "实际 8"
     },
     {
       "name": "0 条 Failed to load function",
@@ -100,9 +105,9 @@
       "detail": "实际 0"
     },
     {
-      "name": "MSPT ≤ 50（20 tps 的单刻预算）",
+      "name": "MSPT ≤ 10（100 tps 的单刻预算）",
       "ok": true,
-      "detail": "7.4 ms"
+      "detail": "6.7 ms"
     }
   ]
 }

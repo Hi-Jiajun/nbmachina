@@ -78,6 +78,7 @@ const NEW_REPO = posix(REPO);
 /* ------------------------------------------------------------------ 输入 */
 // 参考曲（styx）的全部输入：改造前它们就叫这些名字，新版默认工程（不传 --project）解析出的也是这些名字
 const INPUTS = [
+  'analysis_octave.json',
   'notes_fixed_v3.csv',
   'notes_recovered.csv',
   'onsets_banded.json',
@@ -89,7 +90,12 @@ const INPUTS = [
 // emit 那几个脚本要在**数据包本体**上动手（rm play/、重写 undo/redo、静态自检要能引用到别的函数），
 // 所以把现有 build/styx_build 也整份拷进来当起始状态——两侧都从同一份拷贝开始改。
 const INPUT_DIRS = ['styx_build'];
-// 输入只从真实 build 目录拷一次（之后每侧开跑都用硬链接，既快又不会碰到用户的原始文件）
+// 输入只从真实 build 目录拷一次（之后每侧开跑都从这份"输入库"复制）。
+//
+// 这里**必须真拷贝，不能用硬链接**：`layout/single-row-layout.mjs` 会原地覆盖
+// `<build>/single_row_profile.json`（它既是输入又是输出）。硬链接会把这次改写透过到输入库，
+// 于是第二侧开跑时拿到的已经是第一侧跑完后的剖面 —— 第一版 M2-3 的 A/B 就是这么被污染的
+// （表现为 play/lo|hi 里音符块的 Y 坐标、apply_notes_v3 的 air 行整片不同）。
 const INPUT_STORE = path.join(workDir, 'inputs');
 fs.mkdirSync(INPUT_STORE, { recursive: true });
 for (const f of INPUTS) {
@@ -102,11 +108,18 @@ for (const d of INPUT_DIRS) {
   if (!fs.existsSync(src)) throw new Error(`缺少输入目录 ${src}`);
   fs.cpSync(src, path.join(INPUT_STORE, d), { recursive: true });
 }
+/** 输入库的 sha256 指纹：跑完一侧后核对，任何"输入被改写"都以失败暴露出来，而不是静默污染下一侧 */
+const fileSha = (p) => crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+const inputPrint = () => Object.fromEntries(INPUTS
+  .filter((f) => fs.existsSync(path.join(INPUT_STORE, f)))
+  .map((f) => [f, fileSha(path.join(INPUT_STORE, f))]));
+const INPUT_PRINT0 = inputPrint();
+
 const resetBuild = () => {
   fs.rmSync(BUILD, { recursive: true, force: true });
   fs.mkdirSync(BUILD, { recursive: true });
   for (const f of INPUTS) {
-    try { fs.linkSync(path.join(INPUT_STORE, f), path.join(BUILD, f)); } catch { fs.copyFileSync(path.join(INPUT_STORE, f), path.join(BUILD, f)); }
+    fs.copyFileSync(path.join(INPUT_STORE, f), path.join(BUILD, f));
   }
   for (const d of INPUT_DIRS) fs.cpSync(path.join(INPUT_STORE, d), path.join(BUILD, d), { recursive: true });
 };
@@ -147,6 +160,43 @@ const STEPS = [
   },
   // lint-pack 只吐 stdout：两侧都用"位置参数/--root 指向同一个数据包目录"的方式跑，避免比的是自己刚生成的东西
   { name: '14 emit/lint-pack（静态自检）', script: 'src/emit/lint-pack.mjs', stdoutOnly: true, args: ['{B}/styx_build'], newArgs: ['--root', '{B}/styx_build'] },
+  // ---- M2-3 新收口的脚本（过去完全写死路径，测的就是"接上 paths.mjs 之后产出没变"）----
+  {
+    name: '15 arrange/octave-fix（八度修音）',
+    script: 'src/arrange/octave-fix.mjs',
+    args: ['--notes', '{B}/styx_helix_notes.csv', '--evidence', '{B}/analysis_octave.json',
+      '--out', '{B}/notes_fixed_m23.csv', '--report', '{B}/octave_fix_report.json'],
+    outputs: ['notes_fixed_m23.csv', 'octave_fix_report.json'],
+  },
+  {
+    name: '16 analyze/onset-detect（分频带起音检测）',
+    script: 'src/analyze/onset-detect.mjs',
+    args: ['--out', '{B}/onsets_banded_ab.json'],
+    outputs: ['onsets_banded_ab.json'],
+  },
+  {
+    name: '17 analyze/drums（打击乐检测）',
+    script: 'src/analyze/drums.mjs',
+    args: ['--out', '{B}/drums_ab.json'],
+    outputs: ['drums_ab.json'],
+  },
+  {
+    name: '18 layout/single-row-layout（剖面重算 + 灯位）',
+    script: 'src/layout/single-row-layout.mjs',
+    outputs: [
+      'single_row_profile.json',
+      'styx_build/data/styx/function/flat_build_v2a.mcfunction',
+      'styx_build/data/styx/function/flat_build_v2b.mcfunction',
+      'styx_build/data/styx/function/flat_build_v2c.mcfunction',
+      'styx_build/data/styx/function/lamps_v2.mcfunction',
+      'styx_build/data/styx/function/lamps_v2_clear.mcfunction',
+    ],
+  },
+  {
+    name: '19 emit/playsound-hifi（自研音色派发链）',
+    script: 'src/emit/playsound-hifi.mjs',
+    outputs: ['styx_build/data/styx/function/play'],
+  },
 ];
 
 /* ------------------------------------------------------------------ 工具 */
@@ -225,6 +275,12 @@ const taken = { base: {}, new: {} };
 for (const side of ['base', 'new']) {
   resetBuild();
   for (const step of STEPS) taken[side][step.name] = runStep(step, side);
+  const now = inputPrint();
+  const mutated = Object.keys(INPUT_PRINT0).filter((f) => now[f] !== INPUT_PRINT0[f]);
+  if (mutated.length) {
+    console.error(`✘ ${side} 侧跑完发现输入库被改写：${mutated.join('、')}（A/B 结果不可信，先修脚本再去重）`);
+    process.exit(1);
+  }
 }
 
 const results = [];

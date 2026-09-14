@@ -27,6 +27,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { resolvePaths } from '../core/paths.mjs';
 
 export const VERSION = 1;
 
@@ -318,10 +319,10 @@ const isMain = !!process.argv[1] && path.resolve(process.argv[1]) === path.resol
 if (isMain) {
   const argv = process.argv.slice(2);
   const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
-  const B = 'C:/Users/hiliang/Documents/minecraft/build';
-  const SCAN = opt('scan', `${B}/undo-scan-raw.log`);
-  const DIR = opt('dir', `${B}/styx_build/data/styx/function`);
-  const REPORT = opt('report', `${B}/undo-report.json`);
+  const P = resolvePaths({ argv });   // M2-3：路径走 paths.mjs（--build/--project 可覆盖）
+  const SCAN = opt('scan', P.file('undo-scan-raw.log'));
+  const DIR = opt('dir', P.functionsDir);
+  const REPORT = opt('report', P.file('undo-report.json'));
   const maxLinesPerPart = +(opt('max-lines', '4000'));
   const withWhere = argv.includes('--where');
   const allowIncomplete = argv.includes('--allow-incomplete');

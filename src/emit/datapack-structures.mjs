@@ -4,9 +4,12 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import zlib from 'node:zlib';
+import { resolvePaths } from '../core/paths.mjs';
 
-const DIR = 'C:/Users/hiliang/Documents/minecraft/build/styx_build/data/styx/structure';
-const BAK = 'C:/Users/hiliang/Documents/minecraft/build/structures_26deep_backup';
+// M2-3：结构目录与备份目录都走 paths.mjs
+const P = resolvePaths();
+const DIR = P.structuresDir;
+const BAK = P.file('structures_26deep_backup');
 const DEEP = 32;          // 新的进深
 const SHIFT = 2;          // 音符向南挪几格
 

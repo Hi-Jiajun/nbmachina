@@ -1,7 +1,9 @@
 // 分析录到的 WAV：是不是有声音、有没有音符（起始点）节奏
 import fs from 'node:fs';
+import { resolveExternal } from '../core/paths.mjs';
 
-const file = process.argv[2] ?? 'C:/Users/hiliang/Documents/minecraft/testserver/capture.wav';
+// M2-3：默认录音路径 = 测试服目录下的 capture.wav（--server / NBFORGE_SERVER 可覆盖）
+const file = process.argv[2] ?? `${resolveExternal().server}/capture.wav`;
 if (!fs.existsSync(file)) { console.log('WAV 不存在:', file); process.exit(0); }
 const buf = fs.readFileSync(file);
 console.log('文件大小:', (buf.length / 1024 / 1024).toFixed(2), 'MB');

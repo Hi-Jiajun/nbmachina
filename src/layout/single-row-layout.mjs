@@ -2,10 +2,14 @@
 // 输出：single_row_profile.json（覆盖）+ flat_build_v2a/b/c + lamps_v2
 import fs from 'node:fs';
 import zlib from 'node:zlib';
+import { resolvePaths, resolveExternal } from '../core/paths.mjs';
 
-const B = 'C:/Users/hiliang/Documents/minecraft/build';
-const DP = `${B}/styx_build/data/styx/function`;
-const SAVE = 'C:/Program Files/PCL2/.minecraft/versions/1.21.10-Fabric 0.19.5/saves/Styx Helix';
+// M2-3：路径全部走 paths.mjs（build/工程名/存档目录都能用参数或环境变量覆盖）
+const P = resolvePaths();
+const EX = resolveExternal();
+const B = P.build;
+const DP = P.functionsDir;
+const SAVE = EX.save;
 const MINY = -64;
 
 class R {
@@ -133,7 +137,7 @@ for (const b of batches) {
 }
 
 /* ---------- 重写 lamps_v2 ---------- */
-const csv = fs.readFileSync(`${B}/styx_helix_notes.csv`, 'utf8').trim().split(/\r?\n/).slice(1);
+const csv = fs.readFileSync(P.notes, 'utf8').trim().split(/\r?\n/).slice(1);
 const cellY = new Map();
 for (const line of csv) {
   const [stepS, , , , pitchS] = line.split(',');

@@ -1,8 +1,10 @@
 // 从原曲 WAV 估速度：对 RMS 包络做自相关，找节拍周期
 import fs from 'node:fs';
+import { resolvePaths } from '../core/paths.mjs';
 
-const B = 'C:/Users/hiliang/Documents/minecraft/build';
-const path = `${B}/styx_helix_full.wav`;
+// M2-3：路径收口到 paths.mjs（`--build` / `--project` / 环境变量 / 默认仓库上层 build）
+const P = resolvePaths();
+const path = P.audio;
 const buf = fs.readFileSync(path);
 let q = 12, fmt = null, dataOff = 0, dataLen = 0;
 while (q + 8 <= buf.length) {

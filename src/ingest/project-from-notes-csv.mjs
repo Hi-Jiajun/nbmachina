@@ -18,8 +18,11 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { assertProject, VOICES } from './project-schema.mjs';
+import { resolvePaths } from '../core/paths.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+// M2-3：build 目录与三个默认输入都走 paths.mjs（--build/--project 可覆盖）
+const P = resolvePaths();
+const BUILD = P.build;
 
 /** MC 乐器 → SPEC 声部（harp 是这台机器的旋律声部，bass 是低音声部） */
 export const INSTRUMENT_TO_VOICE = {
@@ -87,8 +90,8 @@ export function buildProject({
   author = 'MYTH & ROID',
   tempo = 125,
   license = 'unknown（仅本地研究，未确认授权）',
-  csvPath = `${BUILD}/styx_helix_notes_v3.csv`,
-  audioPath = `${BUILD}/styx_helix_full.wav`,
+  csvPath = P.notesV3,
+  audioPath = P.audio,
   secPerStep = 0.12,
 } = {}) {
   const notes = csvRowsToProjectNotes(rows, { secPerStep });
@@ -135,9 +138,9 @@ const invokedDirectly =
 
 if (invokedDirectly) {
   const args = parseArgs(process.argv.slice(2));
-  const csvPath = args.csv ?? `${BUILD}/styx_helix_notes_v3.csv`;
-  const outPath = args.out ?? `${BUILD}/project.json`;
-  const audioPath = args.audio ?? `${BUILD}/styx_helix_full.wav`;
+  const csvPath = args.csv ?? P.notesV3;
+  const outPath = args.out ?? P.file('project.json');
+  const audioPath = args.audio ?? P.audio;
   const rows = parseNotesCsv(fs.readFileSync(csvPath, 'utf8'));
   const project = buildProject({
     rows,

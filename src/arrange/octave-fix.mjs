@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
+import { resolvePaths } from '../core/paths.mjs';
 import {
   DEFAULT_CONFIG,
   readNotesCsv,
@@ -221,18 +222,18 @@ const invokedDirectly =
   process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url;
 
 if (invokedDirectly) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
   const argv = process.argv.slice(2);
+  const P = resolvePaths({ argv });
   const args = {};
   for (let i = 0; i < argv.length; i++) {
     if (!argv[i].startsWith('--')) continue;
     const next = argv[i + 1];
     args[argv[i].replace(/^--/, '')] = next === undefined || next.startsWith('--') ? true : next;
   }
-  const notesPath = args.notes ?? `${BUILD}/styx_helix_notes.csv`;
-  const evPath = args.evidence ?? `${BUILD}/analysis_octave.json`;
-  const outPath = args.out ?? `${BUILD}/notes_fixed.csv`;
-  const reportPath = args.report ?? `${BUILD}/octave_fix_report.json`;
+  const notesPath = args.notes ?? P.notes;
+  const evPath = args.evidence ?? P.file('analysis_octave.json');
+  const outPath = args.out ?? P.file('notes_fixed.csv');
+  const reportPath = args.report ?? P.file('octave_fix_report.json');
 
   const evidence = JSON.parse(fs.readFileSync(evPath, 'utf8'));
   const csvText = fs.readFileSync(notesPath, 'utf8');

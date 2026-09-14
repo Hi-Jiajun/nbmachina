@@ -27,8 +27,10 @@ import { dominantPeak, spectralCentroid } from './spectrum.mjs';
 import {
   REFERENCE_VEL, REGISTERS, TIMBRES, listRenderJobs, noteFileName, registerSize, renderVoice,
 } from './voices.mjs';
+import { resolvePaths } from '../core/paths.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+// M2-3：build 目录走 paths.mjs（输出目录仍是 `--out`，相对路径按 minecraft 工程根解析）
+const BUILD = resolvePaths().build;
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const flag = (n) => argv.includes(`--${n}`);

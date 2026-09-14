@@ -10,20 +10,25 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tickOfStep, buildTickGroups } from '../emit/tick-map.mjs';
 import { makePos, DECK_BLOCK, noteBlockOf } from '../emit/layout-pos.mjs';
+import { resolvePaths, resolveExternal } from '../core/paths.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(HERE, '../..');
-const B = 'C:/Users/hiliang/Documents/minecraft/build';
-const TS = 'C:/Users/hiliang/Documents/minecraft/testserver';
-const SRC = `${B}/styx_build`;
-const JAVA = 'C:/Users/hiliang/AppData/Roaming/.minecraft/runtime/java-runtime-delta/bin/java.exe';
+// M2-3：build/工程名/测试服/java 全部走 paths.mjs（--build/--project/--server/--java 可覆盖）
+const P = resolvePaths();
+const EX = resolveExternal();
+const B = P.build;
+const TS = EX.server;
+const SRC = P.packDir;
+const JAVA = EX.java;
 
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const TICKS = +(opt('ticks', '600'));
 const MODE = opt('mode', 'lo');
 const TPS = MODE === 'hi' ? 100 : 20;
-const NOTES_CSV = opt('notes', `${B}/styx_helix_notes_v3.csv`);
+// 口径修正（M2-3）：默认用 arrange-all 的最终机器谱面；末尾还有一条"数据包与谱面同源"的护栏
+const NOTES_CSV = opt('notes', P.machineScore);
 const LOG = `${TS}/e2e-${MODE}.log`;
 const PROPS = `${TS}/server.properties`;
 
@@ -48,6 +53,27 @@ function expectedInRange(fromTick, toTick) {
     for (const n of list) { hits++; if (n.instr === 'bass') bass++; else harp++; }
   }
   return { hits, bass, harp };
+}
+
+/**
+ * 数据包里**实际派发**的触发数（同一区间口径）。用来抓"装错谱面"这类静默故障：
+ * 数据包里的 `play/<mode>/bNNN` 是生成时写死的，和 `--notes` 给的谱面对不上就说明两者不同源
+ * （2026-09-14 实测：数据包装的是 v3 谱面 279 音，e2e 按 machine_pipeline 期望 295 音 → 差 16）。
+ */
+function packTriggersInRange(fromTick, toTick) {
+  const dir = `${SRC}/data/styx/function/play/${MODE}`;
+  if (!fs.existsSync(dir)) return null;
+  let n = 0;
+  for (const f of fs.readdirSync(dir)) {
+    if (!/^b\d+\.mcfunction$/.test(f)) continue;
+    for (const line of fs.readFileSync(`${dir}/${f}`, 'utf8').split('\n')) {
+      const m = line.match(/^execute if score #t styx\.t matches (\d+) run scoreboard players add #hits styx\.flag 1$/);
+      if (!m) continue;
+      const t = +m[1];
+      if (t > fromTick && t <= toTick) n++;
+    }
+  }
+  return n;
 }
 
 /* ---------- 同步数据包 ---------- */
@@ -139,6 +165,9 @@ try {
     posChecks.map((c) => `${c.label}(x${c.x},z${c.z},${c.instr}${c.row})${c.ok ? '✔' : '✘'}`).join(' '));
 
   // 开播 + 确定性步进
+  // 监听计数（#mh/#mb）只在 #mon=1 时累加：这里显式打开，避免"靠存档里残留的 #mon 状态"
+  // 导致下面两条断言随世界状态飘（实测出现过增量恒 0 的假失败）。
+  await send('function styx:play/monitor_on', 400);
   if (MODE === 'hi') {
     await send('tick rate 100', 800); // 控制台是权限等级 4，只有玩家聊天里受等级 3 限制的 /tick 能在控制台做
   }
@@ -180,6 +209,10 @@ try {
   const advanced = tick !== null ? tick - base.t : null;
   check(`#t 推进 = ${TICKS}（允许 +1，sprint 收尾）`, advanced === TICKS || advanced === TICKS + 1, `基线 ${base.t} → ${tick}（+${advanced}）`);
   check(`#hits 增量 = 期望 ${exp.hits}（差 ≤1）`, hits !== null && Math.abs((hits - base.hits) - exp.hits) <= 1, `实际 ${hits - base.hits}`);
+  const packCount = packTriggersInRange(base.t, tick ?? base.t);
+  check(`数据包 ${MODE === 'hi' ? '100 tps' : '20 tps'} 派发表与 --notes 同源（防装错谱面）`,
+    packCount !== null && Math.abs(packCount - exp.hits) <= 1,
+    packCount === null ? '读不到数据包派发表' : `数据包 ${packCount} vs 谱面 ${exp.hits}`);
   if (mh !== null) check(`监听 钢琴 增量 = 期望 ${exp.harp}`, Math.abs((mh - base.mh) - exp.harp) <= 1, `实际 ${mh - base.mh}`);
   if (mb !== null) check(`监听 贝斯 增量 = 期望 ${exp.bass}`, Math.abs((mb - base.mb) - exp.bass) <= 1, `实际 ${mb - base.mb}`);
   const loadErrors = (out.match(/Failed to load function/g) || []).length;

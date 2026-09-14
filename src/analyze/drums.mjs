@@ -25,6 +25,7 @@ import fs from 'node:fs';
 
 import { fftInPlace, hannWindow, readWav, rmsOf, sliceWindow } from './dsp.mjs';
 import { bandFluxes, mergeBandPeaks, pickBandPeaks } from './onset-detect.mjs';
+import { resolvePaths } from '../core/paths.mjs';
 
 export const PERCUSSION_KINDS = ['kick', 'snare', 'hat'];
 
@@ -353,15 +354,15 @@ const invokedDirectly =
   process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('src/analyze/drums.mjs');
 
 if (invokedDirectly) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
   const argv = process.argv.slice(2);
+  const P = resolvePaths({ argv });
   const args = {};
   for (let i = 0; i < argv.length; i++) {
     if (!argv[i].startsWith('--')) continue;
     const next = argv[i + 1];
     args[argv[i].replace(/^--/, '')] = next === undefined || next.startsWith('--') ? true : next;
   }
-  const audioPath = args.audio ?? `${BUILD}/styx_helix_full.wav`;
+  const audioPath = args.audio ?? P.audio;
   const outPath = typeof args.out === 'string' ? args.out : null;
 
   const t0 = Date.now();

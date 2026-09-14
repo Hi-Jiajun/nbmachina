@@ -671,7 +671,8 @@ if (invokedDirectly) {
     const next = argv[i + 1];
     args[argv[i].replace(/^--/, '')] = next === undefined || next.startsWith('--') ? true : next;
   }
-  const notesPath = args.notes ?? P.notesV3;
+  // 口径修正（M2-3）：默认评分对象 = arrange-all 的最终机器谱面（过去默认 v3，评的不是真正会响的那份）
+  const notesPath = args.notes ?? P.machineScore;
   const wavPath = args.audio ?? P.audio;
   const outPath = args.out ?? P.file('score_report.json');
   const velPath = typeof args.velocity === 'string' ? args.velocity : null;

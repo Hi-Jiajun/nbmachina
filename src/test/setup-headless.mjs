@@ -1,9 +1,13 @@
 // 用 Node 搭建无头测试服（避免 PowerShell here-string 的坑）
 import fs from 'node:fs';
 import path from 'node:path';
+import { resolvePaths, resolveExternal } from '../core/paths.mjs';
 
-const DIR = 'C:/Users/hiliang/Documents/minecraft/testserver';
-const SRC = 'C:/Users/hiliang/Documents/minecraft/build/styx_build';
+// M2-3：测试服目录与数据包目录都从 paths.mjs 取（--server/--build 可覆盖）
+const P = resolvePaths();
+const EX = resolveExternal();
+const DIR = EX.server;
+const SRC = P.packDir;
 const DST = path.join(DIR, 'world/datapacks/styx_build');
 
 fs.mkdirSync(DIR, { recursive: true });

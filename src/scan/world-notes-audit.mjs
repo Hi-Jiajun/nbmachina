@@ -1,10 +1,14 @@
 // 逐格扫存档里的音符盒：和 CSV 对账，找出「音色不对」和「CSV 里没有」的音符格，生成针对性修复函数
 import fs from 'node:fs';
 import zlib from 'node:zlib';
+import { resolvePaths, resolveExternal } from '../core/paths.mjs';
 
-const SAVE = 'C:/Program Files/PCL2/.minecraft/versions/1.21.10-Fabric 0.19.5/saves/Styx Helix';
-const B = 'C:/Users/hiliang/Documents/minecraft/build';
-const DP = `${B}/styx_build/data/styx/function`;
+// M2-3：存档目录 / build 目录 / 数据包函数目录都走 paths.mjs
+const P = resolvePaths();
+const EX = resolveExternal();
+const SAVE = EX.save;
+const B = P.build;
+const DP = P.functionsDir;
 
 class R {
   constructor(d) { this.d = d; this.p = 0; }
@@ -88,7 +92,7 @@ for (let cx = 30; cx <= 105; cx++) {
 console.log('世界里机器区域的音符盒格数:', world.size);
 
 /* CSV 的期望值 */
-const csv = fs.readFileSync(`${B}/styx_helix_notes.csv`, 'utf8').trim().split(/\r?\n/).slice(1);
+const csv = fs.readFileSync(P.notes, 'utf8').trim().split(/\r?\n/).slice(1);
 const expect = new Map(); // "x,z" -> {inst, note}
 for (const line of csv) {
   const [stepS, , instr, , pitchS] = line.split(',');

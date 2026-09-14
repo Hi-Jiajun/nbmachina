@@ -14,7 +14,8 @@ const P = resolvePaths();
 const DP = P.functionsDir;
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
-const NOTES = opt('notes', P.machine);
+// 口径修正（M2-3）：摆块也要用 arrange-all 的最终机器谱面，否则世界里的音符盒与派发表不同源
+const NOTES = opt('notes', P.machineScore);
 const OLD = opt('old', P.notesV3);
 
 const profile = JSON.parse(fs.readFileSync(P.profile, 'utf8'));

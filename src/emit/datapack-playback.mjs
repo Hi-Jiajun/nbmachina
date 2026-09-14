@@ -24,7 +24,9 @@ const DP = P.datapackDir;
 
 const argv = process.argv.slice(2);
 const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i >= 0 ? argv[i + 1] : dflt; };
-const NOTES_CSV = opt('notes', P.notesV3);
+// 口径修正（M2-3）：默认吃 arrange-all 的最终机器谱面。过去默认 notes_v3（**没经过编排**的那一版），
+// 结果 M2-1 轮次重生成数据包时把力度/延音/打击乐全丢了、e2e 触发数对不上（279 vs 295）。
+const NOTES_CSV = opt('notes', P.machineScore);
 
 // 方案 A：单排（49 段一条线），逐段高度从 single_row_profile.json 读
 const ROWS_PROFILE = JSON.parse(fs.readFileSync(P.profile, 'utf8'));

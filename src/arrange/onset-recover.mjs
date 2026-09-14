@@ -33,6 +33,7 @@ import { DEFAULT_ONSET_DETECT_CONFIG, detectBandOnsets, legacyOnsets } from '../
 import { DEFAULT_CURSORS, foldOne } from './fold.mjs';
 import { candidatePeak, energyToAmplitude } from './pitch-fix.mjs';
 import { measureVelocity, velocityConfig } from './velocity.mjs';
+import { resolvePaths } from '../core/paths.mjs';
 
 export { readNotesCsv, readWav };
 
@@ -368,18 +369,18 @@ const invokedDirectly =
   process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('src/arrange/onset-recover.mjs');
 
 if (invokedDirectly) {
-  const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
   const argv = process.argv.slice(2);
+  const P = resolvePaths({ argv });
   const args = {};
   for (let i = 0; i < argv.length; i++) {
     if (!argv[i].startsWith('--')) continue;
     const next = argv[i + 1];
     args[argv[i].replace(/^--/, '')] = next === undefined || next.startsWith('--') ? true : next;
   }
-  const inPath = args.in ?? `${BUILD}/machine_p1.csv`;
-  const outPath = args.out ?? `${BUILD}/notes_recovered.csv`;
-  const reportPath = typeof args.report === 'string' ? args.report : `${BUILD}/onset_recover_report.json`;
-  const wavPath = args.audio ?? `${BUILD}/styx_helix_full.wav`;
+  const inPath = args.in ?? P.file('machine_p1.csv');
+  const outPath = args.out ?? P.file('notes_recovered.csv');
+  const reportPath = typeof args.report === 'string' ? args.report : P.file('onset_recover_report.json');
+  const wavPath = args.audio ?? P.audio;
   const config = {
     ...(args.tol !== undefined ? { tolSec: Number(args.tol) } : {}),
     ...(args.margin !== undefined ? { margin: Number(args.margin) } : {}),

@@ -22,12 +22,16 @@ import { buildZip } from './zip-writer.mjs';
 import {
   REGISTERS, TIMBRES, noteFileName, registerSize, soundPathOf,
 } from '../synth/voices.mjs';
+import { resolvePaths } from '../core/paths.mjs';
 
 export const PACK_FORMAT = 69;
 export const PACK_DESCRIPTION = 'nbforge 自研音色（零第三方采样：Karplus–Strong 拨弦 / 加法铺底 / 模态钟琴）';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
-const MINECRAFT = process.env.NBFORGE_MC ?? 'C:/Users/hiliang/Documents/minecraft';
+// M2-3：build 目录走 paths.mjs
+const P = resolvePaths();
+const BUILD = P.build;
+// minecraft 工程根 = build 目录的上一级（过去写死成 C:/Users/hiliang/Documents/minecraft，可用 NBFORGE_MC 覆盖）
+const MINECRAFT = process.env.NBFORGE_MC ?? path.dirname(BUILD);
 
 /** 客户端资源包目录候选（PCL2 实例；可用 NBFORGE_CLIENT_RESOURCEPACKS 覆盖） */
 export const CLIENT_PACK_DIRS = [

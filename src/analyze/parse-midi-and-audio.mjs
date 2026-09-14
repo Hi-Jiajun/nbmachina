@@ -1,11 +1,14 @@
 // 从 MIDI 解析真实时间轴（含 tempo map）+ 与现有 CSV 配对拿到声部标签
 // 同时读原曲 WAV，取每个音符位置的响度（做力度用）
 import fs from 'node:fs';
+import { resolvePaths } from '../core/paths.mjs';
 
-const B = 'C:/Users/hiliang/Documents/minecraft/build';
+// M2-3：路径走 paths.mjs（midi 槽位 = `<build>/<prefix>_minecraft.mid`）
+const P = resolvePaths();
+const B = P.build;
 
 /* ---------- MIDI ---------- */
-const mid = fs.readFileSync(`${B}/styx_helix_minecraft.mid`);
+const mid = fs.readFileSync(P.midi);
 let p = 0;
 const u16 = (o) => mid.readUInt16BE(o);
 const u32 = (o) => mid.readUInt32BE(o);
@@ -78,7 +81,7 @@ const top = Object.entries(gaps).sort((a, b) => b[1] - a[1]).slice(0, 8);
 console.log('相邻起音间隔(ms) 最常见:', top.map(([k, v]) => `${k}ms×${v}`).join(' '));
 
 /* ---------- 与旧 CSV 配对，取得声部标签 ---------- */
-const csv = fs.readFileSync(`${B}/styx_helix_notes.csv`, 'utf8').trim().split(/\r?\n/).slice(1)
+const csv = fs.readFileSync(P.notes, 'utf8').trim().split(/\r?\n/).slice(1)
   .map((l) => { const [step, time, instr, midi, pitch] = l.split(','); return { step: +step, t: +time, instr, midi: +midi, pitch: +pitch }; });
 console.log('\n旧 CSV: 音符', csv.length);
 let matched = 0;
@@ -100,8 +103,8 @@ console.log('\n各声部音域（原始 MIDI 音高）:');
 for (const [k, r] of Object.entries(byInstr)) console.log(`  ${k}: ${r.n} 音, midi ${r.min}..${r.max}（${(r.max - r.min)} 个半音）`);
 
 /* ---------- 原曲 WAV（力度用） ---------- */
-for (const f of ['styx_helix_full.wav', 'styx_helix_preview.wav']) {
-  const path = `${B}/${f}`;
+for (const path of [P.audio, P.prefixed('preview.wav')]) {
+  const f = path.split('/').pop();
   if (!fs.existsSync(path)) { console.log(`\n${f}: 不存在`); continue; }
   const buf = fs.readFileSync(path);
   let q = 12, fmt = null, dataOff = 0, dataLen = 0;

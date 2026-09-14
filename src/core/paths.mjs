@@ -33,6 +33,38 @@ const PREFIX_ALIASES = { [LEGACY_PROJECT]: LEGACY_PREFIX };
 /** 工程名允许的字符集：会变成文件名前缀，限制成 ASCII 安全集（中文名请在 project.json 的 meta.title 里写） */
 export const PROJECT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
+/* --------------------------------------------------- 机器外部路径（M2-3 收口） */
+// 这三个路径不属于"工程身份"，而是**这台机器/这个启动器**的位置，但过去同样被写死在脚本里，
+// 换启动器、换存档名、换 java 安装就得改代码。现在统一在这里给默认值 + 覆盖入口：
+//   存档目录   `--save <dir>`   / `NBFORGE_SAVE`   （无头验收、方块对账要读世界数据）
+//   测试服目录 `--server <dir>` / `NBFORGE_SERVER` （无头 e2e、undo 扫描）
+//   java 可执行 `--java <path>` / `NBFORGE_JAVA`   （启动器自带的运行时；系统没有 java）
+export const LEGACY_SAVE = 'C:/Program Files/PCL2/.minecraft/versions/1.21.10-Fabric 0.19.5/saves/Styx Helix';
+export const LEGACY_SERVER = 'C:/Users/hiliang/Documents/minecraft/testserver';
+export const LEGACY_JAVA = 'C:/Users/hiliang/AppData/Roaming/.minecraft/runtime/java-runtime-delta/bin/java.exe';
+
+/**
+ * 解析机器外部路径（存档 / 测试服 / java）。
+ * 不传参数时与历史硬编码逐字符一致（与 resolvePaths 同一条约束）。
+ */
+export function resolveExternal({ argv = process.argv.slice(2), env = process.env, cwd = process.cwd() } = {}) {
+  const flag = (n) => {
+    const v = findFlag(argv, n);
+    if (v === true) throw new Error(`--${n} 需要一个路径参数：--${n} <path>`);
+    return v;
+  };
+  const one = (flagName, envName, legacy, kind) => {
+    const raw = nonEmpty(flag(flagName)) ?? nonEmpty(env[envName]) ?? legacy;
+    const abs = path.resolve(cwd, raw).replace(/\\/g, '/');
+    return kind === 'dir' ? abs.replace(/\/+$/, '') : abs;
+  };
+  return {
+    save: one('save', 'NBFORGE_SAVE', LEGACY_SAVE, 'dir'),
+    server: one('server', 'NBFORGE_SERVER', LEGACY_SERVER, 'dir'),
+    java: one('java', 'NBFORGE_JAVA', LEGACY_JAVA, 'file'),
+  };
+}
+
 /** 目录路径归一化：绝对 + 正斜杠 + 无末尾斜杠（Windows 与历史写法同形） */
 export function normalizeDir(p, cwd = process.cwd()) {
   return path.resolve(cwd, p).replace(/\\/g, '/').replace(/\/+$/, '');
@@ -87,6 +119,7 @@ function projectFromManifest(buildDir) {
  *   packDir: string, packDataDir: string, datapackDir: string,
  *   functionsDir: string, structuresDir: string, tagDir: string,
  *   audio: string, notes: string, notesV3: string, machine: string, profile: string,
+ *   midi: string,
  *   file: (name: string) => string, prefixed: (name: string) => string,
  * }}
  */
@@ -125,6 +158,10 @@ export function resolvePaths({ argv = process.argv.slice(2), env = process.env, 
     notes: `${buildDir}/${prefix}_notes.csv`,
     notesV3: `${buildDir}/${prefix}_notes_v3.csv`,
     machine: `${buildDir}/${prefix}_machine.csv`,
+    // 可演奏机器谱面 = `arrange-all` 的**最终产物**（含力度三通道 / 延音 / 打击乐合并），
+    // 是 emit（摆块 + 派发）/ verify / 无头 e2e 的共同口径。不带工程前缀是历史命名（一个 build 目录 = 一首歌）。
+    machineScore: `${buildDir}/machine_pipeline.csv`,
+    midi: `${buildDir}/${prefix}_minecraft.mid`,
     profile: `${buildDir}/single_row_profile.json`,
     file: (n) => `${buildDir}/${n}`,
     prefixed: (n) => `${buildDir}/${prefix}_${n}`,
