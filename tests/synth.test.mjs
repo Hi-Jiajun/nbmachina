@@ -119,8 +119,14 @@ test('bell 是模态（非谐）音色：2.66× 分音在正确的非谐位置�
   // 2.66×（钟的典型非谐分音）：位置对 + 幅度够 + 远高于分音之间的谱底 → 确实是模态合成
   const inharmonic = dominantPeak(s, { minHz: freq * 2.5, maxHz: freq * 2.9 });
   const floor = dominantPeak(s, { minHz: freq * 2.3, maxHz: freq * 2.42 });
+  // 自诊断（2026-09-14）：这条断言曾偶发失败两次，两次都发生在"别的代理正在写同一份仓库/抢资源"的时候，
+  // 且报出的频率（1012.7Hz）落在它自己请求的 [1100,1276]Hz 之外——用当前源码在数学上不可能。
+  // 之后 96 进程 × 8 次迭代的仪器化复现都跑不出来 ⇒ 归因于**并发写文件**而不是数值抖动。
+  // 把 bin/区间一起打进失败信息，下次一眼就能分清"测量问题"还是"文件被换过"。
+  const diag = `（诊断：bin=${inharmonic.bin} 区间=[${Math.ceil(freq * 2.5 / inharmonic.binHz)},${Math.floor(freq * 2.9 / inharmonic.binHz)}]`
+    + ` binHz=${inharmonic.binHz.toFixed(4)} 采样点=${s.length} 谷=${floor.freq.toFixed(1)}Hz）`;
   assert.ok(errPct(inharmonic.freq, freq * 2.66) <= 2,
-    `非谐分音位置不对：${inharmonic.freq.toFixed(1)}Hz ≠ 2.66×${freq}=${(freq * 2.66).toFixed(1)}Hz`);
+    `非谐分音位置不对：${inharmonic.freq.toFixed(1)}Hz ≠ 2.66×${freq}=${(freq * 2.66).toFixed(1)}Hz${diag}`);
   assert.ok(inharmonic.magnitude >= magnitude * 0.01,
     `2.66× 分音不可闻：${inharmonic.magnitude.toFixed(2)} vs 基频 ${magnitude.toFixed(2)}`);
   assert.ok(inharmonic.magnitude >= floor.magnitude * 10,

@@ -45,6 +45,9 @@ export const INNER_CHOICES = ['bell', 'pad', 'strings'];
 // 这里先把别名收拢，未知乐器一律退回 strings 并计入 stats（不静默丢弃）。
 const INSTRUMENT_ALIAS = {
   harp: 'harp', strings: 'harp', violin: 'harp', piano: 'harp', guitar: 'harp', flute: 'harp',
+  // M3-1：内声部层（arrange 的 `--inner on` 会产出 `instrument=inner` + `voiceRole` 列）；
+  // 显式标签优先于"最高行=旋律"的启发式，见 planHifi
+  inner: 'inner',
   bass: 'bass', bass_guitar: 'bass', cello: 'bass',
   bell: 'bell', chime: 'bell', glockenspiel: 'bell', xylophone: 'bell',
   pad: 'pad', synth_pad: 'pad',
@@ -68,10 +71,12 @@ export function parseScoreCsv(text) {
   const iInstr = idx('instrument');
   const iRow = idx('row');
   const iVol = idx('volume');
+  // M3-1 的可选溯源列：有就用，没有就按老口径（启发式）判定声部
+  const iRole = idx('voiceRole');
   if ([iStep, iInstr, iRow, iVol].some((i) => i < 0)) throw new Error(`谱面 CSV 缺列：${header.join(',')}`);
   const notes = lines.slice(1).filter((l) => l.trim()).map((l) => {
     const c = l.split(',');
-    return { step: +c[iStep], instr: c[iInstr], row: +c[iRow], vol: +c[iVol] };
+    return { step: +c[iStep], instr: c[iInstr], row: +c[iRow], vol: +c[iVol], role: iRole >= 0 ? (c[iRole] ?? '') : '' };
   });
   const byInstrument = {};
   for (const n of notes) byInstrument[n.instr] = (byInstrument[n.instr] ?? 0) + 1;
@@ -94,20 +99,26 @@ export function parseScoreCsv(text) {
 export function planHifi(notes, { bassOctave = 1, inner = 'bell' } = {}) {
   if (!INNER_CHOICES.includes(inner)) throw new Error(`--inner 只支持 ${INNER_CHOICES.join('/')}，收到 ${inner}`);
   const fam = (instr) => INSTRUMENT_ALIAS[String(instr ?? '').toLowerCase()] ?? null;
+  /** 显式内声部标签（M3-1）：`instrument=inner` 或 `voiceRole=inner` 都认 */
+  const isInnerLabel = (n) => String(n.instr ?? '').toLowerCase() === 'inner'
+    || String(n.role ?? '').toLowerCase() === 'inner';
 
-  // 同一 step 上"harp 家族"里行号最高的那颗 = 旋律，其余 = 内声部
+  // 旋律判定（两种口径，显式标签优先）：
+  //   ① 有 M3-1 标签的谱面：标了 inner 的就是内声部，旋律 = 其余 harp 家族音
+  //   ② 没有标签的谱面（老口径）：同一 step 上"harp 家族"里行号最高的那颗 = 旋律，其余 = 内声部
   // 未知乐器也按 harp 家族参与旋律判定（它们最终退回 strings，不该被当成内声部）
   const melodyIdx = new Set();
   const best = new Map();
   notes.forEach((n, i) => {
     if ((fam(n.instr) ?? 'harp') !== 'harp') return;
+    if (isInnerLabel(n)) return; // 显式内声部不参与"谁是旋律"的竞争
     const cur = best.get(n.step);
     if (!cur || n.row > cur.row) best.set(n.step, { row: n.row, idx: i });
   });
   for (const { idx } of best.values()) melodyIdx.add(idx);
 
   const stats = {
-    notes: notes.length, synth: 0, vanilla: 0, inner: 0,
+    notes: notes.length, synth: 0, vanilla: 0, inner: 0, innerExplicit: 0, innerHeuristic: 0,
     strings: 0, pad: 0, bell: 0, bass: 0, bassOctaveUp: 0, unknownInstrument: 0, fallback: 0,
     byTimbre: {}, byInstrument: {},
   };
@@ -146,9 +157,14 @@ export function planHifi(notes, { bassOctave = 1, inner = 'bell' } = {}) {
       timbre = 'strings';
       midi = midiFromRow('harp', n.row);
     } else {
-      timbre = inner; // 内声部（同刻非最高音）
+      // 内声部：音色由 --inner 决定（默认 bell），音高按 harp 的 row→midi 映射。
+      // 来源分两种并分别计数：M3-1 的显式标签（instrument=inner / voiceRole=inner），
+      // 或老口径的"同刻非最高音"启发式（没有标签的谱面）。
+      timbre = inner;
       midi = midiFromRow('harp', n.row);
       stats.inner++;
+      if (isInnerLabel(n)) stats.innerExplicit++;
+      else stats.innerHeuristic++;
     }
     if (!hasEvent(timbre, midi)) {
       throw new Error(`${timbre} 未渲染 midi ${midi}（row ${n.row}，音域 ${REGISTERS[timbre].join('..')}）—— `
@@ -333,8 +349,11 @@ function main() {
   const wiring = wiringState();
 
   const byTimbre = Object.entries(stats.byTimbre).map(([k, v]) => `${k} ${v}`).join(' / ');
+  const innerSrc = stats.inner
+    ? `（显式标签 ${stats.innerExplicit} / 启发式 ${stats.innerHeuristic}）`
+    : '';
   console.log(`谱面：${notesCsv}（${scoreStats.notes} 颗音，step ${scoreStats.minStep}..${scoreStats.maxStep}）`);
-  console.log(`音色映射：${byTimbre || '（无）'}；原版打击乐 ${stats.vanilla}；内声部 ${stats.inner}（--inner=${inner}）`);
+  console.log(`音色映射：${byTimbre || '（无）'}；原版打击乐 ${stats.vanilla}；内声部 ${stats.inner}${innerSrc}（--inner=${inner}）`);
   console.log(`贝斯升八度：+${bassOctave}（${stats.bassOctaveUp} 颗；--bass-octave 0 可关闭）`);
   for (const m of plan.modes) {
     console.log(`  ${m.mode}（${m.tps} tps）：${m.ticks} 个时刻 / ${m.buckets} 桶 / ${m.bins} 组 / 单刻 ${m.callsPerTick} 次调用 / 末刻 ${m.lastTick}`);
