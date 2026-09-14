@@ -86,7 +86,17 @@ for (const job of jobs) {
   // 音准自查：读回**文件**再测（不测内存里的浮点，免得"报告里的数"与"交付的件"不是一回事）
   const back = readWav(wavPath);
   const { freq } = dominantPeak(back.samples);
-  const err = errPct(freq, job.freq);
+  // 钢琴类允许"最强峰 = 某个整数倍泛音"：真钢琴的 2/3 次分音常常比基频还强
+  // （实测 C#4 的 2 次分音最强 → 按"最强峰必须等于基频"算会报 100% 的假误差）。
+  // 判据改成：找一个整数 k∈1..10，使 freq/k 落在基频 ±1% 内；其它音色仍按老口径（k=1）。
+  let err = errPct(freq, job.freq);
+  let harmonic = 1;
+  if (job.timbre === 'piano') {
+    for (let k = 1; k <= 10; k++) {
+      const e = errPct(freq / k, job.freq);
+      if (e < err) { err = e; harmonic = k; }
+    }
+  }
   rows.push({
     timbre: job.timbre,
     note: job.note,
@@ -95,6 +105,7 @@ for (const job of jobs) {
     targetHz: job.freq,
     peakHz: freq,
     errPct: err,
+    harmonic,
     durationSec: samples.length / SAMPLE_RATE,
     rms: rms(back.samples),
     peak: peak(back.samples),

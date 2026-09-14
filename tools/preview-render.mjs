@@ -25,6 +25,7 @@ const P = resolvePaths();
 const AUDIO = path.join(P.build, 'audio_nbforge', 'wav');
 
 const MODE = opt('mode', 'true');          // true = 原曲音高；folded = 折叠 row 口径
+const MELODY = opt('melody', 'piano');     // 旋律层音色：piano（M3-6 新）| strings（M2-1 旧）
 const FROM = Number(opt('from', 0));
 const TO = Number(opt('to', 1e9));
 const OUT = opt('out', path.join(P.build, `preview_${MODE}${FROM || TO < 1e9 ? `_${FROM}-${TO}s` : ''}.wav`));
@@ -34,7 +35,7 @@ const { notes } = parseScoreCsv(csv);
 if (MODE === 'folded') {
   for (const n of notes) n.midi = midiFromRow(n.instr === 'bass' ? 'bass' : 'harp', n.row);
 }
-const { events, stats } = planHifi(notes);      // bassOctave 默认 0（不做任何升降）
+const { events, stats } = planHifi(notes, { melody: MELODY });   // bassOctave 默认 0（不做任何升降）
 
 const cache = new Map();
 const sampleOf = (e) => {
@@ -76,7 +77,7 @@ const gain = peak > 0.99 ? 0.99 / peak : 1;
 if (gain !== 1) for (let i = 0; i < out.length; i++) out[i] *= gain;
 
 fs.writeFileSync(OUT, encodeWav({ samples: out, sampleRate: SAMPLE_RATE }));
-console.log(`模式=${MODE}  区间=${FROM}..${TO}s  混入音符=${mixed}（缺采样 ${missing}）  增益=${gain.toFixed(3)}`);
+console.log(`模式=${MODE}  旋律=${MELODY}  区间=${FROM}..${TO}s  混入音符=${mixed}（缺采样 ${missing}）  增益=${gain.toFixed(3)}`);
 console.log(`音高：${JSON.stringify(stats.octaveFallback != null ? { octaveFallback: stats.octaveFallback } : {})}`
   + `  打击乐（未合成）=${stats.vanilla}  内声部=${stats.inner}`);
 console.log(`产物：${OUT.replace(/\\/g, '/')}`);

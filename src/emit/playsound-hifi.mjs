@@ -23,7 +23,7 @@ import {
   buildTickGroups, callsPerTick, pad, planBins, planBuckets,
 } from './tick-map.mjs';
 import {
-  REFERENCE_VEL, REGISTERS, eventIdOf, hasEvent, midiFromRow, noteFileName,
+  REFERENCE_VEL, REGISTERS, TIMBRES, eventIdOf, hasEvent, midiFromRow, noteFileName,
 } from '../synth/voices.mjs';
 import { makePos } from './layout-pos.mjs';
 import { resolvePaths } from '../core/paths.mjs';
@@ -59,7 +59,9 @@ const VANILLA_SOUND = {
   hat: 'minecraft:block.note_block.hat',
   snare: 'minecraft:block.note_block.snare',
 };
-const TIMBRE_COUNTER = { strings: '#hifiStr', bell: '#hifiBell', pad: '#hifiPad', bass: '#hifiBass' };
+const TIMBRE_COUNTER = {
+  strings: '#hifiStr', bell: '#hifiBell', pad: '#hifiPad', bass: '#hifiBass', piano: '#hifiPiano',
+};
 const pitchMul = (row) => (2 ** ((row - 12) / 12)).toFixed(4);
 const vol2 = (v) => (Number.isFinite(v) ? Math.min(1, Math.max(0, v)) : 1).toFixed(2);
 
@@ -102,11 +104,13 @@ export function parseScoreCsv(text) {
 /**
  * 谱面 → 播放事件（音色映射的唯一入口）。
  * @param {Array<{step:number,instr:string,row:number,vol:number}>} notes
- * @param {{bassOctave?:number, inner?:string}} [opts] bassOctave 默认 0（**原曲音高，不做任何升降**；
+ * @param {{bassOctave?:number, inner?:string, melody?:string}} [opts] bassOctave 默认 0（**原曲音高，不做任何升降**；
  *   旧默认 +1 是为了"小音箱放不出 25Hz 基频"，2026-09-14 按用户要求取消："音高全部按原曲"）
+ *   melody = 旋律层音色（默认 piano；可用 strings 回到 M2-1 的拨弦音色做 A/B）
  */
-export function planHifi(notes, { bassOctave = 0, inner = 'bell' } = {}) {
+export function planHifi(notes, { bassOctave = 0, inner = 'bell', melody = 'strings' } = {}) {
   if (!INNER_CHOICES.includes(inner)) throw new Error(`--inner 只支持 ${INNER_CHOICES.join('/')}，收到 ${inner}`);
+  if (!TIMBRES.includes(melody)) throw new Error(`--melody 只支持 ${TIMBRES.join('/')}，收到 ${melody}`);
   const fam = (instr) => INSTRUMENT_ALIAS[String(instr ?? '').toLowerCase()] ?? null;
   /** 显式内声部标签（M3-1）：`instrument=inner` 或 `voiceRole=inner` 都认 */
   const isInnerLabel = (n) => String(n.instr ?? '').toLowerCase() === 'inner'
@@ -130,7 +134,7 @@ export function planHifi(notes, { bassOctave = 0, inner = 'bell' } = {}) {
     notes: notes.length, synth: 0, vanilla: 0, inner: 0, innerExplicit: 0, innerHeuristic: 0,
     // 真实音高没有对应采样、退回"折叠 row"的音数（正常应为 0；>0 说明音域要再扩）
     octaveFallback: 0, bassOctaveSkipped: 0,
-    strings: 0, pad: 0, bell: 0, bass: 0, bassOctaveUp: 0, unknownInstrument: 0, fallback: 0,
+    strings: 0, pad: 0, bell: 0, bass: 0, piano: 0, bassOctaveUp: 0, unknownInstrument: 0, fallback: 0,
     byTimbre: {}, byInstrument: {},
   };
   const events = [];
@@ -182,8 +186,8 @@ export function planHifi(notes, { bassOctave = 0, inner = 'bell' } = {}) {
       timbre = 'pad';
       midi = sampleMidi('pad', n);
     } else if (melodyIdx.has(i)) {
-      timbre = 'strings';
-      midi = sampleMidi('strings', n);
+      timbre = melody;
+      midi = sampleMidi(melody, n);
     } else {
       // 内声部：音色由 --inner 决定（默认 bell），音高同样优先取谱面真实音高。
       // 来源分两种并分别计数：M3-1 的显式标签（instrument=inner / voiceRole=inner），
@@ -403,15 +407,17 @@ function main() {
   // 原曲音高：默认不升八度（用户 2026-09-14："音高全部按原曲，不要单独去升降八度"）
   const bassOctave = Number(opt('bass-octave', 0));
   const inner = opt('inner', 'bell');
+  // 旋律层音色：流水线默认用新的钢琴类（M3-6，按真演奏频谱标定）；--melody strings 可回到 M2-1 拨弦
+  const melody = opt('melody', 'piano');
   const vel = Number(opt('vel', REFERENCE_VEL));
   void vel;
 
   const { notes, stats: scoreStats } = parseScoreCsv(fs.readFileSync(notesCsv, 'utf8'));
-  const { events, stats, plan } = planHifi(notes, { bassOctave, inner });
+  const { events, stats, plan } = planHifi(notes, { bassOctave, inner, melody });
   if (stats.unknownInstrument) {
     console.warn(`[警告] ${stats.unknownInstrument} 颗音的乐器名不在映射表里，已退回 strings（见 stats.fallback）`);
   }
-  const functions = buildHifiFunctions(notes, { bassOctave, inner });
+  const functions = buildHifiFunctions(notes, { bassOctave, inner, melody });
   const written = writeHifiFunctions(functions);
   const wired = wireHifiTick();   // M3-4：自己接上每刻入口（只在 #hifi=1 时生效）
   const wiring = wiringState();

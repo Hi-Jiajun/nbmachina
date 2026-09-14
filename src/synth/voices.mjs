@@ -14,11 +14,11 @@
 import { midiName, midiToFreq } from '../analyze/dsp.mjs';
 
 import {
-  SAMPLE_RATE, fmPad, karplusStrong, modalBell,
+  SAMPLE_RATE, fmPad, karplusStrong, modalBell, pianoVoice,
 } from './synth.mjs';
 
 export const SOUND_NAMESPACE = 'nbforge';
-export const TIMBRES = ['strings', 'pad', 'bell', 'bass'];
+export const TIMBRES = ['strings', 'pad', 'bell', 'bass', 'piano'];
 export const REGISTERS = {
   // M3-5：音域按**谱面真实音高**重定（后端 A 没有"2 个八度"的方块限制）。
   // 依据 `machine_pipeline.csv` 的 midi 列：harp 56..102（G#3..F#7，p50=G#6 附近）、bass 21..61。
@@ -28,12 +28,33 @@ export const REGISTERS = {
   pad: [42, 102],
   bell: [42, 102],
   bass: [19, 61],
+  // M3-6：钢琴类（非谐加性 + 锤击 + 扩散尾音），与 strings 同音域，用于旋律层 A/B
+  piano: [42, 102],
 };
 /** 采样里烘死的参考力度（playsound 路径按谱面 volume 调音量，M4 才做多层力度采样） */
 export const REFERENCE_VEL = 0.8;
 
 /** 每个音色的算法与参数（注释里写清"这个数为什么是这个数"） */
 export const VOICE_PARAMS = {
+  // M3-6：按真钢琴（Animenz 演奏）的长时平均谱标定 —— 中低"琴体"更足、高频"空气"不掉太快。
+  // 依据与迭代过程见 docs/M3-6-report.md；算法见 src/synth/synth.mjs 的 pianoVoice。
+  piano: {
+    kind: 'piano',
+    partials: 22,
+    inharmonicity: 0.00012,
+    ampPow: 0.85,
+    hfShelf: 0.55,
+    hfGain: 1.9,
+    bodyLo: 160,
+    bodyHi: 800,
+    bodyGain: 1.7,
+    t60Low: 3.4,
+    t60High: 1.7,
+    t60Floor: 0.55,
+    partialMaxHz: 9000,
+    strikeGain: 0.085,
+    reverbMix: 0.22,
+  },
   // 拨弦：明亮、衰减快，靠琴体 EQ 加木头感
   strings: {
     kind: 'karplus',
@@ -121,6 +142,7 @@ export function durationSecOf(timbre, freq) {
     case 'bass': return clamp(3.6 * (110 / freq) ** 0.3, 0.9, 2.4);
     case 'pad': return 2.6;
     case 'bell': return 2.4;
+    case 'piano': return 2.9;   // 尾巴由 schroederReverb 再延长 ~1.3s
     default: throw new Error(`未知音色：${timbre}`);
   }
 }
@@ -157,6 +179,7 @@ export function renderVoice(timbre, midi, { vel = REFERENCE_VEL, sampleRate = SA
   }
   if (params.kind === 'additive') return fmPad({ ...params, freq, sampleRate, durationSec, vel });
   if (params.kind === 'modal') return modalBell({ ...params, freq, sampleRate, durationSec, vel, seed });
+  if (params.kind === 'piano') return pianoVoice({ ...params, freq, sampleRate, durationSec, vel, seed });
   throw new Error(`未知合成算法：${params.kind}`);
 }
 

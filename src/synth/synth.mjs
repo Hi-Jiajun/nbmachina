@@ -16,6 +16,152 @@
 // 确定性：噪声激励来自 mulberry32(seed)，同参数两次渲染逐样本相同（可回归）。
 export const SAMPLE_RATE = 44100;
 
+/* ---------------------------------------------------------- M3-6 · 扩散混响 */
+
+/**
+ * Schroeder 混响（4 并联梳状 + 3 串联全通）：给采样加"空间/空气"。
+ *
+ * <p>为什么需要它：拿 Animenz 真演奏（build/animenz_styx_helix.wav）做长时平均谱对比，
+ * 我们的 strings 在高频 2.5–11 kHz 比真钢琴**少 11–15 dB**、中低 320–640 Hz 少 9 dB ——
+ * 听感就是"没有空灵、偏木头"。真钢琴的"空气"一半来自高次分音、一半来自厅堂尾音，
+ * 所以音色侧补高次分音（见 pianoVoice），这里补尾音。
+ *
+ * @returns {Float64Array} 比输入更长的数组（含 rt60 长度的尾巴）
+ */
+export function schroederReverb(samples, { sampleRate = SAMPLE_RATE, rt60 = 1.3, mix = 0.22, seed = 1 } = {}) {
+  const tail = Math.round(rt60 * sampleRate);
+  const n = samples.length + tail;
+  const combs = [1116, 1188, 1277, 1356].map((d) => Math.round((d * sampleRate) / 44100));
+  const allpasses = [556, 441, 341].map((d) => Math.round((d * sampleRate) / 44100));
+  const acc = new Float64Array(n);
+  for (const d of combs) {
+    const buf = new Float64Array(d);
+    const g = 10 ** ((-3 * d) / (rt60 * sampleRate));   // 每圈衰减 60dB/rt60
+    let idx = 0;
+    for (let i = 0; i < n; i++) {
+      const x = (i < samples.length ? samples[i] : 0) + g * buf[idx];
+      buf[idx] = x;
+      idx = (idx + 1) % d;
+      acc[i] += x / combs.length;
+    }
+  }
+  let sig = acc;
+  for (const d of allpasses) {
+    const buf = new Float64Array(d);
+    const out = new Float64Array(n);
+    let idx = 0;
+    for (let i = 0; i < n; i++) {
+      const bufout = buf[idx];
+      const x = sig[i] + -0.5 * bufout;
+      out[i] = bufout + 0.5 * x;
+      buf[idx] = x;
+      idx = (idx + 1) % d;
+    }
+    sig = out;
+  }
+  const out = new Float64Array(n);
+  for (let i = 0; i < n; i++) out[i] = (i < samples.length ? samples[i] * (1 - mix) : 0) + sig[i] * mix;
+  return out;
+}
+
+/* ------------------------------------------------------- M3-6 · 钢琴类音色 */
+
+/**
+ * 钢琴类：**非谐加性合成 + 锤击瞬态 + 扩散尾音**（M3-6，按真演奏的频谱标定）。
+ *
+ * <p>标定依据（1/3 倍频程能量占比，dB，见 build/animenz_styx_helix.wav）：
+ * 真演奏的能量中心在 320–640 Hz（−3.2 dB），2.5–11 kHz 仍有 −25.8 / −40.1 dB；
+ * 旧 strings 分别是 −11.9 / −37.1 / −54.8 dB —— 中低"琴体"与高频"空气"都不够。
+ * 所以这里：① 部分音幅度用 k^-ampPow（指数比 KS 缓）并给高频 shelf；② 高次分音的
+ * t60 不要掉太快（t60Floor）；③ 频率按真实钢琴的**非谐性** f_k = k·f0·√(1+B·k²)；
+ * ④ 尾部接 schroederReverb。
+ */
+export function pianoVoice({
+  freq,
+  sampleRate = SAMPLE_RATE,
+  durationSec = 2.9,
+  vel = 0.8,
+  partials = 22,
+  inharmonicity = 0.00012,
+  ampPow = 0.85,
+  hfShelf = 0.55,        // 高频 shelf 起始（相对部分音序号的比例）
+  hfGain = 1.9,          // shelf 之后额外乘的倍数（提亮）
+  bodyLo = 160,          // "琴体"频带（真演奏的能量中心在 320–640Hz，
+  bodyHi = 800,          //   我们的旧音色在这一带少 8–9dB → 落在带内的部分音加权）
+  bodyGain = 1.7,
+  t60Low = 3.4,
+  t60High = 1.7,
+  t60Floor = 0.55,       // 高次分音的 t60 下限（别把"空气"衰减掉）
+  partialMaxHz = 9000,   // 部分音频率上限（超过就停）：5–11kHz 靠锤击瞬态与混响补，
+                         // 不靠把泛音堆到 20kHz —— 实测那样会让高频比真钢琴高 14dB（发刺）
+  strikeMs = 9,
+  strikeGain = 0.085,
+  reverbMix = 0.22,
+  reverbRt60 = 1.3,
+  seed = 7,
+} = {}) {
+  const v = Math.min(1, Math.max(0, vel));
+  const n = Math.round(durationSec * sampleRate);
+  const out = new Float64Array(n);
+  const nyq = sampleRate / 2;
+  let k = 0;
+  for (let p = 1; p <= partials; p++) {
+    const fk = freq * p * Math.sqrt(1 + inharmonicity * p * p);
+    if (fk >= Math.min(nyq * 0.92, partialMaxHz)) break;
+    let amp = Math.pow(p, -ampPow);
+    if (p >= partials * hfShelf) amp *= hfGain;
+    if (fk >= bodyLo && fk <= bodyHi) amp *= bodyGain;
+    const t60 = Math.max(t60Floor, lerp(t60Low, t60High, Math.min(1, (fk / 900) ** 0.5)));
+    const tau = t60 / 6.907755;
+    const phase = (p * p * 0.37) % (2 * Math.PI);
+    for (let i = 0; i < n; i++) {
+      const t = i / sampleRate;
+      out[i] += amp * Math.exp(-t / tau) * Math.sin(2 * Math.PI * fk * t + phase);
+    }
+    k++;
+  }
+  // 锤击瞬态：短促、带高频（真钢琴起音里那点"击弦"声）
+  const rnd = mulberry32(seed + 977);
+  const strikeN = Math.round((strikeMs / 1000) * sampleRate);
+  let prev = 0;
+  for (let i = 0; i < Math.min(strikeN, n); i++) {
+    const w = rnd() * 2 - 1;
+    const hp = w - prev;   // 一阶差分 = 提亮
+    prev = w;
+    out[i] += hp * strikeGain * Math.exp((-i / strikeN) * 6) * (0.5 + 0.5 * v);
+  }
+  // 起音斜坡（避免咔声）+ 力度→亮度/响度
+  const rampN = Math.round(0.004 * sampleRate);
+  const bright = 1 + 0.8 * (v - 0.5);
+  for (let i = 0; i < n; i++) {
+    const r = i < rampN ? 0.5 - 0.5 * Math.cos((Math.PI * i) / rampN) : 1;
+    out[i] *= r * (0.55 + 0.45 * v);
+  }
+  // 归一化 + 混响尾巴
+  let m = 0;
+  for (const s of out) m = Math.max(m, Math.abs(s));
+  if (m > 0) for (let i = 0; i < n; i++) out[i] = (out[i] / m) * (0.5 + 0.5 * v) * (0.6 + 0.4 * bright);
+  const wet = schroederReverb(out, { sampleRate, rt60: reverbRt60, mix: reverbMix, seed });
+  // DC 阻断 + 超低频清理：Schroeder 的并联梳状会在直流/极低频累积能量，
+  // 实测会让自检的"最强谱峰"跑到 ~0Hz（音准误差直接报 100%）。
+  let y1 = 0;
+  let x1 = 0;
+  for (let i = 0; i < wet.length; i++) {
+    const x = wet[i];
+    const y = x - x1 + 0.9985 * y1;
+    x1 = x;
+    y1 = y;
+    wet[i] = y;
+  }
+  // 末尾淡出（防文件边界咔声）
+  const fadeN = Math.round(0.08 * sampleRate);
+  for (let i = 0; i < fadeN; i++) {
+    const j = wet.length - fadeN + i;
+    if (j >= 0) wet[j] *= 0.5 + 0.5 * Math.cos((Math.PI * i) / fadeN);
+  }
+  return wet;
+}
+
 /* ------------------------------------------------------------------ 小工具 */
 
 /** 确定性 PRNG（mulberry32）：同一 seed 永远给同一串噪声 —— 采样可复现的前提 */

@@ -33,9 +33,9 @@ const errPct = (measured, target) => Math.abs(measured - target) / target * 100;
 
 /* ============================================================ 1. 合成器契约 */
 
-test('契约：4 个音色、每个 ≥3 个八度（37 个半音）、每半音一个采样', () => {
+test('契约：5 个音色（含 M3-6 钢琴类）、每个 ≥3 个八度（37 个半音）、每半音一个采样', () => {
   assert.ok(TIMBRES.length >= 3, `音色数 ${TIMBRES.length} < 3`);
-  assert.deepEqual([...TIMBRES].sort(), ['bass', 'bell', 'pad', 'strings']);
+  assert.deepEqual([...TIMBRES].sort(), ['bass', 'bell', 'pad', 'piano', 'strings']);
   for (const t of TIMBRES) {
     const [lo, hi] = REGISTERS[t];
     const n = registerSize(t);
@@ -280,7 +280,7 @@ test('采样回读：容器内的 ogg 基频与目标音高一致（每音色抽
 
 /* ================================================ 5. playsound 高保真后端 */
 
-test('映射：harp→strings（同刻最高音）／次高音→bell／bass→bass（+1 八度）／打击乐→原版', () => {
+test('映射：旋律层（默认 strings）／次高音→bell／bass→bass（原曲音高）／打击乐→原版', () => {
   const notes = [
     { step: 0, instr: 'harp', row: 15, vol: 0.9 },
     { step: 0, instr: 'harp', row: 12, vol: 0.6 },
@@ -293,15 +293,19 @@ test('映射：harp→strings（同刻最高音）／次高音→bell／bass→b
   const at = (row) => events.find((e) => e.step === 0 && e.row === row);
   assert.equal(at(15).event, 'nbforge:strings_a3', 'harp row 15 = A3 是旋律');
   assert.equal(at(12).event, 'nbforge:bell_fs3', '同刻次高音 = 内声部');
-  assert.equal(at(9).event, 'nbforge:bass_ds2', 'bass row 9 → midi 27，监听里升八度到 39');
-  assert.equal(at(9).midi, 39);
+  assert.equal(at(9).event, 'nbforge:bass_ds1', 'bass row 9 → midi 27（默认不升八度，原曲音高）');
+  assert.equal(at(9).midi, 27);
   assert.equal(at(0).event, 'minecraft:block.note_block.basedrum');
   assert.equal(at(24).event, 'minecraft:block.note_block.hat');
   assert.equal(events.find((e) => e.step === 1).event, 'nbforge:strings_d4');
   assert.equal(stats.synth, 4);
   assert.equal(stats.vanilla, 2);
   assert.equal(stats.bell, 1);
-  assert.equal(stats.bassOctaveUp, 1);
+  assert.equal(stats.bassOctaveUp, 0);
+  // 旋律层可切换音色（M3-6 新增钢琴类；流水线 CLI 默认 piano）
+  const piano = planHifi(notes, { melody: 'piano' });
+  assert.equal(piano.events.find((e) => e.step === 0 && e.row === 15).event, 'nbforge:piano_a3');
+  assert.equal(piano.stats.piano, 2, '旋律两颗音都换成 piano');
   // 打击乐保留原版音高语义（与 datapack-playback 的 pitchMul(row) 一致）
   assert.equal(at(0).pitch, '0.5000');
   assert.equal(at(24).pitch, '2.0000');
@@ -329,15 +333,17 @@ test('映射：内声部可用 pad 替换 bell（--inner），未知乐器退回
   assert.equal(unknown.events[0].event, 'nbforge:strings_d3');
 });
 
-test('贝斯升八度：默认 +1（小音箱放得出），可关', () => {
-  const up = planHifi([{ step: 0, instr: 'bass', row: 9, vol: 0.5 }]).events[0];
-  assert.equal(up.midi, 39);
-  assert.equal(up.event, 'nbforge:bass_ds2');
-  assert.equal(up.pitch, '1');
-  const flat = planHifi([{ step: 0, instr: 'bass', row: 9, vol: 0.5 }], { bassOctave: 0 }).events[0];
+test('贝斯音高：默认按原曲（不升八度），--bass-octave 1 可开旧行为', () => {
+  // 2026-09-14 用户要求"音高全部按原曲，不要单独去升降八度" → 默认 0
+  const flat = planHifi([{ step: 0, instr: 'bass', row: 9, vol: 0.5 }]).events[0];
   assert.equal(flat.midi, 27);
   assert.equal(flat.event, 'nbforge:bass_ds1');
-  assert.equal(planHifi([{ step: 0, instr: 'bass', row: 9, vol: 0.5 }]).stats.bassOctaveUp, 1);
+  assert.equal(flat.pitch, '1');
+  assert.equal(planHifi([{ step: 0, instr: 'bass', row: 9, vol: 0.5 }]).stats.bassOctaveUp, 0);
+  const up = planHifi([{ step: 0, instr: 'bass', row: 9, vol: 0.5 }], { bassOctave: 1 }).events[0];
+  assert.equal(up.midi, 39);
+  assert.equal(up.event, 'nbforge:bass_ds2');
+  assert.equal(planHifi([{ step: 0, instr: 'bass', row: 9, vol: 0.5 }], { bassOctave: 1 }).stats.bassOctaveUp, 1);
 });
 
 test('函数生成：monitor_hifi_on/off + 独立 hifi/tick（两种刻率表、无 tick rate 命令）', () => {
