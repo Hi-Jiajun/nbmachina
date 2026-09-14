@@ -140,11 +140,45 @@ for (const start of SEGS) {
     }
     mixed++;
   }
-  let peak = 0;
-  for (const v of out) peak = Math.max(peak, Math.abs(v));
-  const gain = peak > 0.99 ? 0.99 / peak : 1;
-  if (gain !== 1) for (let i = 0; i < out.length; i++) out[i] *= gain;
+  // —— 混音配平（M3-10）：不再"整体降增益"（上一版峰值 2.74 → 全曲被压 0.36，伴奏变弱）——
+  // 做法：① 先按 RMS 把整体拉到 -18 dBFS 的"舒适区"；② 用软膝限幅（tanh）只削峰、不动其余部分；
+  // ③ 输出 32bit float（保留混音精度，后续可无损转 24/48 母版）。
+  let peak = 0, acc = 0;
+  for (const v of out) { peak = Math.max(peak, Math.abs(v)); acc += v * v; }
+  const rms = Math.sqrt(acc / Math.max(1, out.length));
+  const norm = rms > 0 ? (10 ** (-18 / 20)) / rms : 1;
+  const knee = 0.75;                                    // 软膝起点
+  for (let i = 0; i < out.length; i++) {
+    const x = out[i] * norm;
+    const a = Math.abs(x);
+    out[i] = a <= knee ? x : Math.sign(x) * (knee + (1 - knee) * Math.tanh((a - knee) / (1 - knee)));
+  }
+  let peak2 = 0;
+  for (const v of out) peak2 = Math.max(peak2, Math.abs(v));
+  console.log(`  混音：原始峰值 ${peak.toFixed(2)} / RMS ${(20 * Math.log10(rms)).toFixed(1)}dBFS → 归一 -18dBFS + 软限幅 → 峰值 ${peak2.toFixed(3)}`);
   const file = path.join(OUTDIR, `ab_${VOICE}_${start}s.wav`);
-  fs.writeFileSync(file, encodeWav({ samples: out, sampleRate: SAMPLE_RATE }));
-  console.log(`  ${start}s：混入旋律 ${mixed} 颗（峰值 ${peak.toFixed(2)} → 增益 ${gain.toFixed(2)}）→ ${file.replace(/\\/g, '/')}`);
+  fs.writeFileSync(file, encodeWav32f(out, SAMPLE_RATE));
+  console.log(`  ${start}s：混入旋律 ${mixed} 颗（已配平 + 软限幅）→ ${file.replace(/\\/g, '/')}`);
 }
+
+/** 32bit float WAV（保留混音精度；ffmpeg 转 24/48 母版时不再丢位） */
+function encodeWav32f(samples, sampleRate) {
+  const data = Buffer.alloc(samples.length * 4);
+  for (let i = 0; i < samples.length; i++) data.writeFloatLE(samples[i], i * 4);
+  const head = Buffer.alloc(44);
+  head.write('RIFF', 0, 'ascii');
+  head.writeUInt32LE(36 + data.length, 4);
+  head.write('WAVE', 8, 'ascii');
+  head.write('fmt ', 12, 'ascii');
+  head.writeUInt32LE(16, 16);
+  head.writeUInt16LE(3, 20);          // 3 = IEEE float
+  head.writeUInt16LE(1, 22);
+  head.writeUInt32LE(sampleRate, 24);
+  head.writeUInt32LE(sampleRate * 4, 28);
+  head.writeUInt16LE(4, 32);
+  head.writeUInt16LE(32, 34);
+  head.write('data', 36, 'ascii');
+  head.writeUInt32LE(data.length, 40);
+  return Buffer.concat([head, data]);
+}
+
