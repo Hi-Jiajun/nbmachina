@@ -72,12 +72,19 @@ export function parseScoreCsv(text) {
   const iInstr = idx('instrument');
   const iRow = idx('row');
   const iVol = idx('volume');
+  // 谱面的**真实音高**（`midi` 列，T3 用音频逐音标定过）：后端 A 没有 2 个八度限制，
+  // 应当按它播音高；`row` 只是"折叠到音符盒音域"的结果，给机器（后端 B）用。
+  const iMidi = idx('midi');
   // M3-1 的可选溯源列：有就用，没有就按老口径（启发式）判定声部
   const iRole = idx('voiceRole');
   if ([iStep, iInstr, iRow, iVol].some((i) => i < 0)) throw new Error(`谱面 CSV 缺列：${header.join(',')}`);
   const notes = lines.slice(1).filter((l) => l.trim()).map((l) => {
     const c = l.split(',');
-    return { step: +c[iStep], instr: c[iInstr], row: +c[iRow], vol: +c[iVol], role: iRole >= 0 ? (c[iRole] ?? '') : '' };
+    return {
+      step: +c[iStep], instr: c[iInstr], row: +c[iRow], vol: +c[iVol],
+      midi: iMidi >= 0 ? +c[iMidi] : null,
+      role: iRole >= 0 ? (c[iRole] ?? '') : '',
+    };
   });
   const byInstrument = {};
   for (const n of notes) byInstrument[n.instr] = (byInstrument[n.instr] ?? 0) + 1;
@@ -120,6 +127,8 @@ export function planHifi(notes, { bassOctave = 1, inner = 'bell' } = {}) {
 
   const stats = {
     notes: notes.length, synth: 0, vanilla: 0, inner: 0, innerExplicit: 0, innerHeuristic: 0,
+    // 真实音高没有对应采样、退回"折叠 row"的音数（正常应为 0；>0 说明音域要再扩）
+    octaveFallback: 0, bassOctaveSkipped: 0,
     strings: 0, pad: 0, bell: 0, bass: 0, bassOctaveUp: 0, unknownInstrument: 0, fallback: 0,
     byTimbre: {}, byInstrument: {},
   };
@@ -144,25 +153,42 @@ export function planHifi(notes, { bassOctave = 1, inner = 'bell' } = {}) {
     }
     let timbre;
     let midi;
+    // 采样音高：**优先用谱面的真实音高**（`midi` 列，T3 用音频逐音标定过），
+    // 只有该音高没有对应采样时才退回"折叠到音符盒音域"的老口径（并计数，便于发现覆盖率问题）。
+    const sampleMidi = (timbreName, n) => {
+      if (Number.isFinite(n.midi) && hasEvent(timbreName, n.midi)) {
+        return n.midi;
+      }
+      stats.octaveFallback++;
+      return midiFromRow(timbreName === 'bass' ? 'bass' : 'harp', n.row);
+    };
     if (family === 'bass') {
       timbre = 'bass';
-      midi = midiFromRow('bass', n.row) + 12 * bassOctave;
-      if (bassOctave) stats.bassOctaveUp++;
+      const base = sampleMidi('bass', n);
+      const lifted = base + 12 * bassOctave;
+      // 升八度是为了小音箱听得见；但提升后若超出采样音域就**不提升**（否则整个渲染直接报错）
+      if (bassOctave && hasEvent('bass', lifted)) {
+        midi = lifted;
+        stats.bassOctaveUp++;
+      } else {
+        midi = base;
+        if (bassOctave) stats.bassOctaveSkipped++;
+      }
     } else if (family === 'bell') {
       timbre = 'bell';
-      midi = midiFromRow('harp', n.row);
+      midi = sampleMidi('bell', n);
     } else if (family === 'pad') {
       timbre = 'pad';
-      midi = midiFromRow('harp', n.row);
+      midi = sampleMidi('pad', n);
     } else if (melodyIdx.has(i)) {
       timbre = 'strings';
-      midi = midiFromRow('harp', n.row);
+      midi = sampleMidi('strings', n);
     } else {
-      // 内声部：音色由 --inner 决定（默认 bell），音高按 harp 的 row→midi 映射。
+      // 内声部：音色由 --inner 决定（默认 bell），音高同样优先取谱面真实音高。
       // 来源分两种并分别计数：M3-1 的显式标签（instrument=inner / voiceRole=inner），
       // 或老口径的"同刻非最高音"启发式（没有标签的谱面）。
       timbre = inner;
-      midi = midiFromRow('harp', n.row);
+      midi = sampleMidi(inner, n);
       stats.inner++;
       if (isInnerLabel(n)) stats.innerExplicit++;
       else stats.innerHeuristic++;
@@ -394,6 +420,12 @@ function main() {
     : '';
   console.log(`谱面：${notesCsv}（${scoreStats.notes} 颗音，step ${scoreStats.minStep}..${scoreStats.maxStep}）`);
   console.log(`音色映射：${byTimbre || '（无）'}；原版打击乐 ${stats.vanilla}；内声部 ${stats.inner}${innerSrc}（--inner=${inner}）`);
+  if (stats.octaveFallback) {
+    console.warn(`[警告] ${stats.octaveFallback} 颗音的**真实音高没有对应采样**，已退回折叠 row 的老口径`
+      + `（音域 ${REGISTERS.strings.join('..')} / bass ${REGISTERS.bass.join('..')}）—— 需要扩 REGISTERS 后重跑 render-all`);
+  } else {
+    console.log('音高口径：全部按谱面真实 midi 播（后端 A 不受 2 个八度限制）');
+  }
   console.log(`贝斯升八度：+${bassOctave}（${stats.bassOctaveUp} 颗；--bass-octave 0 可关闭）`);
   for (const m of plan.modes) {
     console.log(`  ${m.mode}（${m.tps} tps）：${m.ticks} 个时刻 / ${m.buckets} 桶 / ${m.bins} 组 / 单刻 ${m.callsPerTick} 次调用 / 末刻 ${m.lastTick}`);

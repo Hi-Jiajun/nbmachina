@@ -1,16 +1,16 @@
 {
-  "at": "2026-09-14T07:31:59.067Z",
+  "at": "2026-09-14T07:47:03.474Z",
   "mode": "lo",
   "tps": 20,
   "ticks": 600,
   "notesCsv": "C:/Users/hiliang/Documents/minecraft/build/machine_pipeline.csv",
   "baseline": {
-    "t": 15,
+    "t": 16,
     "on": 1,
     "hits": 7,
     "mh": 4,
     "mb": 3,
-    "hifiPlays": 9
+    "hifiPlays": 7
   },
   "positions": [
     {
@@ -50,11 +50,11 @@
     "harp": 110
   },
   "actual": {
-    "t": 616,
+    "t": 617,
     "hits": 302,
     "mh": 114,
     "mb": 188,
-    "mspt": 7.5
+    "mspt": 7.3
   },
   "delta": {
     "t": 601,
@@ -73,12 +73,12 @@
     {
       "name": "function styx:play/start 执行成功（#on = 1）",
       "ok": true,
-      "detail": "#on=1、#t=15"
+      "detail": "#on=1、#t=16"
     },
     {
       "name": "#t 推进 = 600（允许 +1，sprint 收尾）",
       "ok": true,
-      "detail": "基线 15 → 616（+601）"
+      "detail": "基线 16 → 617（+601）"
     },
     {
       "name": "#hits 增量 = 期望 295（差 ≤1）",
@@ -118,7 +118,7 @@
     {
       "name": "MSPT ≤ 50（20 tps 的单刻预算）",
       "ok": true,
-      "detail": "7.5 ms"
+      "detail": "7.3 ms"
     }
   ]
 }

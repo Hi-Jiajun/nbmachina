@@ -20,10 +20,14 @@ import {
 export const SOUND_NAMESPACE = 'nbforge';
 export const TIMBRES = ['strings', 'pad', 'bell', 'bass'];
 export const REGISTERS = {
-  strings: [42, 78],
-  pad: [42, 78],
-  bell: [42, 78],
-  bass: [19, 55],
+  // M3-5：音域按**谱面真实音高**重定（后端 A 没有"2 个八度"的方块限制）。
+  // 依据 `machine_pipeline.csv` 的 midi 列：harp 56..102（G#3..F#7，p50=G#6 附近）、bass 21..61。
+  // 旧值 [42,78] / [19,55] 是按"折叠后的 row"定的，结果 hifi 渲染器把旋律播低了一到两个八度
+  // （玩家 15:50 反馈"中高音不好听、没有空灵感"——根因就是音高不在原曲的八度上）。
+  strings: [42, 102],
+  pad: [42, 102],
+  bell: [42, 102],
+  bass: [19, 61],
 };
 /** 采样里烘死的参考力度（playsound 路径按谱面 volume 调音量，M4 才做多层力度采样） */
 export const REFERENCE_VEL = 0.8;

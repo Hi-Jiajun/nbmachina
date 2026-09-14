@@ -100,6 +100,35 @@ test('无标签老谱面：最高行=旋律、其余=内声部（与 M2-1 口径
   assert.equal(stats.innerHeuristic, 2);
 });
 
+/* ------------------------------------------------- ④ 音高口径：用真实 midi 而不是折叠 row */
+
+test('音高：有 `midi` 列时按**真实音高**播（后端 A 不受 2 个八度限制）', () => {
+  // 同一颗音：row=11（折叠到音符盒音域）vs midi=75（音频标定后的真实音高，D#5）
+  const foldedOnly = planHifi([{ step: 0, instr: 'harp', row: 11, vol: 0.8 }]).events[0];
+  assert.equal(foldedOnly.midi, 53, '没有 midi 列时退回 row→midi（老口径）');
+  const withTrue = planHifi([{ step: 0, instr: 'harp', row: 11, midi: 75, vol: 0.8 }]).events[0];
+  assert.equal(withTrue.midi, 75, '有 midi 列时必须按真实音高播');
+  assert.equal(withTrue.event, 'nbforge:strings_ds5');
+  assert.equal(withTrue.pitch, '1', '用的是一音一采样，不该再叠 pitch');
+});
+
+test('音高：真实音高超出采样音域时退回折叠 row，并计入 octaveFallback', () => {
+  const { events, stats } = planHifi([{ step: 0, instr: 'harp', row: 11, midi: 120, vol: 0.8 }]);
+  assert.equal(events[0].midi, 53, '超音域 → 退回 row→midi');
+  assert.equal(stats.octaveFallback, 1, '退回次数要计数，便于发现音域覆盖不足');
+});
+
+test('真实数据：整份机器谱面没有一颗音因超音域退回（音域已覆盖原曲）', () => {
+  const p = path.join(BUILD, 'machine_pipeline.csv');
+  assert.ok(fs.existsSync(p), `缺真实数据 ${p}——真实数据断言不许跳过`);
+  const { notes } = parseScoreCsv(fs.readFileSync(p, 'utf8'));
+  const { events, stats } = planHifi(notes);
+  assert.equal(events.length, notes.length);
+  assert.equal(stats.octaveFallback, 0, `有 ${stats.octaveFallback} 颗音超出采样音域`);
+  const high = events.filter((e) => e.midi !== null && e.midi >= 90).length;
+  assert.ok(high > 100, `高音区（midi ≥ 90）应占相当比例，实测 ${high} 颗`);
+});
+
 test('CSV 解析：有 voiceRole 列就读，没有就空串（老谱面逐字节兼容）', () => {
   const withRole = parseScoreCsv('step,instrument,row,volume,voiceRole\n1,harp,12,0.5,inner\n');
   assert.equal(withRole.notes[0].role, 'inner');
