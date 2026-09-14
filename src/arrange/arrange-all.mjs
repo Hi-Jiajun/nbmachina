@@ -1,7 +1,12 @@
-// 一条命令跑完编曲链（T5）：音级恢复 → 重折行 → 力度(accent) → 长音延音 → 打击乐 → 去撞格
-//   node src/arrange/arrange-all.mjs [--out build/machine_pipeline.csv]
+// 一条命令跑完编曲链（T5）：音级恢复 → 重折行 → 力度(accent) → 长音延音 → [内声部层] → 打击乐 → 去撞格
+//   node src/arrange/arrange-all.mjs [--out build/machine_pipeline.csv] [--inner on]
 // 每步都调对应模块的 CLI（模块可单独重跑），并输出 build/manifest.json（每步输入输出的 sha256 + 计数）。
 // 任一步失败 → 立刻非 0 退出，绝不留半成品当"成功"。
+//
+// `--inner on`（默认 off）在长音延音之后插一步 `src/arrange/inner-voice.mjs`（M3-1 内声部/和声层），
+// 它把同刻"旋律以外的 harp 材料"标成 instrument=inner 并追加 voiceRole/innerOf/innerReason 三列；
+// 默认 off 时这一步不跑、不写任何文件，全链路产物与改造前逐字节一致（见 tools/ab-verify.mjs）。
+// `--inner-register keep|relocate|band` 透传给该模块（默认 keep，理由见 docs/M3-1-inner-voice-report.md §4）。
 import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -14,6 +19,10 @@ const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i
 const OUT = opt('out', P.file('machine_pipeline.csv'));
 /** 传给每个子脚本：子进程的默认路径与父进程解析出来的完全相同（已显式给 --in/--out 时也不冲突） */
 const PASS = ['--build', B, '--project', P.project];
+/** 内声部层开关（默认 off）与它的音区映射模式 */
+const INNER = String(opt('inner', 'off')).toLowerCase();
+const INNER_ON = ['on', '1', 'true', 'yes'].includes(INNER);
+const INNER_REGISTER = opt('inner-register', 'keep');
 
 const sha = (p) => (fs.existsSync(p) ? crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0, 16) : null);
 const rows = (p) => (fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim().split(/\r?\n/).length - 1 : 0);
@@ -55,10 +64,20 @@ run('① 音级恢复', 'src/arrange/pitch-fix.mjs', ['--in', BASELINE, '--out',
 run('② 重折 0..24 行', 'src/arrange/fold.mjs', ['--in', f1, '--out', f2, ...PASS], f2);
 run('③ 力度 accent 口径', 'src/arrange/velocity.mjs', ['--accent', '--in', f2, '--out', f3, ...PASS], f3);
 run('④ 长音延音', 'src/arrange/sustain.mjs', ['--in', f3, '--out', f4, ...PASS], f4);
+
+// ④b · 内声部/和声层（M3-1）：只在 --inner on 时跑，默认不产生任何新文件
+const f4b = P.file('pipeline_4b_inner.csv');
+let MAIN = f4;
+if (INNER_ON) {
+  run('④b 内声部层', 'src/arrange/inner-voice.mjs',
+    ['--in', f4, '--out', f4b, '--register', INNER_REGISTER, '--report', P.file('inner-voice-report.json'), ...PASS], f4b);
+  MAIN = f4b;
+}
+
 run('⑤ 打击乐层', 'src/arrange/percussion.mjs', ['--audio', P.audio, '--out', f5, ...PASS], f5);
 
 // 主谱面 + 打击乐：只保留 emit 需要的 7 列（打击乐 CSV 与主谱面列序一致）
-const base = fs.readFileSync(f4, 'utf8').trim().split(/\r?\n/);
+const base = fs.readFileSync(MAIN, 'utf8').trim().split(/\r?\n/);
 const perc = fs.readFileSync(f5, 'utf8').trim().split(/\r?\n/);
 const merge = P.file('pipeline_6_merged.csv');
 fs.writeFileSync(merge, [base[0], ...base.slice(1), ...perc.slice(1)].join('\n') + '\n', 'utf8');
