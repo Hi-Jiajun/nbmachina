@@ -19,6 +19,13 @@ export function spectralDenoise(samples, {
   mode = 'wiener',   // 'wiener' = g = p²/(p² + o·n²)（保留更多音乐）；'subtract' = 经典谱减
   noiseWindow = null, // {startSec, endSec}：用这一段**纯噪声**的频谱当 profile（Audacity/sox 的做法），
                       // 比"分位数盲估"准确得多 —— 盲估会被琴声污染（实测音乐损失≈噪声下降）。
+  // M3-8b：非平稳模式（等价 noisereduce 的 non-stationary 思路）——噪声不再是一个固定 profile，
+  // 而是**每根频点各自的时间轨迹**：取滑动窗内的最小值（窗口内该频点最安静的瞬间≈噪声），
+  // 再乘 margin 当噪声估计。这样"和琴声一起出现、随时间变化的噪声"才估得准（用户反馈：
+  // profile 法在尾声有效，但在弱奏句'还不够'）。
+  noiseMode = 'profile',   // 'profile' | 'slidingMin'
+  minWinSec = 1.5,
+  minMargin = 1.4,
 } = {}) {
   const hop = fftSize >> 2;                       // 75% 重叠（Hann 满足 COLA）
   const win = hannWindow(fftSize);
@@ -44,8 +51,24 @@ export function spectralDenoise(samples, {
 
   // ---- ② 每根频点的噪声底：优先用给定的纯噪声窗（profile），否则退回分位数盲估
   const noise = new Float64Array(binCount);
+  const magsNoise = new Float64Array(nFrames * binCount);
   const col = new Float64Array(nFrames);
-  if (noiseWindow) {
+  if (noiseMode === 'slidingMin') {
+    const half = Math.max(1, Math.round(minWinSec / 2 / (hop / sampleRate)));
+    const colOut = new Float64Array(nFrames);   // ⚠️ 必须双缓冲：原地覆写会让"前一个帧的结果"
+                                                // 被后一个帧当成原始值读 → 最小值一路衰减到 0 → 掩码恒 1（实测各档参数输出完全相同）
+    for (let b = 0; b < binCount; b++) {
+      for (let f = 0; f < nFrames; f++) col[f] = mags[f * binCount + b];
+      for (let f = 0; f < nFrames; f++) {
+        let lo = Infinity;
+        const f0 = Math.max(0, f - half);
+        const f1 = Math.min(nFrames - 1, f + half);
+        for (let g = f0; g <= f1; g++) if (col[g] < lo) lo = col[g];
+        colOut[f] = lo * minMargin;
+      }
+      for (let f = 0; f < nFrames; f++) magsNoise[f * binCount + b] = colOut[f];
+    }
+  } else if (noiseWindow) {
     const f0 = Math.max(0, Math.floor((noiseWindow.startSec * sampleRate) / hop));
     const f1 = Math.min(nFrames - 1, Math.ceil((noiseWindow.endSec * sampleRate) / hop));
     const cnt = Math.max(1, f1 - f0 + 1);
@@ -71,9 +94,10 @@ export function spectralDenoise(samples, {
     const i = new Float64Array(fftSize);
     for (let b = 0; b < binCount; b++) {
       const p = mags[f * binCount + b];
+      const n = noiseMode === 'slidingMin' ? magsNoise[f * binCount + b] : noise[b];
       const g = mode === 'wiener'
-        ? Math.min(1, Math.max(floor, (p * p) / (p * p + oversub * noise[b] * noise[b] + 1e-20)))
-        : Math.min(1, Math.max(floor, 1 - oversub * (noise[b] / (p + 1e-12))));
+        ? Math.min(1, Math.max(floor, (p * p) / (p * p + oversub * n * n + 1e-20)))
+        : Math.min(1, Math.max(floor, 1 - oversub * (n / (p + 1e-12))));
       r[b] = re[f * binCount + b] * g;
       i[b] = im[f * binCount + b] * g;
       if (b > 0 && b < fftSize / 2) {           // 对称补回共轭，保证反变换是实数
@@ -97,3 +121,4 @@ export function spectralDenoise(samples, {
   for (let i = 0; i < samples.length; i++) res[i] = norm[i] > 1e-6 ? out[i] / norm[i] : samples[i];
   return res;
 }
+
