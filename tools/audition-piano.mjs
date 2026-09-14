@@ -27,6 +27,7 @@ const VOICE = opt('voice', 'salamander');
 const LIB = opt('lib', path.join('C:/Users/hiliang/Documents/minecraft/_toolchain/piano/SalamanderGrandPianoV3_OggVorbis/ogg'));
 const SEGS = opt('segments', '0,226,284').split(',').map(Number);
 const SEC = Number(opt('sec', '30'));
+const FULL = argv.includes('--full');          // 整曲 + 全编曲（旋律=真钢琴，其余层=自家合成音色）
 const OUTDIR = opt('out', path.join(B, 'audition'));
 
 /* ---------------- 采样库索引：<音名><八度>v<层>.ogg → {midi: [层1..层N]} ---------------- */
@@ -109,14 +110,27 @@ for (const start of SEGS) {
   const to = Math.round((start + SEC) * SAMPLE_RATE);
   const out = new Float64Array(to - from);
   let mixed = 0;
-  for (const e of melody) {
+  for (const e of (FULL ? events.filter((x) => x.kind === 'synth') : melody)) {
     const t = e.step * STEP_SECONDS;
     if (t < start || t > start + SEC) continue;
+    const isMelody = e.timbre === 'strings';
     const target = e.midi + root;
-    const src = nearest(target);
-    const layers = index.get(src);
-    const ratio = 2 ** ((target - src) / 12);          // 变调比（±1.5 半音内）
-    const s = resample(pcmOf(layerOf(layers, e.volume === undefined ? 0.8 : Number(e.volume)).file), ratio);
+    let s;
+    if (isMelody) {                                    // 旋律：真钢琴（最近采样 + 变调 + 力度分层）
+      const src = nearest(target);
+      const layers = index.get(src);
+      const ratio = 2 ** ((target - src) / 12);
+      const raw = resample(pcmOf(layerOf(layers, e.volume === undefined ? 0.8 : Number(e.volume)).file), ratio);
+      // 真钢琴库是满幅采样，直接叠加会把伴奏压小（首版峰值 2.74 → 整体被压 0.36）→ 按配比缩放
+      const melGain = Number(opt('melody-gain', '0.42'));
+      s = new Float64Array(raw.length);
+      for (let i = 0; i < raw.length; i++) s[i] = raw[i] * melGain;
+    } else {                                           // 其余层：自家合成音色（同一套混合代码）
+      const dir = path.join(B, 'audio_nbforge', 'wav', e.timbre);
+      const f = path.join(dir, `${e.note}.wav`);
+      if (!fs.existsSync(f)) { continue; }
+      s = pcmOf(f);
+    }
     const off = Math.round(t * SAMPLE_RATE) - from;
     const g = Number(e.volume);                        // 谱面力度：层已按力度选了，这里只做小幅微调
     for (let i = 0; i < s.length; i++) {
