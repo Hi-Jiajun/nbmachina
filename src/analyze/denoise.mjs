@@ -24,9 +24,13 @@ export function spectralDenoise(samples, {
   // 再乘 margin 当噪声估计。这样"和琴声一起出现、随时间变化的噪声"才估得准（用户反馈：
   // profile 法在尾声有效，但在弱奏句'还不够'）。
   // ⚠️ 听感判负（2026-09-14，用户：'二级比一级更糟糕'）：slidingMin（等价 noisereduce 非平稳思路）虽然能把安静段噪声再降 11dB，但会带来比一级更差的听感伪影 —— 默认不启用，只作研究留档。
-  noiseMode = 'profile',   // 'profile'（默认，已过听感）| 'slidingMin'（未过听感）
+  // ⚠️ 两次听感判负（用户 2026-09-14）：slidingMin '二级比一级更糟糕'；决策引导 dd '都不如一级'。
+  // 结论：**默认只用 'profile'（一级）**'——'profile'（默认，已过听感）| 'slidingMin' | 'dd'（两者均未过听感，仅留档）
+  noiseMode = 'profile',
   minWinSec = 1.5,
   minMargin = 1.4,
+  alpha = 0.98,       // 'dd' 模式：决策引导先验 SNR 的递归平滑系数（越大越平滑、音乐噪声越少）
+  ddFloorDb = -18,    // 'dd' 模式的谱底（每个频点最多衰减多少 dB）
 } = {}) {
   const hop = fftSize >> 2;                       // 75% 重叠（Hann 满足 COLA）
   const win = hannWindow(fftSize);
@@ -54,7 +58,7 @@ export function spectralDenoise(samples, {
   const noise = new Float64Array(binCount);
   const magsNoise = new Float64Array(nFrames * binCount);
   const col = new Float64Array(nFrames);
-  if (noiseMode === 'slidingMin') {
+  if (noiseMode === 'slidingMin' || noiseMode === 'dd') {
     const half = Math.max(1, Math.round(minWinSec / 2 / (hop / sampleRate)));
     const colOut = new Float64Array(nFrames);   // ⚠️ 必须双缓冲：原地覆写会让"前一个帧的结果"
                                                 // 被后一个帧当成原始值读 → 最小值一路衰减到 0 → 掩码恒 1（实测各档参数输出完全相同）
@@ -89,16 +93,34 @@ export function spectralDenoise(samples, {
   // ---- ③ 逐帧逐频点算增益并做反变换
   const out = new Float64Array(samples.length + fftSize);
   const floor = 10 ** (floorDb / 20);
+  // 'dd' 模式的状态：上一帧的增益与后验 SNR（决策引导递归）
+  const gPrev = new Float64Array(binCount);
+  const gammaPrev = new Float64Array(binCount);
   const norm = new Float64Array(samples.length + fftSize);
   for (let f = 0; f < nFrames; f++) {
     const r = new Float64Array(fftSize);
     const i = new Float64Array(fftSize);
     for (let b = 0; b < binCount; b++) {
       const p = mags[f * binCount + b];
-      const n = noiseMode === 'slidingMin' ? magsNoise[f * binCount + b] : noise[b];
-      const g = mode === 'wiener'
-        ? Math.min(1, Math.max(floor, (p * p) / (p * p + oversub * n * n + 1e-20)))
-        : Math.min(1, Math.max(floor, 1 - oversub * (n / (p + 1e-12))));
+      // dd 与 slidingMin 都用逐频点的时间轨迹（magsNoise）；只有 profile 模式用固定 profile 数组。
+      // ⚠️ 这里漏写 'dd' 导致它读到全 0 的 profile → 增益恒 1、各档参数输出完全相同（本项目第三次同款征兆）。
+      const n = (noiseMode === 'slidingMin' || noiseMode === 'dd') ? magsNoise[f * binCount + b] : noise[b];
+      let g;
+      if (noiseMode === 'dd') {
+        // 决策引导（Ephraim–Malah 族）：ξ_k = α·G²_{k-1}·γ_{k-1} + (1-α)·max(γ_k−1, 0)，
+        // 增益用 Wiener 形式 ξ/(1+ξ)。跨帧先验让"瞬时低于噪声底"的频点不被误杀，
+        // 从而抑制音乐噪声（纯谱减的致命伤）。
+        const n2 = n * n + 1e-20;
+        const gamma = (p * p) / n2;
+        const xi = Math.max(1e-6, alpha * gPrev[b] * gPrev[b] * gammaPrev[b] + (1 - alpha) * Math.max(gamma - 1, 0));
+        g = Math.min(1, Math.max(10 ** (ddFloorDb / 20), xi / (1 + xi)));
+        gPrev[b] = g;
+        gammaPrev[b] = gamma;
+      } else if (mode === 'wiener') {
+        g = Math.min(1, Math.max(floor, (p * p) / (p * p + oversub * n * n + 1e-20)));
+      } else {
+        g = Math.min(1, Math.max(floor, 1 - oversub * (n / (p + 1e-12))));
+      }
       r[b] = re[f * binCount + b] * g;
       i[b] = im[f * binCount + b] * g;
       if (b > 0 && b < fftSize / 2) {           // 对称补回共轭，保证反变换是实数
@@ -122,5 +144,6 @@ export function spectralDenoise(samples, {
   for (let i = 0; i < samples.length; i++) res[i] = norm[i] > 1e-6 ? out[i] / norm[i] : samples[i];
   return res;
 }
+
 
 
