@@ -179,14 +179,21 @@ test('sounds.json：每个采样一条事件，名字与文件一一对应', () 
   assert.deepEqual(Object.keys(json).sort(),
     ['bass_g0', 'bell_cs4', 'demo_bass', 'demo_bell', 'demo_pad', 'demo_strings', 'silent', 'strings_fs4']);
   assert.deepEqual(json.strings_fs4.sounds, [
-    { name: 'strings/fs4', stream: false, attenuation_distance: 16 },
+    { name: 'nbforge:strings/fs4', stream: false, attenuation_distance: 16 },
   ]);
-  assert.equal(json.bell_cs4.sounds[0].name, 'bell/cs4');
+  assert.equal(json.bell_cs4.sounds[0].name, 'nbforge:bell/cs4');
+  // 采样名必须**带命名空间**：不带就会被客户端当 minecraft: 解析 → 找不到文件 → 事件零采样
+  // （2026-09-14 客户端日志实测：File minecraft:sounds/strings/g3.ogg does not exist）
+  for (const key of Object.keys(json)) {
+    for (const s of json[key].sounds) {
+      assert.ok(s.name.includes(':'), `${key} 的采样名缺命名空间：${s.name}`);
+    }
+  }
   // 别名必须落在**同名音色目录**里（demo_bell → bell/…）；
   // 至于"文件真的存在"，由下面"zip 里每个 name 都指向真实条目"那条测试在真实产物上兜住。
   for (const [key, a] of Object.entries(DEMO_ALIASES)) {
     assert.ok(json[key], `缺 demo 别名 ${key}`);
-    assert.equal(json[key].sounds[0].name, a.path);
+    assert.equal(json[key].sounds[0].name, `nbforge:${a.path}`);
     const timbre = key.slice('demo_'.length);
     assert.ok(a.path.startsWith(`${timbre}/`), `${key} 应指向 ${timbre}/…，实际 ${a.path}`);
   }
@@ -249,7 +256,8 @@ test('资源包构建：目录结构 + zip 体积 <15MB（用真实采样目录�
   const sounds = JSON.parse(fs.readFileSync(path.join(out, 'nbforge_resources', 'assets/nbforge/sounds.json'), 'utf8'));
   for (const key of Object.keys(sounds)) {
     for (const s of sounds[key].sounds) {
-      assert.ok(names.includes(`assets/nbforge/sounds/${s.name}.ogg`), `${key} → ${s.name}.ogg 不在 zip 里`);
+      const rel = s.name.replace(/^[a-z0-9_]+:/, '');   // 去掉命名空间前缀再对 zip 路径
+      assert.ok(names.includes(`assets/nbforge/sounds/${rel}.ogg`), `${key} → ${rel}.ogg 不在 zip 里`);
     }
   }
 });

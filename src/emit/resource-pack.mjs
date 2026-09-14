@@ -28,7 +28,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 import { buildZip } from './zip-writer.mjs';
 import {
-  REGISTERS, TIMBRES, noteFileName, registerSize, soundPathOf,
+  REGISTERS, SOUND_NAMESPACE, TIMBRES, noteFileName, registerSize, soundPathOf,
 } from '../synth/voices.mjs';
 import { resolvePaths } from '../core/paths.mjs';
 
@@ -108,13 +108,17 @@ export function buildSoundsJson(entries) {
   const out = {};
   for (const e of entries) {
     out[`${e.timbre}_${noteFileName(e.midi)}`] = {
-      sounds: [{ name: soundPathOf(e.timbre, e.midi), stream: false, attenuation_distance: 16 }],
+      // ⚠️ `name` 必须**写全命名空间**：不带命名空间时客户端按 `minecraft:` 解析，
+      // 于是去找 `minecraft:sounds/strings/g3.ogg` → 找不到 → 事件变成"零采样"
+      // → 每个音都报 `Unable to play empty soundEvent`（就是"自研音色一直听不到"的真根因，
+      //    2026-09-14 15:36 客户端日志实测）。
+      sounds: [{ name: `${SOUND_NAMESPACE}:${soundPathOf(e.timbre, e.midi)}`, stream: false, attenuation_distance: 16 }],
     };
   }
   for (const [key, a] of Object.entries(DEMO_ALIASES)) {
-    out[key] = { sounds: [{ name: a.path, stream: false, attenuation_distance: a.attenuation }] };
+    out[key] = { sounds: [{ name: `${SOUND_NAMESPACE}:${a.path}`, stream: false, attenuation_distance: a.attenuation }] };
   }
-  out[SILENT_EVENT] = { sounds: [{ name: SILENT_EVENT, stream: false }] };
+  out[SILENT_EVENT] = { sounds: [{ name: `${SOUND_NAMESPACE}:${SILENT_EVENT}`, stream: false }] };
   return out;
 }
 
