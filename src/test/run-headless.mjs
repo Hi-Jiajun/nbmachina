@@ -168,6 +168,9 @@ try {
   // 监听计数（#mh/#mb）只在 #mon=1 时累加：这里显式打开，避免"靠存档里残留的 #mon 状态"
   // 导致下面两条断言随世界状态飘（实测出现过增量恒 0 的假失败）。
   await send('function styx:play/monitor_on', 400);
+  // M3-4：自研音色那条链（styx:play/hifi/*）过去**没有接线**，玩家开监听听不到任何自研音色
+  // （2026-09-14 客户端实测）。这里显式打开高保真监听并断言它每刻真的在触发。
+  await send('function styx:play/monitor_hifi_on', 400);
   if (MODE === 'hi') {
     await send('tick rate 100', 800); // 控制台是权限等级 4，只有玩家聊天里受等级 3 限制的 /tick 能在控制台做
   }
@@ -177,7 +180,7 @@ try {
   await send('tick freeze', 600);
   base = {};
   const baselineReads = [];
-  for (const [k, obj] of [['t', 'styx.t'], ['on', 'styx.flag'], ['hits', 'styx.flag'], ['mh', 'styx.flag'], ['mb', 'styx.flag']]) {
+  for (const [k, obj] of [['t', 'styx.t'], ['on', 'styx.flag'], ['hits', 'styx.flag'], ['mh', 'styx.flag'], ['mb', 'styx.flag'], ['hifiPlays', 'styx.hifi']]) {
     base[k] = await readScore(`#${k}`, obj);
     baselineReads.push(`${k}=${base[k]}`);
   }
@@ -195,6 +198,7 @@ try {
   hits = await readScore('#hits', 'styx.flag');
   mh = await readScore('#mh', 'styx.flag');
   mb = await readScore('#mb', 'styx.flag');
+  const hifiPlays = await readScore('#hifiPlays', 'styx.hifi');
   // MSPT 要在"真实跑"的状态下量：解冻跑 ~5 秒再查（`tick query` 的行是 "Average time per tick: X ms"）
   await send('tick unfreeze', 500);
   await sleep(5000);
@@ -215,6 +219,9 @@ try {
     packCount === null ? '读不到数据包派发表' : `数据包 ${packCount} vs 谱面 ${exp.hits}`);
   if (mh !== null) check(`监听 钢琴 增量 = 期望 ${exp.harp}`, Math.abs((mh - base.mh) - exp.harp) <= 1, `实际 ${mh - base.mh}`);
   if (mb !== null) check(`监听 贝斯 增量 = 期望 ${exp.bass}`, Math.abs((mb - base.mb) - exp.bass) <= 1, `实际 ${mb - base.mb}`);
+  // 自研音色链：每个音符一条 /playsound，增量应当等于同一窗口的音符数（接不上线时恒为 0）
+  check(`自研音色 每刻触发增量 = 期望 ${exp.hits}`, hifiPlays !== null && Math.abs(hifiPlays - base.hifiPlays) >= exp.hits - 1,
+    hifiPlays === null ? '读不到 #hifiPlays' : `实际 ${hifiPlays - base.hifiPlays}`);
   const loadErrors = (out.match(/Failed to load function/g) || []).length;
   check('0 条 Failed to load function', loadErrors === 0, `实际 ${loadErrors}`);
   const msptBudget = TPS === 100 ? 10 : 50;

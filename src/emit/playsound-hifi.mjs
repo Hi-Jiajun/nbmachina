@@ -325,6 +325,36 @@ export function wiringState(datapackDir = DP) {
   };
 }
 
+/**
+ * **自己接线**（M3-4）：在 `styx:play/tick` 末尾追加一行
+ * `execute if score #hifi styx.flag matches 1 run function styx:play/hifi/tick`。
+ *
+ * 为什么必须自己接：M2-1 交付时只生成了函数、把接线留给"根代理"，结果一直没接——
+ * 玩家开监听后没有任何自研音色（2026-09-14 15:10 实测：`Unable to play empty soundEvent` 之后
+ * 就是完全没声音，因为每刻根本没调用 hifi/tick）。
+ *
+ * 安全性：这一行**带 #hifi 开关**，而 #hifi 只有 `styx:play/monitor_hifi_on` 会置 1，
+ * `monitor_hifi_off` 与 `play/reset` 都会清 0 → 默认路径（没开监听）行为不变。
+ * 幂等：已经接过就不再追加。
+ *
+ * 注意顺序：`play/` 整个目录是 `datapack-playback.mjs` 生成时重建的，所以**本文件必须后跑**
+ * （流水线顺序：emit:playback → … → emit:hifi）。重跑 playback 之后要再跑一次本文件。
+ */
+export function wireHifiTick(datapackDir = DP) {
+  const file = path.join(datapackDir, 'function', 'play', 'tick.mcfunction');
+  if (!fs.existsSync(file)) {
+    return { wired: false, added: false, reason: 'play/tick.mcfunction 不存在（先跑 node src/emit/datapack-playback.mjs）' };
+  }
+  const text = fs.readFileSync(file, 'utf8');
+  if (text.includes('styx:play/hifi/tick')) {
+    return { wired: true, added: false, reason: '已经接过（幂等跳过）' };
+  }
+  const line = '# hifi（自研音色）每刻入口：只在 #hifi=1（monitor_hifi_on）时生效（M3-4 自动接线）\n'
+    + 'execute if score #hifi styx.flag matches 1 run function styx:play/hifi/tick\n';
+  fs.writeFileSync(file, text.replace(/\n*$/, '\n') + line, 'utf8');
+  return { wired: true, added: true, reason: '已追加到 styx:play/tick 末尾' };
+}
+
 /* ------------------------------------------------------------------- CLI */
 
 function main() {
@@ -346,6 +376,7 @@ function main() {
   }
   const functions = buildHifiFunctions(notes, { bassOctave, inner });
   const written = writeHifiFunctions(functions);
+  const wired = wireHifiTick();   // M3-4：自己接上每刻入口（只在 #hifi=1 时生效）
   const wiring = wiringState();
 
   const byTimbre = Object.entries(stats.byTimbre).map(([k, v]) => `${k} ${v}`).join(' / ');
@@ -360,7 +391,8 @@ function main() {
   }
   console.log(`播放指令合计 ${events.length} 条/套表（两种刻率各一套）；写出函数 ${written.length} 个 → ${path.join(DP, 'function', 'play', 'hifi')}`);
   if (wiring.wired) {
-    console.log(`接线：已接（${wiring.inPlayTick ? 'play/tick' : ''}${wiring.inTag ? ' minecraft:tick 标签' : ''}）`);
+    console.log(`接线：已接（${wiring.inPlayTick ? 'play/tick' : ''}${wiring.inTag ? ' minecraft:tick 标签' : ''}）`
+      + `${wired.added ? '—— 本次自动追加（M3-4）' : ''}`);
   } else {
     console.warn(`[警告] 未接线：styx:play/hifi/tick 还没有被每刻调用。${wiring.hint}`);
   }
