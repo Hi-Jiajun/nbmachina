@@ -102,9 +102,10 @@ export function parseScoreCsv(text) {
 /**
  * 谱面 → 播放事件（音色映射的唯一入口）。
  * @param {Array<{step:number,instr:string,row:number,vol:number}>} notes
- * @param {{bassOctave?:number, inner?:string}} [opts] bassOctave 默认 +1（监听里小音箱放不出 25Hz 的基频）
+ * @param {{bassOctave?:number, inner?:string}} [opts] bassOctave 默认 0（**原曲音高，不做任何升降**；
+ *   旧默认 +1 是为了"小音箱放不出 25Hz 基频"，2026-09-14 按用户要求取消："音高全部按原曲"）
  */
-export function planHifi(notes, { bassOctave = 1, inner = 'bell' } = {}) {
+export function planHifi(notes, { bassOctave = 0, inner = 'bell' } = {}) {
   if (!INNER_CHOICES.includes(inner)) throw new Error(`--inner 只支持 ${INNER_CHOICES.join('/')}，收到 ${inner}`);
   const fam = (instr) => INSTRUMENT_ALIAS[String(instr ?? '').toLowerCase()] ?? null;
   /** 显式内声部标签（M3-1）：`instrument=inner` 或 `voiceRole=inner` 都认 */
@@ -399,7 +400,8 @@ function main() {
   const notesCsv = resolvePath(opt('notes', fs.existsSync(`${BUILD}/machine_pipeline.csv`)
     ? `${BUILD}/machine_pipeline.csv`
     : P.machine));
-  const bassOctave = Number(opt('bass-octave', 1));
+  // 原曲音高：默认不升八度（用户 2026-09-14："音高全部按原曲，不要单独去升降八度"）
+  const bassOctave = Number(opt('bass-octave', 0));
   const inner = opt('inner', 'bell');
   const vel = Number(opt('vel', REFERENCE_VEL));
   void vel;
