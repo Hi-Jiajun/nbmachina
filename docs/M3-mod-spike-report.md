@@ -139,6 +139,12 @@ robocopy testserver _toolchain\spike-testserver /E          # 202 MB 副本
 java -Xms1G -Xmx2G -Dnbforge.selftest=true <proxy props> -jar fabric-server-launch.jar nogui
 ```
 
+> **并行环境说明（如实记录）**：本次预研期间工作区里还有另一条任务在**真 `testserver`** 上反复起停做 e2e
+> （真服 `logs/latest.log`：14:24:43 起、14:25:55 停，端口 25565、`level-name=world`；14:24–14:26 的
+> `world/**` 与 `server.properties` 写入都来自它）。本预研对真 `testserver` **只有读操作**（robocopy 取源 +
+> 读配置/日志），**没有**创建 `testserver/mods/`、**没有**改它的 `server.properties`；spike 服务端用
+> **25599 端口 + 新世界 `nbforge_spike`**，与它互不干扰。副本 `world/` 是拷贝时的快照，本次也没被使用。
+
 关键日志（全文 `build/m3-mod-spike/selftest-server-latest.log`，另 `testserver` 原件未改）：
 
 ```
