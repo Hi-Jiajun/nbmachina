@@ -81,10 +81,15 @@ export function spectralDenoise(samples, {
         i[fftSize - b] = -i[b];
       }
     }
-    fftInPlace(r, i);                           // 正变换与反变换同一实现（只差 1/N 缩放）
+    // 反变换：不假设 fftInPlace 的缩放/符号约定 —— 用"共轭 → 前向 FFT → 共轭 → /N"的标准等价式。
+    // （第一版直接对共轭对称谱再调一次 fftInPlace，实测重建有 5–8dB 的频带失真：增益全 1 时
+    //   输出也不等于输入 —— 这正是"越调越糟"的根因。）
+    for (let k = 0; k < fftSize; k++) i[k] = -i[k];
+    fftInPlace(r, i);
+    for (let k = 0; k < fftSize; k++) i[k] = -i[k];
     const off = f * hop;
     for (let k = 0; k < fftSize; k++) {
-      out[off + k] += r[k] / fftSize;           // 反变换缩放
+      out[off + k] += r[k] / fftSize;
       norm[off + k] += win[k];
     }
   }
