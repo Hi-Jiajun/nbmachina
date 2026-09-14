@@ -1,0 +1,94 @@
+// M3-8 · 谱减法降噪（Berouti 式过减 + 谱底保留）：比 ffmpeg 的 afftdn 更可控
+//
+// 为什么自己写：afftdn 只有"整体降多少 dB"一个旋钮，实测 tn=0/nr=8 时
+// 9–16kHz 的嘶声能降 4.8dB，但 **120–1200Hz 的室内/编码噪声一点没动**（17.1→17.3），
+// 而用户听到的"还有底噪"主要就在中低频。谱减法可以：① 每根频点各自估噪声底（min-statistics）；
+// ② 用**过减系数**把噪声压到谱底以下；③ 设**谱底**（每频点最多衰多少 dB）避免把琴声削空。
+import { fftInPlace, hannWindow } from './dsp.mjs';
+
+/**
+ * @param {Float64Array} samples 单声道
+ * @param {object} [opts]
+ * @param {number} [opts.fftSize] 窗长（2048 ≈ 46ms；越小越能跟瞬态，越大频率分辨率越好）
+ * @param {number} [opts.oversub] 过减系数（1.0 = 经典谱减；1.5–2.5 更狠）
+ * @param {number} [opts.floorDb] 谱底：每频点最多衰减这么多 dB（-20 = 留 10% 幅度）
+ * @param {number} [opts.noisePct] 噪声底估计用"每频点第几百分位"（钢琴录音里每根频点都会在某个时刻落到噪声底）
+ */
+export function spectralDenoise(samples, {
+  sampleRate = 44100, fftSize = 2048, oversub = 2.0, floorDb = -22, noisePct = 0.04,
+  mode = 'wiener',   // 'wiener' = g = p²/(p² + o·n²)（保留更多音乐）；'subtract' = 经典谱减
+  noiseWindow = null, // {startSec, endSec}：用这一段**纯噪声**的频谱当 profile（Audacity/sox 的做法），
+                      // 比"分位数盲估"准确得多 —— 盲估会被琴声污染（实测音乐损失≈噪声下降）。
+} = {}) {
+  const hop = fftSize >> 2;                       // 75% 重叠（Hann 满足 COLA）
+  const win = hannWindow(fftSize);
+  const nFrames = Math.max(1, Math.ceil((samples.length - fftSize) / hop) + 1);
+  const binCount = fftSize / 2 + 1;
+
+  // ---- ① 正变换，保留复数谱
+  const re = new Float64Array(nFrames * binCount);
+  const im = new Float64Array(nFrames * binCount);
+  const mags = new Float64Array(nFrames * binCount);
+  for (let f = 0; f < nFrames; f++) {
+    const off = f * hop;
+    const r = new Float64Array(fftSize);
+    const i = new Float64Array(fftSize);
+    for (let k = 0; k < fftSize; k++) r[k] = (samples[off + k] ?? 0) * win[k];
+    fftInPlace(r, i);
+    for (let b = 0; b < binCount; b++) {
+      re[f * binCount + b] = r[b];
+      im[f * binCount + b] = i[b];
+      mags[f * binCount + b] = Math.hypot(r[b], i[b]);
+    }
+  }
+
+  // ---- ② 每根频点的噪声底：优先用给定的纯噪声窗（profile），否则退回分位数盲估
+  const noise = new Float64Array(binCount);
+  const col = new Float64Array(nFrames);
+  if (noiseWindow) {
+    const f0 = Math.max(0, Math.floor((noiseWindow.startSec * sampleRate) / hop));
+    const f1 = Math.min(nFrames - 1, Math.ceil((noiseWindow.endSec * sampleRate) / hop));
+    const cnt = Math.max(1, f1 - f0 + 1);
+    for (let b = 0; b < binCount; b++) {
+      let acc = 0;
+      for (let f = f0; f <= f1; f++) acc += mags[f * binCount + b];
+      noise[b] = acc / cnt;
+    }
+  } else {
+    for (let b = 0; b < binCount; b++) {
+      for (let f = 0; f < nFrames; f++) col[f] = mags[f * binCount + b];
+      const sorted = Float64Array.from(col).sort();
+      noise[b] = sorted[Math.floor(nFrames * noisePct)] ?? 0;
+    }
+  }
+
+  // ---- ③ 逐帧逐频点算增益并做反变换
+  const out = new Float64Array(samples.length + fftSize);
+  const floor = 10 ** (floorDb / 20);
+  const norm = new Float64Array(samples.length + fftSize);
+  for (let f = 0; f < nFrames; f++) {
+    const r = new Float64Array(fftSize);
+    const i = new Float64Array(fftSize);
+    for (let b = 0; b < binCount; b++) {
+      const p = mags[f * binCount + b];
+      const g = mode === 'wiener'
+        ? Math.min(1, Math.max(floor, (p * p) / (p * p + oversub * noise[b] * noise[b] + 1e-20)))
+        : Math.min(1, Math.max(floor, 1 - oversub * (noise[b] / (p + 1e-12))));
+      r[b] = re[f * binCount + b] * g;
+      i[b] = im[f * binCount + b] * g;
+      if (b > 0 && b < fftSize / 2) {           // 对称补回共轭，保证反变换是实数
+        r[fftSize - b] = r[b];
+        i[fftSize - b] = -i[b];
+      }
+    }
+    fftInPlace(r, i);                           // 正变换与反变换同一实现（只差 1/N 缩放）
+    const off = f * hop;
+    for (let k = 0; k < fftSize; k++) {
+      out[off + k] += r[k] / fftSize;           // 反变换缩放
+      norm[off + k] += win[k];
+    }
+  }
+  const res = new Float64Array(samples.length);
+  for (let i = 0; i < samples.length; i++) res[i] = norm[i] > 1e-6 ? out[i] / norm[i] : samples[i];
+  return res;
+}
