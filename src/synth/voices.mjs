@@ -14,7 +14,7 @@
 import { midiName, midiToFreq } from '../analyze/dsp.mjs';
 
 import {
-  SAMPLE_RATE, fmPad, karplusStrong, modalBell, pianoVoice,
+  SAMPLE_RATE, applyEq, fmPad, karplusStrong, modalBell, pianoVoice,
 } from './synth.mjs';
 
 export const SOUND_NAMESPACE = 'nbforge';
@@ -58,6 +58,14 @@ export const VOICE_PARAMS = {
   // 拨弦：明亮、衰减快，靠琴体 EQ 加木头感
   strings: {
     kind: 'karplus',
+    // M3-7：用户听感 —— "旧 strings 还可以，但中高音不够空灵"。
+    // 按真演奏的频带差距（320–640 少 8dB、1.3–2.5k 少 8dB）做**温和**补偿：
+    // 只动 350Hz–3.5kHz，5kHz 以上**不加**（用户实测 5–11kHz 补过头会"刺耳"）。
+    eq: [
+      { freq: 380, q: 0.8, gainDb: 4 },
+      { freq: 1800, q: 0.7, gainDb: 5 },
+      { freq: 3400, q: 0.7, gainDb: 2.5 },
+    ],
     damping: [0.55, 0.25], // 力度 0→1：环路阻尼，越大高次泛音衰减越快（越暗）
     excitationLowpass: [0.90, 0.30], // 力度 0→1：激励低通极点（≈750Hz → ≈8.4kHz）
     pickPosition: 0.18, // 拨弦位置：压掉第 5~6 次泛音，介于"太薄(0.5)"与"太闷(0.05)"之间
@@ -174,13 +182,30 @@ export function renderVoice(timbre, midi, { vel = REFERENCE_VEL, sampleRate = SA
   const freq = midiToFreq(midi);
   const durationSec = durationSecOf(timbre, freq);
   const seed = seedOf(timbre, midi);
+  let samples;
   if (params.kind === 'karplus') {
-    return karplusStrong({ ...params, freq, sampleRate, durationSec, vel, seed });
+    samples = karplusStrong({ ...params, freq, sampleRate, durationSec, vel, seed });
+  } else if (params.kind === 'additive') {
+    samples = fmPad({ ...params, freq, sampleRate, durationSec, vel });
+  } else if (params.kind === 'modal') {
+    samples = modalBell({ ...params, freq, sampleRate, durationSec, vel, seed });
+  } else if (params.kind === 'piano') {
+    samples = pianoVoice({ ...params, freq, sampleRate, durationSec, vel, seed });
+  } else {
+    throw new Error(`未知合成算法：${params.kind}`);
   }
-  if (params.kind === 'additive') return fmPad({ ...params, freq, sampleRate, durationSec, vel });
-  if (params.kind === 'modal') return modalBell({ ...params, freq, sampleRate, durationSec, vel, seed });
-  if (params.kind === 'piano') return pianoVoice({ ...params, freq, sampleRate, durationSec, vel, seed });
-  throw new Error(`未知合成算法：${params.kind}`);
+  // M3-7：可选的参数均衡（目前只有 strings 用：温和提亮中高、不碰 5kHz 以上）
+  if (params.eq) {
+    samples = applyEq(samples, params.eq, sampleRate);
+    // EQ 会抬峰值 → 重新归一到 0.99，守住"不削波"的契约（相对频谱不变）
+    let m = 0;
+    for (const s of samples) m = Math.max(m, Math.abs(s));
+    if (m > 0.99) {
+      const g = 0.99 / m;
+      for (let i = 0; i < samples.length; i++) samples[i] *= g;
+    }
+  }
+  return samples;
 }
 
 /** 渲染任务清单（render-all.mjs 与测试共用，保证"包里有什么"与"报了什么"一致） */

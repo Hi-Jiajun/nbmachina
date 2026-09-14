@@ -407,8 +407,9 @@ function main() {
   // 原曲音高：默认不升八度（用户 2026-09-14："音高全部按原曲，不要单独去升降八度"）
   const bassOctave = Number(opt('bass-octave', 0));
   const inner = opt('inner', 'bell');
-  // 旋律层音色：流水线默认用新的钢琴类（M3-6，按真演奏频谱标定）；--melody strings 可回到 M2-1 拨弦
-  const melody = opt('melody', 'piano');
+  // 旋律层音色：2026-09-14 用户听感判定 —— 新的 piano（非谐加性+混响）"电子味重、高频刺耳、整体不如旧音色"，
+  // 所以默认回到 M2-1 的 strings（Karplus–Strong 拨弦，用户认可），piano 保留为 --melody piano 实验项。
+  const melody = opt('melody', 'strings');
   const vel = Number(opt('vel', REFERENCE_VEL));
   void vel;
 

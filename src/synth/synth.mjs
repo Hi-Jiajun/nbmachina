@@ -66,6 +66,38 @@ export function schroederReverb(samples, { sampleRate = SAMPLE_RATE, rt60 = 1.3,
 
 /* ------------------------------------------------------- M3-6 · 钢琴类音色 */
 
+/* ------------------------------------------------------- M3-7 · 参数均衡 */
+
+/** RBJ 峰值均衡（peaking EQ）：给已合成的采样做"温和提亮/压刺"的后处理 */
+export function peakingEq(samples, { sampleRate = SAMPLE_RATE, freq, q = 0.7, gainDb = 0 }) {
+  const A = 10 ** (gainDb / 40);
+  const w0 = (2 * Math.PI * freq) / sampleRate;
+  const alpha = Math.sin(w0) / (2 * q);
+  const cosw = Math.cos(w0);
+  const b0 = 1 + alpha * A;
+  const b1 = -2 * cosw;
+  const b2 = 1 - alpha * A;
+  const a0 = 1 + alpha / A;
+  const a1 = -2 * cosw;
+  const a2 = 1 - alpha / A;
+  const out = new Float64Array(samples.length);
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < samples.length; i++) {
+    const x0 = samples[i];
+    const y0 = (b0 / a0) * x0 + (b1 / a0) * x1 + (b2 / a0) * x2 - (a1 / a0) * y1 - (a2 / a0) * y2;
+    out[i] = y0;
+    x2 = x1; x1 = x0; y2 = y1; y1 = y0;
+  }
+  return out;
+}
+
+/** 一串频带依次过（bands: [{freq, q, gainDb}]） */
+export function applyEq(samples, bands, sampleRate = SAMPLE_RATE) {
+  let s = samples;
+  for (const b of bands) s = peakingEq(s, { sampleRate, ...b });
+  return s;
+}
+
 /**
  * 钢琴类：**非谐加性合成 + 锤击瞬态 + 扩散尾音**（M3-6，按真演奏的频谱标定）。
  *

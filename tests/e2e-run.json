@@ -1,5 +1,5 @@
 {
-  "at": "2026-09-14T08:15:24.548Z",
+  "at": "2026-09-14T08:57:08.698Z",
   "mode": "lo",
   "tps": 20,
   "ticks": 600,
@@ -10,7 +10,7 @@
     "hits": 7,
     "mh": 4,
     "mb": 3,
-    "hifiPlays": 7
+    "hifiPlays": 9
   },
   "positions": [
     {
@@ -54,7 +54,7 @@
     "hits": 302,
     "mh": 114,
     "mb": 188,
-    "mspt": 7.2
+    "mspt": 7.8
   },
   "delta": {
     "t": 601,
@@ -118,7 +118,7 @@
     {
       "name": "MSPT ≤ 50（20 tps 的单刻预算）",
       "ok": true,
-      "detail": "7.2 ms"
+      "detail": "7.8 ms"
     }
   ]
 }

@@ -25,7 +25,7 @@ import { encodeOgg, ffmpegAvailable } from './ogg.mjs';
 import { SAMPLE_RATE, peak, rms } from './synth.mjs';
 import { dominantPeak, spectralCentroid } from './spectrum.mjs';
 import {
-  REFERENCE_VEL, REGISTERS, TIMBRES, listRenderJobs, noteFileName, registerSize, renderVoice,
+  REFERENCE_VEL, REGISTERS, TIMBRES, VOICE_PARAMS, listRenderJobs, noteFileName, registerSize, renderVoice,
 } from './voices.mjs';
 import { resolvePaths } from '../core/paths.mjs';
 
@@ -91,7 +91,7 @@ for (const job of jobs) {
   // 判据改成：找一个整数 k∈1..10，使 freq/k 落在基频 ±1% 内；其它音色仍按老口径（k=1）。
   let err = errPct(freq, job.freq);
   let harmonic = 1;
-  if (job.timbre === 'piano') {
+  if (job.timbre === 'piano' || VOICE_PARAMS[job.timbre]?.eq) {
     for (let k = 1; k <= 10; k++) {
       const e = errPct(freq / k, job.freq);
       if (e < err) { err = e; harmonic = k; }
