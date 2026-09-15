@@ -28,5 +28,22 @@ node src/synth/render-all.mjs --out build/audio_nbforge   # WAV → OGG（libvor
 因此资源包的发声内容不涉及第三方版权（不采样原曲、不采样商业音源、不下载网络素材）。
 合成算法与参数的取舍见 `docs/M2-1-report.md`。
 
-Ogg/Vorbis 编码调用本机 `ffmpeg`（仓库不分发任何二进制）；若日后引入任何采样素材，
-必须按设计文档 ⑦ 的要求逐条登记来源与许可证（CC0/公有领域优先）。
+Ogg/Vorbis 编码调用本机 `ffmpeg`（仓库不分发任何二进制）。
+
+---
+
+## 第三方采样库（M3-13 起：真乐器路线）
+
+以下采样库用于**离线渲染**（`tools/render-ensemble.mjs`、`tools/audition-piano.mjs`）与后续
+mod 音源。采样文件本体**不进仓库**（存放在仓库外的 `_toolchain/`，已被 `.gitignore` 忽略），
+仓库只记录来源、规格与核验结果（见 `docs/M3-13-audio-sources.md`）。
+**用它们制作并发布音频成品时，必须按下表署名（CC-BY 3.0 的署名义务）。**
+
+| 库 | 作者 / 录音 | 许可 | 用到的规格 | 来源 |
+|---|---|---|---|---|
+| Salamander Grand Piano V3 | Alexander Holm | **CC-BY 3.0** | 48kHz/24bit WAV 母版（30 根音 × 16 层力度 + 松键/谐波层） | archive.org/details/SalamanderGrandPianoV3 |
+| Yamaha Disklavier Pro（Zenph） | Zenph Studios 为 OLPC 录制；SF2 由 Roberto Gordo Saez 编译 | **CC-BY 3.0** | 44.1kHz/16bit；SF2 版 116 采样，OLPC 原始合集 1212 个多奏法采样 | csounds.com / OLPC Sound samples / archive.org |
+| VSCO 2: Community Edition | Versilian Studios LLC（录 Sam Gossner & Simon Dalzell） | **CC0 1.0** | 44.1kHz，16/24bit 混合；3168 采样（含 VSCO 1 Percussion、Miscellania 1&2） | github.com/sgossner/VSCO-2-CE（官方 DIRECT DOWNLOAD） |
+
+参考音降噪用到 `UVR-DeNoise` 模型权重（UVR 项目，MIT；权重随项目发布、逐条条款未核）——
+**只在本机处理用户提供的参考录音，不随仓库或成品分发**。
