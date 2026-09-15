@@ -77,6 +77,9 @@ export function parseScoreCsv(text) {
   // 谱面的**真实音高**（`midi` 列，T3 用音频逐音标定过）：后端 A 没有 2 个八度限制，
   // 应当按它播音高；`row` 只是"折叠到音符盒音域"的结果，给机器（后端 B）用。
   const iMidi = idx('midi');
+  // M0 T5b 的**实测力度**（从参考演奏里逐音量出来的，`pipeline_*.csv` 里有，machine 谱面没有）。
+  // 可选列：解析出来但没有列时就给 null，让调用方决定要不要退回 volume。
+  const iVel = idx('velocity');
   // M3-1 的可选溯源列：有就用，没有就按老口径（启发式）判定声部
   const iRole = idx('voiceRole');
   if ([iStep, iInstr, iRow, iVol].some((i) => i < 0)) throw new Error(`谱面 CSV 缺列：${header.join(',')}`);
@@ -86,6 +89,7 @@ export function parseScoreCsv(text) {
       step: +c[iStep], instr: c[iInstr], row: +c[iRow], vol: +c[iVol],
       midi: iMidi >= 0 ? +c[iMidi] : null,
       role: iRole >= 0 ? (c[iRole] ?? '') : '',
+      velocity: iVel >= 0 ? +c[iVel] : null,
     };
   });
   const byInstrument = {};
@@ -147,7 +151,9 @@ export function planHifi(notes, { bassOctave = 0, inner = 'bell', melody = 'stri
       stats.fallback++;
       family = 'harp'; // 未知乐器按旋律声部处理（音高仍可用 row→midi 映射）
     }
-    const base = { step: n.step, instr: n.instr, row: n.row, vol: n.vol };
+    // `velocity` = M0 T5b 从参考演奏量出来的实测力度（可选列；没有就是 null）。
+    // 只做透传，不在这里改音量口径——要不要用它做"真力度"由调用方（离线渲染/emit）决定。
+    const base = { step: n.step, instr: n.instr, row: n.row, vol: n.vol, velocity: n.velocity ?? null };
     if (VANILLA_SOUND[family]) {
       stats.vanilla++;
       events.push({

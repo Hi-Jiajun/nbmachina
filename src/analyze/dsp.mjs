@@ -6,7 +6,7 @@
 // 也避免 T2（八度证据）与 T5/T6 两份实现各自漂移。
 //
 // 口径（写进 M0-3 报告）：
-//   · WAV：只支持未压缩 PCM（8/16/32bit），多声道按均值合成单声道浮点 [-1,1]
+//   · WAV：只支持未压缩 PCM（8/16/24/32bit），多声道按均值合成单声道浮点 [-1,1]
 //   · 频率：A4 = 440Hz（midi 69），f = a4 · 2^((m−69)/12)
 //   · 窄带能量：Goertzel 在目标频点上的加窗 DFT 功率 |X(f)|²（Hann 窗）
 //   · 谱面 CSV：按表头取列，保留原始字段（`fields`）以便逐列回写
@@ -34,7 +34,7 @@ export function freqToMidi(freq, a4 = 440) {
 
 /* ------------------------------------------------------------- WAV 读写 */
 
-/** 读 WAV（PCM 8/16/32bit，多声道混成单声道）；source 可以是路径或 Buffer */
+/** 读 WAV（PCM 8/16/24/32bit，多声道混成单声道）；source 可以是路径或 Buffer */
 export function readWav(source) {
   const buf = Buffer.isBuffer(source) ? source : fs.readFileSync(source);
   if (buf.toString('ascii', 0, 4) !== 'RIFF' || buf.toString('ascii', 8, 12) !== 'WAVE') {
@@ -70,6 +70,13 @@ export function readWav(source) {
       if (fmt.bits === 16) sum += data.readInt16LE(idx) / 32768;
       else if (fmt.bits === 32) sum += data.readInt32LE(idx) / 2147483648;
       else if (fmt.bits === 8) sum += (data[idx] - 128) / 128;
+      else if (fmt.bits === 24) {
+        // 24bit 小端有符号：Buffer 没有 readInt24LE，手动拼三字节再做符号扩展。
+        // 这条是硬需求：Salamander 48k/24bit 母版与 VSCO 的 24bit 采样都靠它，
+        // 旧实现直接抛"不支持的位深: 24"（真钢琴母版根本读不进来）。
+        const v = data[idx] | (data[idx + 1] << 8) | (data[idx + 2] << 16);
+        sum += (v & 0x800000 ? v - 0x1000000 : v) / 8388608;
+      }
       else throw new Error(`不支持的位深: ${fmt.bits}`);
     }
     out[i] = sum / fmt.channels;
