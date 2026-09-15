@@ -57,7 +57,44 @@ public final class NbforgeAudio {
 	private static long cachedBytes = 0L;
 	private static long DEVICE = 0L;
 	private static long CONTEXT = 0L;
-	private static final Map<Integer, Long> ACTIVE = new HashMap<>();   // source -> 开始时间(ms)
+	/** 低音放音时长（ms）：贝斯线换音时把上一条低音快速放掉，模拟钢琴换踏板 / 贝斯手换音 */
+	public static final long BASS_FADE_MS = 120L;
+	/** 同键重击的放音时长（ms）：同一根弦被重新敲响，上一个声音被自然替换 */
+	public static final long RESTRIKE_FADE_MS = 60L;
+
+	/** 一路正在发声的音：谁（乐器 + 键位 + 声部）、增益、起始时间与放音状态 */
+	private static final class Voice {
+		final int source;
+		final String instrument;
+		final String voice;
+		final int midi;
+		final float gain;
+		final long startMs = System.currentTimeMillis();
+		final long fadeMs;
+		long releaseStartMs = -1L;
+
+		Voice(int source, String instrument, String voice, int midi, float gain, long fadeMs) {
+			this.source = source;
+			this.instrument = instrument;
+			this.voice = voice;
+			this.midi = midi;
+			this.gain = gain;
+			this.fadeMs = fadeMs;
+		}
+
+		boolean isReleasing() {
+			return releaseStartMs >= 0L;
+		}
+
+		/** 放音包络：1 → 0 */
+		float fadeFactor(long nowMs) {
+			if (releaseStartMs < 0L) return 1f;
+			if (fadeMs <= 0L) return 0f;
+			return Math.max(0f, 1f - (nowMs - releaseStartMs) / (float) fadeMs);
+		}
+	}
+
+	private static final Map<Integer, Voice> ACTIVE = new LinkedHashMap<>();   // source -> Voice
 	private static final ArrayDeque<Integer> FREE = new ArrayDeque<>();
 
 	private static Thread thread;
@@ -72,6 +109,8 @@ public final class NbforgeAudio {
 	private static volatile int restartCount = 0;
 	private static volatile int stolenCount = 0;
 	private static volatile int foldedCount = 0;
+	/** 被"放音"规则提前放掉的声部数（低音单音线 + 同键重击）——M3-19 的低音"糊"就是靠它解决 */
+	private static volatile int dampedCount = 0;
 	private static volatile int peakActive = 0;
 
 	private NbforgeAudio() {
@@ -116,6 +155,10 @@ public final class NbforgeAudio {
 	/** 因为超出乐器音域而被**整八度**折回来的音符数（低音提琴/竖琴这类窄音域乐器会有） */
 	public static int foldedCount() {
 		return foldedCount;
+	}
+
+	public static int dampedCount() {
+		return dampedCount;
 	}
 
 	public static int activeCount() {
@@ -266,19 +309,55 @@ public final class NbforgeAudio {
 	/** 回收播放结束的 source（必须在本线程调用） */
 	private static void recycle(IntBuffer state) {
 		if (ACTIVE.isEmpty()) return;
-		Long now = System.currentTimeMillis();
-		for (Iterator<Map.Entry<Integer, Long>> it = ACTIVE.entrySet().iterator(); it.hasNext(); ) {
-			Map.Entry<Integer, Long> e = it.next();
+		long now = System.currentTimeMillis();
+		for (Iterator<Map.Entry<Integer, Voice>> it = ACTIVE.entrySet().iterator(); it.hasNext(); ) {
+			Map.Entry<Integer, Voice> e = it.next();
+			Voice v = e.getValue();
+			if (v.isReleasing()) {
+				float f = v.fadeFactor(now);
+				AL10.alSourcef(v.source, AL10.AL_GAIN, Math.max(0f, v.gain * masterGain * f));
+				if (f <= 0f) {
+					AL10.alSourceStop(v.source);
+					AL10.alSourcei(v.source, AL10.AL_BUFFER, 0);
+					FREE.push(v.source);
+					it.remove();
+					continue;
+				}
+			}
 			state.clear();
-			AL10.alGetSourcei(e.getKey(), AL10.AL_SOURCE_STATE, state);
+			AL10.alGetSourcei(v.source, AL10.AL_SOURCE_STATE, state);
 			boolean stopped = state.get(0) != AL10.AL_PLAYING;
-			boolean tooLong = now - e.getValue() > 60_000L;   // 兜底：超过 60s 的一律回收
+			boolean tooLong = now - v.startMs > 60_000L;   // 兜底：超过 60s 的一律回收
 			if (stopped || tooLong) {
-				AL10.alSourceStop(e.getKey());
-				AL10.alSourcei(e.getKey(), AL10.AL_BUFFER, 0);
-				FREE.push(e.getKey());
+				AL10.alSourceStop(v.source);
+				AL10.alSourcei(v.source, AL10.AL_BUFFER, 0);
+				FREE.push(v.source);
 				it.remove();
 			}
+		}
+	}
+
+	/**
+	 * 放音规则（M3-19）：
+	 * <ul>
+	 *   <li><b>同声部单音线</b>（目前是 `bass`）：新音进来 → 把同声部仍在响的音全部放掉
+	 *       （实测贝斯 1054 颗在 E2 以下、956 颗间隔 &lt; 0.5s，10 秒尾巴叠起来必糊）；</li>
+	 *   <li><b>同键重击</b>：同一（乐器 + 键位）再响 → 上一个放掉（同一根弦被重新敲响，物理上就是替换）。</li>
+	 * </ul>
+	 */
+	private static void dampConflicts(String instrument, String voice, int midi) {
+		long now = System.currentTimeMillis();
+		boolean monophonic = "bass".equalsIgnoreCase(voice);
+		for (Voice v : ACTIVE.values()) {
+			if (v.isReleasing()) continue;
+			// 同一时刻的和弦（同一 tick 派发下来的几颗音）不能互相放掉：
+			// 只在"上一个音至少已经响了 60ms"时才放，否则一个三音和弦会被自己掐成单音。
+			if (now - v.startMs < 60L) continue;
+			boolean sameKey = v.instrument.equals(instrument) && v.midi == midi;
+			boolean sameVoiceLine = monophonic && v.voice.equalsIgnoreCase(voice);
+			if (!sameKey && !sameVoiceLine) continue;
+			v.releaseStartMs = now;
+			dampedCount++;
 		}
 	}
 
@@ -286,11 +365,12 @@ public final class NbforgeAudio {
 	 * 播一颗音（线程安全）。采样文件按"乐器 + midi + 力度"解析，解析不到就不播（并计数）。
 	 *
 	 * @param instrument 乐器 id（instruments.json 里的 id）
+	 * @param voice      声部（harp/bass/…；`bass` 走单音线放音，其余保留自然衰减）
 	 * @param midi       0..127
 	 * @param velocity   1..127（决定力度层与增益）
 	 * @param x,y,z      世界坐标（世界的音源位置；听者位置由 {@link #setListener} 同步）
 	 */
-	public static void play(String instrument, int midi, int velocity, double x, double y, double z) {
+	public static void play(String instrument, String voice, int midi, int velocity, double x, double y, double z) {
 		receivedCount++;
 		if (receivedCount % 25 == 0) {
 			NbforgeMod.LOGGER.info("[nbforge] 已收到 {} 条音符（引擎就绪={} 已播={} 丢弃={} 重建={}）",
@@ -318,12 +398,14 @@ public final class NbforgeAudio {
 		}
 		float gain = NbforgeInstruments.velocityGain(velocity) * (float) Math.pow(10.0, region.gainDb / 20.0);
 		float pitch = (float) region.pitchRatio(playMidi);
-		TASKS.offer(() -> playNow(region.file, gain, pitch, x, y, z));
+		TASKS.offer(() -> playNow(region.file, gain, pitch, x, y, z, instrument, voice, playMidi));
 	}
 
-	private static void playNow(String file, float gain, float pitch, double x, double y, double z) {
+	private static void playNow(String file, float gain, float pitch, double x, double y, double z,
+								String instrument, String voice, int midi) {
 		int buffer = bufferFor(file);
 		if (buffer == 0) return;
+		dampConflicts(instrument, voice, midi);
 		int source;
 		if (!FREE.isEmpty()) {
 			source = FREE.pop();
@@ -355,7 +437,9 @@ public final class NbforgeAudio {
 			FREE.push(source);
 			return;
 		}
-		ACTIVE.put(source, System.currentTimeMillis());
+		ACTIVE.put(source, new Voice(source, instrument, voice, midi,
+			Math.max(0f, Math.min(4f, gain * masterGain)),
+			"bass".equalsIgnoreCase(voice) ? BASS_FADE_MS : RESTRIKE_FADE_MS));
 		playedCount++;
 		if (ACTIVE.size() > peakActive) peakActive = ACTIVE.size();
 	}
@@ -363,9 +447,10 @@ public final class NbforgeAudio {
 	private static int stealOldest() {
 		int oldest = 0;
 		long best = Long.MAX_VALUE;
-		for (Map.Entry<Integer, Long> e : ACTIVE.entrySet()) {
-			if (e.getValue() < best) {
-				best = e.getValue();
+		for (Map.Entry<Integer, Voice> e : ACTIVE.entrySet()) {
+			if (e.getValue().isReleasing()) continue;   // 已经在放音路上的优先回收，不需要"偷"
+			if (e.getValue().startMs < best) {
+				best = e.getValue().startMs;
 				oldest = e.getKey();
 			}
 		}

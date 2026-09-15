@@ -168,7 +168,7 @@ public final class NbforgeCommands {
 		String instrument = StringArgumentType.getString(ctx, "instrument");
 		int midi = IntegerArgumentType.getInteger(ctx, "midi");
 		NbforgePlayPayload payload = new NbforgePlayPayload(
-			instrument, midi, velocity, player.getX(), player.getY(), player.getZ());
+			instrument, "manual", midi, velocity, player.getX(), player.getY(), player.getZ());
 		ServerPlayNetworking.send(player, payload);
 		source.sendFeedback(() -> Text.literal(String.format(
 			"[nbforge] play %s midi=%d vel=%d → 客户端无损引擎（nbforge:play）", instrument, midi, velocity)), false);
