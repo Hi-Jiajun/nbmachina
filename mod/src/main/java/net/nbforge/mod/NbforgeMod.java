@@ -10,6 +10,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import net.nbforge.mod.net.NbforgePlayPayload;
+import net.nbforge.mod.score.NbforgeScorePlayer;
 
 /**
  * nbforge 后端 A 的最小骨架。
@@ -48,6 +49,7 @@ public class NbforgeMod implements ModInitializer {
 		LOGGER.info("[nbforge] 已注册 S2C 音符协议 nbforge:play");
 		NbforgeCommands.register();
 		NbforgeSustainQueue.register();
+		NbforgeScorePlayer.register();
 		NbforgeSelfTest.register();
 	}
 }

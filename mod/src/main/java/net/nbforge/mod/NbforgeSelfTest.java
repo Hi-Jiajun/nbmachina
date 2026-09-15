@@ -1,6 +1,7 @@
 package net.nbforge.mod;
 
 import java.util.List;
+import java.util.Locale;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.minecraft.registry.Registries;
@@ -9,6 +10,9 @@ import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
+
+import net.nbforge.mod.score.NbforgeScore;
+import net.nbforge.mod.score.NbforgeScorePlayer;
 
 /**
  * 只读自检：加 {@code -Dnbforge.selftest=true} 起服后自动执行，120 刻后停服。
@@ -41,9 +45,13 @@ public final class NbforgeSelfTest {
 			if (ticks == 40) {
 				NbforgeMod.LOGGER.info("[nbforge][selftest] t=40 活跃延音作业={} 累计击发={}",
 					NbforgeSustainQueue.activeJobs(), NbforgeSustainQueue.totalPlays());
+				NbforgeMod.LOGGER.info("[nbforge][selftest] 谱面播放器 t=40（约 2.0s）：到点 {} 颗 / 已发 {} 条 / 收件人 {}"
+					+ "（无玩家时只计数不发送；谱面前 2.0s 应为 13 颗）",
+					NbforgeScorePlayer.due(), NbforgeScorePlayer.sent(), NbforgeScorePlayer.recipients());
 			}
 			if (ticks >= 120) {
 				running = false;
+				NbforgeScorePlayer.stop();
 				NbforgeMod.LOGGER.info("[nbforge][selftest] 结束：累计击发={} 峰值并发作业={} 残留作业={}",
 					NbforgeSustainQueue.totalPlays(), NbforgeSustainQueue.peakActiveJobs(),
 					NbforgeSustainQueue.activeJobs());
@@ -68,6 +76,30 @@ public final class NbforgeSelfTest {
 		NbforgeMod.LOGGER.info("[nbforge][selftest] /nbforge 命令节点存在={} 子命令={}",
 			node != null, node == null ? "-" : String.join(",",
 				node.getChildren().stream().map(c -> c.getName()).toList()));
+
+		// P2-2 谱面直读：<游戏目录>/nbforge/score.csv 存在就解析并抽查"到点计数"
+		java.nio.file.Path scoreFile = NbforgeScorePlayer.defaultFile(server);
+		if (NbforgeScorePlayer.exists(scoreFile)) {
+			try {
+				int n = NbforgeScorePlayer.load(scoreFile);
+				NbforgeScore sc = NbforgeScorePlayer.score();
+				int at0 = NbforgeScorePlayer.dryRunDue(sc, 0.0);
+				int at60 = NbforgeScorePlayer.dryRunDue(sc, 60.0);
+				int all = NbforgeScorePlayer.dryRunDue(sc, sc.durationSec() + 1.0);
+				NbforgeMod.LOGGER.info("[nbforge][selftest] 谱面直读：{} 颗音 / {}s / 跳过 {} 行；声部 {}",
+					n, String.format(Locale.ROOT, "%.1f", sc.durationSec()), sc.skippedRows(), sc.byVoice());
+				NbforgeMod.LOGGER.info("[nbforge][selftest] 到点计数：t=0 → {}，t=60s → {}，末尾 → {}（应等于 {}）",
+					at0, at60, all, sc.size());
+				NbforgeMod.LOGGER.info("[nbforge][selftest] 谱面自检 {}", all == sc.size() && at0 <= at60 ? "通过" : "失败");
+				// 真跑一次播放器（没有玩家 → 不发送，只验证"到点计数随时间推进"）
+				NbforgeScorePlayer.start(new Vec3d(0.5D, 70.0D, 0.5D));
+				NbforgeMod.LOGGER.info("[nbforge][selftest] 已启动谱面播放器（自检用，t=120 停）");
+			} catch (Exception e) {
+				NbforgeMod.LOGGER.warn("[nbforge][selftest] 谱面自检失败：{}", e.toString());
+			}
+		} else {
+			NbforgeMod.LOGGER.info("[nbforge][selftest] 谱面文件不存在（{}），跳过谱面自检", scoreFile);
+		}
 
 		ServerWorld overworld = server.getOverworld();
 		// 1) 直接调 mod API 发声（完全不经过命令层）

@@ -28,6 +28,8 @@ cd C:\Users\hiliang\Documents\minecraft\nbforge\mod
 /nbforge sustain <音色id> <音量> <音高> <总刻数> <间隔刻数>   # 重触发 + 包络衰减模拟延音
 /nbforge stopall
 /nbforge play <乐器> <midi 0-127> [力度 1-127]              # P2：让执行者客户端用**无损引擎**播
+/nbforge score load [路径]                                  # P2-2：谱面直读（默认 <游戏目录>/nbforge/score.csv）
+/nbforge score play | stop | status                         # 服务端按谱面派发 → 客户端无损播
 ```
 
 **客户端（无损引擎，命令字是 `/nbfc`，避免顶掉服务端的 `/nbforge`）**

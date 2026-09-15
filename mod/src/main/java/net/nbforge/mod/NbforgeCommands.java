@@ -19,6 +19,8 @@ import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 
 import net.nbforge.mod.net.NbforgePlayPayload;
+import net.nbforge.mod.score.NbforgeScore;
+import net.nbforge.mod.score.NbforgeScorePlayer;
 
 /**
  * 服务端命令入口（Fabric Command API v2）：
@@ -28,6 +30,7 @@ import net.nbforge.mod.net.NbforgePlayPayload;
  * /nbforge sustain &lt;音色id&gt; &lt;音量&gt; &lt;音高&gt; &lt;总刻数&gt; &lt;间隔刻数&gt;
  * /nbforge stopall
  * /nbforge play &lt;乐器&gt; &lt;midi 0-127&gt; [力度 1-127]   ← P2：让客户端用**无损音频引擎**播（走 mod 自己的 OpenAL，不进原版音频栈）
+ * /nbforge score load [路径] / play / stop / status      ← P2-2：**谱面直读**（服务端按谱面派发，客户端无损播）
  * </pre>
  * 控制台（无玩家）也能执行：位置取命令源的坐标，音源世界取命令源所在世界。
  *
@@ -74,7 +77,15 @@ public final class NbforgeCommands {
 					.then(CommandManager.argument("midi", IntegerArgumentType.integer(0, 127))
 						.executes(ctx -> play(ctx, 100))
 						.then(CommandManager.argument("velocity", IntegerArgumentType.integer(1, 127))
-							.executes(ctx -> play(ctx, IntegerArgumentType.getInteger(ctx, "velocity"))))))));
+							.executes(ctx -> play(ctx, IntegerArgumentType.getInteger(ctx, "velocity")))))))
+			.then(CommandManager.literal("score")
+				.then(CommandManager.literal("load")
+					.executes(ctx -> scoreLoad(ctx, null))
+					.then(CommandManager.argument("file", StringArgumentType.greedyString())
+						.executes(ctx -> scoreLoad(ctx, StringArgumentType.getString(ctx, "file")))))
+				.then(CommandManager.literal("play").executes(NbforgeCommands::scorePlay))
+				.then(CommandManager.literal("stop").executes(NbforgeCommands::scoreStop))
+				.then(CommandManager.literal("status").executes(NbforgeCommands::scoreStatus))));
 	}
 
 	private static int info(CommandContext<ServerCommandSource> ctx) {
@@ -161,6 +172,68 @@ public final class NbforgeCommands {
 		ServerPlayNetworking.send(player, payload);
 		source.sendFeedback(() -> Text.literal(String.format(
 			"[nbforge] play %s midi=%d vel=%d → 客户端无损引擎（nbforge:play）", instrument, midi, velocity)), false);
+		return 1;
+	}
+
+	/** `/nbforge score load [路径]`：默认读 `<游戏目录>/nbforge/score.csv` */
+	private static int scoreLoad(CommandContext<ServerCommandSource> ctx, String fileArg) {
+		ServerCommandSource source = ctx.getSource();
+		java.nio.file.Path file = fileArg == null || fileArg.isBlank()
+			? NbforgeScorePlayer.defaultFile(source.getServer())
+			: java.nio.file.Path.of(fileArg.trim());
+		try {
+			int n = NbforgeScorePlayer.load(file);
+			NbforgeScore sc = NbforgeScorePlayer.score();
+			source.sendFeedback(() -> Text.literal(String.format(
+				"[nbforge] 谱面已加载：%d 颗音 / %.1fs（跳过 %d 行）\n  声部：%s\n  来源：%s",
+				n, sc.durationSec(), sc.skippedRows(), sc.byVoice(), file)), false);
+			return n;
+		} catch (Exception e) {
+			source.sendError(Text.literal("[nbforge] 谱面加载失败：" + e.getClass().getSimpleName() + ": " + e.getMessage()
+				+ "\n  先跑 `node tools/export-mod-score.mjs --deploy` 生成 " + file));
+			return 0;
+		}
+	}
+
+	/** `/nbforge score play`：锚点取执行者坐标；没有玩家时退回命令源坐标（控制台也能跑） */
+	private static int scorePlay(CommandContext<ServerCommandSource> ctx) {
+		ServerCommandSource source = ctx.getSource();
+		if (NbforgeScorePlayer.score() == null) {
+			source.sendError(Text.literal("[nbforge] 还没加载谱面：先 /nbforge score load"));
+			return 0;
+		}
+		NbforgeScorePlayer.start(source.getPosition());
+		source.sendFeedback(() -> Text.literal(String.format(
+			"[nbforge] 谱面播放开始：%d 颗音 / %.1fs，锚点 %.1f/%.1f/%.1f（客户端无损引擎播）",
+			NbforgeScorePlayer.score().size(), NbforgeScorePlayer.score().durationSec(),
+			source.getPosition().x, source.getPosition().y, source.getPosition().z)), false);
+		return 1;
+	}
+
+	private static int scoreStop(CommandContext<ServerCommandSource> ctx) {
+		NbforgeScorePlayer.stop();
+		ctx.getSource().sendFeedback(() -> Text.literal(String.format(
+			"[nbforge] 谱面播放已停止（到点 %d 颗 / 发送 %d 条）",
+			NbforgeScorePlayer.due(), NbforgeScorePlayer.sent())), false);
+		return 1;
+	}
+
+	private static int scoreStatus(CommandContext<ServerCommandSource> ctx) {
+		ServerCommandSource source = ctx.getSource();
+		NbforgeScore sc = NbforgeScorePlayer.score();
+		if (sc == null) {
+			source.sendFeedback(() -> Text.literal(String.format(
+				"[nbforge] 谱面未加载；默认路径 %s（存在=%s）",
+				NbforgeScorePlayer.defaultFile(source.getServer()),
+				NbforgeScorePlayer.exists(NbforgeScorePlayer.defaultFile(source.getServer())))), false);
+			return 0;
+		}
+		source.sendFeedback(() -> Text.literal(String.format(
+			"[nbforge] 谱面：%d 颗 / %.1fs，进度 %d 颗（%.1f%%），到点 %d / 发送 %d，收件人 %d，播放中=%s",
+			sc.size(), sc.durationSec(), NbforgeScorePlayer.cursor(),
+			sc.size() == 0 ? 0.0 : 100.0 * NbforgeScorePlayer.cursor() / sc.size(),
+			NbforgeScorePlayer.due(), NbforgeScorePlayer.sent(), NbforgeScorePlayer.recipients(),
+			NbforgeScorePlayer.playing())), false);
 		return 1;
 	}
 }
