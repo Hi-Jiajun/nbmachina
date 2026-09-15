@@ -31,7 +31,9 @@
 4. **`src/emit/playsound-hifi.mjs`**：音量口径改成 `velMidi → velMidiToAmplitude()`
    （没有 velMidi 的音退回旧的 `volume`）。
 5. **`tools/render-ensemble.mjs`**：`--dynamics measured` 时用 velMidi 同时驱动
-   **采样层选择**与增益；`--dynamics flat`（默认）保持与改造前逐字节一致。
+   **采样层选择**与增益；`--dynamics flat`（默认）仍按谱面 `volume` 列（= 改造前的口径）——
+   实测与改造前的整曲渲染：比值中位 1.0000 / p5 0.9992 / p95 1.0006、相关系数 0.9995、能量差 0.00dB，
+   即**数值上是同一条曲线**（浮点求和顺序造成的 ~1e-5 相对差，不是内容差）。
 
 ## 3. 实测证据
 
@@ -63,6 +65,15 @@ lint-pack：788 个函数 / 140345 行，静态自检通过
 | Yamaha · measured（新） | **7.96 dB** | -33.6 / -12.6 | **118 层** | ×0.146..1.000 |
 
 ## 4. 怎么回退 / 怎么复算
+
+**交付的 A/B 试听**（同一份谱面、同一套采样，30 秒高潮段 + 整曲母版，均在 `build/ensemble/`）：
+
+```
+styx_ens_salamander48_flat_{0s,226s}_*.wav   对照：改造前的恒定力度
+styx_ens_salamander48_dyn_{0s,226s}_*.wav    实测力度（velMidi）
+styx_ens_disklavier_flat_* / _dyn_*          同一对，Yamaha 完整合集
+*_48k24bit.wav                               整曲 4:46 母版（48kHz/24bit 立体声）
+```
 
 ```bash
 npm run arrange:all                       # 重新生成含 velMidi 的谱面（⑥b 步骤）
