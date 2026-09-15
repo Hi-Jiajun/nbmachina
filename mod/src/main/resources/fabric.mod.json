@@ -12,6 +12,9 @@
 	"entrypoints": {
 		"main": [
 			"net.nbforge.mod.NbforgeMod"
+		],
+		"client": [
+			"net.nbforge.mod.NbforgeClient"
 		]
 	},
 	"depends": {

@@ -1,12 +1,15 @@
 package net.nbforge.mod;
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
 import net.minecraft.sound.SoundEvent;
 import net.minecraft.util.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import net.nbforge.mod.net.NbforgePlayPayload;
 
 /**
  * nbforge 后端 A 的最小骨架。
@@ -40,6 +43,9 @@ public class NbforgeMod implements ModInitializer {
 	@Override
 	public void onInitialize() {
 		LOGGER.info("[nbforge] onInitialize：已注册自定义音色事件 demo_bell/demo_pad/demo_strings/demo_bass");
+		// P2：音符协议（服务端 → 客户端）。必须在两边都注册，否则客户端拒收。
+		PayloadTypeRegistry.playS2C().register(NbforgePlayPayload.ID, NbforgePlayPayload.CODEC);
+		LOGGER.info("[nbforge] 已注册 S2C 音符协议 nbforge:play");
 		NbforgeCommands.register();
 		NbforgeSustainQueue.register();
 		NbforgeSelfTest.register();

@@ -3,9 +3,12 @@ package net.nbforge.mod;
 import com.mojang.brigadier.CommandDispatcher;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.StringArgumentType;
 import com.mojang.brigadier.context.CommandContext;
 import net.fabricmc.fabric.api.command.v2.CommandRegistrationCallback;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
 import net.minecraft.command.argument.IdentifierArgumentType;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.server.world.ServerWorld;
@@ -15,6 +18,8 @@ import net.minecraft.text.Text;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 
+import net.nbforge.mod.net.NbforgePlayPayload;
+
 /**
  * 服务端命令入口（Fabric Command API v2）：
  * <pre>
@@ -22,6 +27,7 @@ import net.minecraft.util.math.Vec3d;
  * /nbforge note &lt;音色id&gt; [音量] [音高]
  * /nbforge sustain &lt;音色id&gt; &lt;音量&gt; &lt;音高&gt; &lt;总刻数&gt; &lt;间隔刻数&gt;
  * /nbforge stopall
+ * /nbforge play &lt;乐器&gt; &lt;midi 0-127&gt; [力度 1-127]   ← P2：让客户端用**无损音频引擎**播（走 mod 自己的 OpenAL，不进原版音频栈）
  * </pre>
  * 控制台（无玩家）也能执行：位置取命令源的坐标，音源世界取命令源所在世界。
  *
@@ -62,7 +68,13 @@ public final class NbforgeCommands {
 								.then(CommandManager.argument("interval", IntegerArgumentType.integer(1, 40))
 									.executes(NbforgeCommands::sustain)))))))
 			.then(CommandManager.literal("stopall")
-				.executes(NbforgeCommands::stopAll)));
+				.executes(NbforgeCommands::stopAll))
+			.then(CommandManager.literal("play")
+				.then(CommandManager.argument("instrument", StringArgumentType.word())
+					.then(CommandManager.argument("midi", IntegerArgumentType.integer(0, 127))
+						.executes(ctx -> play(ctx, 100))
+						.then(CommandManager.argument("velocity", IntegerArgumentType.integer(1, 127))
+							.executes(ctx -> play(ctx, IntegerArgumentType.getInteger(ctx, "velocity"))))))));
 	}
 
 	private static int info(CommandContext<ServerCommandSource> ctx) {
@@ -127,5 +139,28 @@ public final class NbforgeCommands {
 
 	static SoundCategory defaultCategory() {
 		return SoundCategory.RECORDS;
+	}
+
+	/**
+	 * P2 · 让**执行命令的玩家客户端**用无损音频引擎播一颗音。
+	 *
+	 * <p>服务端只发（乐器 / midi / 力度 / 坐标），采样文件与变调由客户端按自己的
+	 * `config/nbforge/instruments.json` 解析——所以服务端（包括专用服务器）不需要任何采样。
+	 */
+	private static int play(CommandContext<ServerCommandSource> ctx, int velocity) {
+		ServerCommandSource source = ctx.getSource();
+		ServerPlayerEntity player = source.getPlayer();
+		if (player == null) {
+			source.sendError(Text.literal("[nbforge] play 需要玩家执行（控制台没有客户端可发）"));
+			return 0;
+		}
+		String instrument = StringArgumentType.getString(ctx, "instrument");
+		int midi = IntegerArgumentType.getInteger(ctx, "midi");
+		NbforgePlayPayload payload = new NbforgePlayPayload(
+			instrument, midi, velocity, player.getX(), player.getY(), player.getZ());
+		ServerPlayNetworking.send(player, payload);
+		source.sendFeedback(() -> Text.literal(String.format(
+			"[nbforge] play %s midi=%d vel=%d → 客户端无损引擎（nbforge:play）", instrument, midi, velocity)), false);
+		return 1;
 	}
 }
