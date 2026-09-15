@@ -8,7 +8,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  DYNAMICS_DEFAULTS, addVelMidiColumn, assignVelMidi, describeVelMidi, velMidiToAmplitude, writeCsv,
+  DYNAMICS_DEFAULTS, PHRASE_DEFAULTS, addVelMidiColumn, assignVelMidi, describeVelMidi, phraseVelMidi,
+  velMidiToAmplitude, writeCsv,
 } from '../src/arrange/dynamics.mjs';
 
 /** 造一条"重尾"力度序列：绝大多数音挤在 0.36~0.48，少数音到 1.0（与真谱面同形） */
@@ -104,4 +105,49 @@ test('CSV 入口：补 velMidi 列，并把"主谱面 12 列 + 打击乐 7 列"�
   const round = writeCsv(outHeader, rows).trim().split(/\r?\n/);
   assert.equal(round.length, 4);
   assert.ok(round.slice(1).every((l) => l.split(',').length === outHeader.length));
+});
+
+// 乐句级力度（M3-14b）：用户判定逐音实测力度"分配特别不好听、完全不如恒定力度"
+// —— 实测同一乐句内的相邻音 velMidi 跳变中位 26 级、42% 超过 32 级。平滑后必须"像人弹的"。
+test('乐句级力度：相邻音不再乱跳、范围收窄、乐句趋势保留', () => {
+  const notes = [];
+  for (let i = 0; i < 240; i++) {
+    const t = i * 0.12;                       // 20 秒、每步一颗音
+    const phrase = Math.floor(t / 5) % 3;     // 三句：弱 / 中 / 强
+    const center = [0.45, 0.6, 0.8][phrase];
+    const jitter = (i % 2 ? 1 : -1) * 0.15;   // 逐音抖动 = 假"实测力度"的样子
+    notes.push({ instrument: 'harp', velocity: center + jitter, timeSec: t });
+  }
+  const perNote = assignVelMidi(notes).map((n) => n.velMidi);
+  const phrase = phraseVelMidi(notes).map((n) => n.velMidi);
+
+  const jumps = (xs) => xs.slice(1).map((v, i) => Math.abs(v - xs[i])).sort((a, b) => a - b);
+  const perJumps = jumps(perNote);
+  const phJumps = jumps(phrase);
+  const median = (xs) => xs[xs.length >> 1];
+  assert.ok(median(perJumps) > 10, `夹具本身要有跳变（逐音中位 ${median(perJumps)}）`);
+  assert.ok(median(phJumps) <= 5, `乐句级相邻跳变中位 ${median(phJumps)} 仍太大`);
+  assert.ok(phJumps[Math.floor(phJumps.length * 0.9)] <= 20, 'p90 跳变也必须收住');
+
+  const min = Math.min(...phrase), max = Math.max(...phrase);
+  assert.ok(min >= PHRASE_DEFAULTS.floor && max <= PHRASE_DEFAULTS.ceiling, `范围 ${min}..${max} 越界`);
+  assert.ok(max - min >= 20, `乐句之间必须还有起伏（实际跨度 ${max - min}）`);
+
+  // 乐句趋势保留：每一句内部的均值必须随"弱/中/强"单调上升
+  const means = [0, 1, 2].map((p) => {
+    const seg = phrase.filter((_, i) => Math.floor(i * 0.12 / 5) % 3 === p);
+    return seg.reduce((a, b) => a + b, 0) / seg.length;
+  });
+  assert.ok(means[0] < means[1] && means[1] < means[2], `乐句均值没有跟着强弱走：${means.map((m) => m.toFixed(1))}`);
+});
+
+test('乐句级力度：范围可调（窄档 ~4.6dB）', () => {
+  const notes = Array.from({ length: 120 }, (_, i) => ({
+    instrument: 'harp', velocity: 0.4 + 0.3 * (Math.floor(i / 40) / 2), timeSec: i * 0.12,
+  }));
+  const narrow = phraseVelMidi(notes, { floor: 68, ceiling: 100 }).map((n) => n.velMidi);
+  assert.ok(Math.min(...narrow) >= 68 && Math.max(...narrow) <= 100);
+  const wide = phraseVelMidi(notes).map((n) => n.velMidi);
+  const span = (xs) => Math.max(...xs) - Math.min(...xs);
+  assert.ok(span(narrow) < span(wide), `窄档跨度 ${span(narrow)} 应小于默认跨度 ${span(wide)}`);
 });

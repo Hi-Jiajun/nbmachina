@@ -23,6 +23,14 @@ const PASS = ['--build', B, '--project', P.project];
 const INNER = String(opt('inner', 'off')).toLowerCase();
 const INNER_ON = ['on', '1', 'true', 'yes'].includes(INNER);
 const INNER_REGISTER = opt('inner-register', 'keep');
+/**
+ * 力度口径（M3-14）：
+ *   off      = 不写 velMidi（= 改造前的恒定力度；**默认**，因为用户听感判定逐音实测力度"完全不如恒定力度"）
+ *   phrase   = 乐句级力度（时间窗中位数平滑 + 窄范围 52..104）
+ *   measured = 逐音实测力度（10..127，跳变大，只用于对照）
+ */
+const DYNAMICS = String(opt('dynamics', 'off')).toLowerCase();
+if (!['off', 'phrase', 'measured'].includes(DYNAMICS)) throw new Error('--dynamics 只支持 off/phrase/measured');
 
 const sha = (p) => (fs.existsSync(p) ? crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex').slice(0, 16) : null);
 const rows = (p) => (fs.existsSync(p) ? fs.readFileSync(p, 'utf8').trim().split(/\r?\n/).length - 1 : 0);
@@ -87,9 +95,16 @@ manifest.merge = { out: merge, sha256_16: sha(merge), notes: rows(merge) };
 // ⑥b · 力度归一（M3-14）：M0 的实测力度是重尾分布（旋律 p5 0.36 / p95 0.50），
 // 直接当音量用 = 听不出强弱。这里按声部做分位数拉伸，输出 1..127 的 `velMidi`，
 // 让"采样力度层选择"与"播放音量"共用一把尺子；打击乐没有力度概念（留空）。
-const merge2 = P.file('pipeline_6b_dynamics.csv');
-run('⑥b 力度归一（velMidi）', 'src/arrange/dynamics.mjs', ['--in', merge, '--out', merge2, ...PASS], merge2);
-manifest.dynamics = { out: merge2, sha256_16: sha(merge2), notes: rows(merge2) };
+let merge2 = merge;
+if (DYNAMICS !== 'off') {
+  merge2 = P.file('pipeline_6b_dynamics.csv');
+  run(`⑥b 力度归一（velMidi · ${DYNAMICS}）`, 'src/arrange/dynamics.mjs',
+    ['--in', merge, '--out', merge2, '--mode', DYNAMICS, ...PASS], merge2);
+  manifest.dynamics = { mode: DYNAMICS, out: merge2, sha256_16: sha(merge2), notes: rows(merge2) };
+} else {
+  console.log('  ⑥b 力度归一：--dynamics off（不写 velMidi，数据包用谱面 volume 列 = 恒定力度）');
+  manifest.dynamics = { mode: 'off' };
+}
 
 run('⑦ 去撞格', 'src/arrange/dedupe.mjs', ['--in', merge2, '--out', OUT, ...PASS], OUT);
 manifest.out = OUT;

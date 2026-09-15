@@ -98,6 +98,58 @@ export function velMidiToAmplitude(velMidi, rangeDb = DYNAMICS_DEFAULTS.rangeDb)
   return 10 ** (((v - 127) / 126) * rangeDb / 20);
 }
 
+export const PHRASE_DEFAULTS = {
+  windowSec: 1.5,   // 平滑窗：乐句级（~1.5s）而不是逐音
+  pLow: 0.10,       // 平滑后的分位数下界
+  pHigh: 0.90,      // 上界
+  floor: 52,        // 只留 ~6.5dB 的动态：逐音 26 级的跳变听感上就是"乱"，乐句级才像人弹的
+  ceiling: 104,
+};
+
+/**
+ * 乐句级力度（M3-14b）：把逐音 velMidi 用**时间窗中位数**平滑，再压到较窄的范围。
+ *
+ * 为什么需要它：逐音 velMidi 虽然指标上"动态更大"，但实测相邻音跳变中位 26 级、p90 68 级、
+ * 42% 的相邻音跳变 >32 级 —— 听感上就是"每颗音随机强弱"，用户判定"完全不如恒定力度"。
+ * 平滑后同一乐句里的音落在同一档，只在乐句之间起伏（= 人实际弹琴的样子）。
+ *
+ * @param {Array<{instrument?:string, velocity?:number, timeSec?:number, time?:number}>} notes
+ */
+export function phraseVelMidi(notes, opts = {}) {
+  const cfg = { ...PHRASE_DEFAULTS, ...opts };
+  // 注意：短语档的 floor/ceiling 只作用于"平滑后再压范围"这一步，不能漏进逐音归一
+  // （否则窄档会把逐音拉伸的上限也改掉，实测会让整段力度整体偏移）。
+  const base = assignVelMidi(notes, cfg.base ?? {});
+  const timed = base
+    .map((n, i) => ({ i, v: n.velMidi, t: Number(n.timeSec ?? n.time ?? NaN) }))
+    .filter((x) => x.v !== null && Number.isFinite(x.t))
+    .sort((a, b) => a.t - b.t);
+  if (!timed.length) return base;
+
+  const smoothed = new Map();
+  for (const x of timed) {
+    const win = [];
+    for (const y of timed) {
+      if (Math.abs(y.t - x.t) <= cfg.windowSec / 2) win.push(y.v);
+    }
+    win.sort((a, b) => a - b);
+    // 截尾均值（去掉两端 10%）而不是中位数：中位数在"逐音交替抖动"的序列上会随窗口相位来回翻，
+    // 实测夹具里就会出现 52↔76 的跳变；截尾均值既抗离群又能给出连续曲线。
+    const cut = Math.floor(win.length * 0.1);
+    const core = win.slice(cut, win.length - cut || win.length);
+    smoothed.set(x.i, core.reduce((a, b) => a + b, 0) / core.length);
+  }
+  const vals = [...smoothed.values()].sort((a, b) => a - b);
+  const at = (p) => vals[Math.min(vals.length - 1, Math.max(0, Math.round((vals.length - 1) * p)))];
+  const lo = at(cfg.pLow);
+  const hi = Math.max(at(cfg.pHigh), lo + 1);
+  return base.map((n, i) => {
+    if (!smoothed.has(i)) return n;
+    const t = Math.max(0, Math.min(1, (smoothed.get(i) - lo) / (hi - lo)));
+    return { ...n, velMidi: Math.round(cfg.floor + (cfg.ceiling - cfg.floor) * t) };
+  });
+}
+
 /** 给日志/报告用的可读统计 */
 export function describeVelMidi(notes) {
   const out = {};
@@ -130,15 +182,24 @@ export function writeCsv(header, rows) {
   return [header.join(','), ...body].join('\n') + '\n';
 }
 
+/**
+ * 给 CSV 文本补 `velMidi` 列。
+ * @param {string} text
+ * @param {{mode?:'measured'|'phrase', [k:string]:any}} [opts] mode 默认 measured
+ */
 export function addVelMidiColumn(text, opts = {}) {
+  const { mode = 'measured', ...rest } = opts;
   const { header, rows } = readCsv(text);
   const iInstr = header.indexOf('instrument');
   const iVel = header.indexOf('velocity');
+  const iTime = header.indexOf('time_seconds');
   const notes = rows.map((r) => ({
     instrument: iInstr >= 0 ? r[iInstr] : '',
     velocity: iVel >= 0 ? Number(r[iVel]) : NaN,
+    timeSec: iTime >= 0 ? Number(r[iTime]) : NaN,
   }));
-  const withDyn = assignVelMidi(notes, opts);
+  const assign = mode === 'phrase' ? phraseVelMidi : assignVelMidi;
+  const withDyn = assign(notes, rest);
   const outHeader = header.includes('velMidi') ? header : [...header, 'velMidi'];
   const iOut = outHeader.indexOf('velMidi');
   const outRows = rows.map((r, i) => {
@@ -159,10 +220,12 @@ if (isMain) {
   const P = resolvePaths();
   const IN = opt('in', P.machineScore);
   const OUT = opt('out', P.file('pipeline_6b_dynamics.csv'));
-  const { header, rows, notes } = addVelMidiColumn(fs.readFileSync(IN, 'utf8'));
+  const MODE = String(opt('mode', 'measured'));
+  if (!['measured', 'phrase'].includes(MODE)) throw new Error('--mode 只支持 measured/phrase');
+  const { header, rows, notes } = addVelMidiColumn(fs.readFileSync(IN, 'utf8'), { mode: MODE });
   fs.writeFileSync(OUT, writeCsv(header, rows), 'utf8');
   const stats = describeVelMidi(notes);
-  console.log(`${IN.split(/[\\/]/).pop()} + velMidi → ${OUT.split(/[\\/]/).pop()}（${rows.length} 行）`);
+  console.log(`${IN.split(/[\\/]/).pop()} + velMidi（mode=${MODE}）→ ${OUT.split(/[\\/]/).pop()}（${rows.length} 行）`);
   for (const [voice, s] of Object.entries(stats)) {
     console.log(`  ${voice}: ${s.n} 行，其中 ${s.withVel} 行有力度；velMidi ${s.min ?? '-'}..${s.max ?? '-'}`
       + `；分布 ${Object.entries(s.hist).sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => `${k}:${v}`).join(' ')}`);
