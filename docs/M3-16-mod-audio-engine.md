@@ -47,3 +47,44 @@
 2. **多乐器/多声部**：现在旋律走钢琴库，内声部/贝斯/打击乐仍是合成音色——把 VSCO 的竖琴/低音提琴拨弦/鼓也导进 `instruments.json`；
 3. **延音与断奏**：`sta` 短奏采样已经在库里（OLPC 有 360 个），接上"音符时值 → 用哪套采样"；
 4. **游戏内录制**：把播放的音频按总线录成 WAV（无损存档 + B 站 hi-res），对应 P3。
+
+## 6. 落地测试清单（2026-09-15，用户执行）
+
+**前置**：重启游戏（mod jar 变了，`/reload` 不够）。资源包只在测**老链路**时才需要。
+
+自动侧已跑绿（见下），需要人耳/客户端的是这 6 步——**照抄即可**：
+
+```
+1) /nbfc status
+   期望：引擎就绪=true 乐器=4 采样缓存=0 个/0MB 活跃声部=0 ...
+         OpenAL：OpenAL Community / OpenAL Soft / 1.1 ALSOFT ... / float32=true
+
+2) /nbfc instruments
+   期望：4 个乐器（salamander48 / disklavier / vsco_upright / disklavier_sf2），带区域数与许可
+
+3) /nbfc selftest salamander48 60 100
+   期望：打印采样文件路径（存在=true）、区域（loKey..hiKey / root / 力度区间 / 增益）、
+         解码（2ch / 48000Hz / 10.00s / 480000 帧）；1.2s 后再打印"采样缓存=1 个 … 活跃声部=1"
+   ⇒ 这一条同时验证"选层 + 解码 + 上传 + 播放"
+
+4) /nbfc demo salamander48
+   期望：听到 C4 G4 C5 E5 G5 各三遍（力度 30 / 70 / 110 递增），**强的那遍应该明显更亮更响**
+
+5) /nbforge play salamander48 60 100
+   期望：服务端回显"→ 客户端无损引擎（nbforge:play）"，并听到一颗 C4
+   ⇒ 这一条验证"服务端 → 网络包 → 客户端引擎"整条链路
+
+6) A/B（有资源包时）：/nbforge note nbforge:strings_gs5 1 1   （老链路：资源包 Ogg）
+   对比：/nbfc note salamander48 79 100                        （新链路：48k/24bit 母版）
+```
+
+**出问题就把这两行的原文发回来**：`/nbfc status` 与 `/nbfc selftest salamander48 60 100`。
+
+### 本轮自动验证结果（2026-09-15 09:1x）
+
+| 项 | 结果 |
+|---|---|
+| `AlProbe`（不启 MC 开第二个 OpenAL 设备） | ✅ `OpenAL Soft 1.23.1`，`AL_EXT_FLOAT32=true`，24bit/16bit 两种母版解码正常，`state=PLAYING / alError=0` |
+| `TruncateProbe`（采样截断） | ✅ Salamander `25.69s → 10.00s`，淡出段峰值单调 `0.0198→0.0117→0.0103→0.0060→0.0027`，尾帧 0；Yamaha 8.2s 不截断 |
+| 副本服自检（新 jar 44916 B） | ✅ `S2C 协议已注册`、命令树 `info,note,sustain,stopall,play`、36 击发 / 峰值 3 / 残留 0 |
+| 构建 + 部署 | ✅ `BUILD SUCCESSFUL` → 客户端 `mods/`（44916 B）+ `config/nbforge/instruments.json`（385590 B） |

@@ -17,6 +17,7 @@ import net.minecraft.util.math.MathHelper;
 
 import net.nbforge.mod.audio.NbforgeAudio;
 import net.nbforge.mod.audio.NbforgeInstruments;
+import net.nbforge.mod.audio.NbforgeWav;
 import net.nbforge.mod.net.NbforgePlayPayload;
 
 /**
@@ -31,6 +32,7 @@ import net.nbforge.mod.net.NbforgePlayPayload;
  * /nbfc instruments                列出已加载乐器（id / 区域数 / 许可）
  * /nbfc note &lt;乐器&gt; &lt;midi&gt; [力度]  本地试听一颗音（不吃资源包、不走原版音频栈）
  * /nbfc demo [乐器]                一键试听：C 大调琶音 × 三档力度（验证力度层与无损通路）
+ * /nbfc selftest [乐器] [midi] [力度]  单音自检：打印采样文件/解码参数/AL 状态（远程诊断用）
  * </pre>
  */
 public final class NbforgeClient implements ClientModInitializer {
@@ -49,6 +51,17 @@ public final class NbforgeClient implements ClientModInitializer {
 				.then(ClientCommandManager.literal("status").executes(ctx -> status(ctx.getSource())))
 				.then(ClientCommandManager.literal("reload").executes(ctx -> reload(ctx.getSource())))
 				.then(ClientCommandManager.literal("instruments").executes(ctx -> list(ctx.getSource())))
+				.then(ClientCommandManager.literal("selftest")
+					.executes(ctx -> selftest(ctx.getSource(), defaultInstrument(), 60, 100))
+					.then(ClientCommandManager.argument("instrument", StringArgumentType.word())
+						.executes(ctx -> selftest(ctx.getSource(), StringArgumentType.getString(ctx, "instrument"), 60, 100))
+						.then(ClientCommandManager.argument("midi", IntegerArgumentType.integer(0, 127))
+							.executes(ctx -> selftest(ctx.getSource(), StringArgumentType.getString(ctx, "instrument"),
+								IntegerArgumentType.getInteger(ctx, "midi"), 100))
+							.then(ClientCommandManager.argument("velocity", IntegerArgumentType.integer(1, 127))
+								.executes(ctx -> selftest(ctx.getSource(), StringArgumentType.getString(ctx, "instrument"),
+									IntegerArgumentType.getInteger(ctx, "midi"),
+									IntegerArgumentType.getInteger(ctx, "velocity")))))))
 				.then(ClientCommandManager.literal("demo")
 					.executes(ctx -> demo(ctx.getSource(), defaultInstrument()))
 					.then(ClientCommandManager.argument("instrument", StringArgumentType.word())
@@ -83,10 +96,12 @@ public final class NbforgeClient implements ClientModInitializer {
 
 	private static int status(FabricClientCommandSource src) {
 		src.sendFeedback(Text.literal(String.format(
-			"[nbforge] 引擎就绪=%s 乐器=%d 采样缓存=%d 活跃声部=%d 峰值=%d 已播=%d 丢弃=%d 主增益=%.2f%s",
+			"[nbforge] 引擎就绪=%s 乐器=%d 采样缓存=%d 个/%.0fMB 活跃声部=%d 峰值=%d 已播=%d 丢弃=%d 主增益=%.2f\n"
+				+ "  OpenAL：%s%s",
 			NbforgeAudio.ready(), NbforgeInstruments.size(), NbforgeAudio.bufferCount(),
-			NbforgeAudio.activeCount(), NbforgeAudio.peakActive(), NbforgeAudio.playedCount(),
-			NbforgeAudio.droppedCount(), NbforgeAudio.masterGain(),
+			NbforgeAudio.cachedBytes() / 1048576.0, NbforgeAudio.activeCount(), NbforgeAudio.peakActive(),
+			NbforgeAudio.playedCount(), NbforgeAudio.droppedCount(), NbforgeAudio.masterGain(),
+			NbforgeAudio.alInfo(),
 			NbforgeAudio.lastError() == null ? "" : "；最后错误：" + NbforgeAudio.lastError())));
 		return 1;
 	}
@@ -159,6 +174,55 @@ public final class NbforgeClient implements ClientModInitializer {
 			}
 		}, "nbforge-demo").start();
 		src.sendFeedback(Text.literal("[nbforge] 试听 " + instrument + "：C4 G4 C5 E5 G5 × 力度 30/70/110"));
+		return 1;
+	}
+
+	/**
+	 * 单音自检（远程诊断用）：把"用哪个采样文件、解码参数、上传后的 AL 状态"全打出来。
+	 * 出问题时把这几行发回即可定位（不用翻客户端日志）。
+	 */
+	private static int selftest(FabricClientCommandSource src, String instrument, int midi, int velocity) {
+		var inst = NbforgeInstruments.get(instrument);
+		if (inst == null) {
+			src.sendError(Text.literal("[nbforge] 没有这个乐器：" + instrument));
+			return 0;
+		}
+		var region = inst.pick(midi, velocity);
+		if (region == null) {
+			src.sendError(Text.literal("[nbforge] " + instrument + " 里没有可用区域"));
+			return 0;
+		}
+		String file = region.file;
+		boolean exists = file != null && java.nio.file.Files.isRegularFile(java.nio.file.Path.of(file));
+		String decode;
+		try {
+			var pcm = NbforgeWav.read(java.nio.file.Path.of(file));
+			decode = String.format("%dch / %dHz / %.2fs / %d 帧", pcm.channels(), pcm.sampleRate(), pcm.seconds(), pcm.frames());
+		} catch (Exception e) {
+			decode = "解码失败：" + e.getClass().getSimpleName() + ": " + e.getMessage();
+		}
+		src.sendFeedback(Text.literal(String.format(
+			"[nbforge] selftest %s midi=%d vel=%d\n  采样=%s（存在=%s）\n  区域：loKey..hiKey=%d..%d root=%d 力度 %d..%d 增益%+.1fdB\n  解码：%s\n  引擎就绪=%s 主增益=%.2f",
+			instrument, midi, velocity, file, exists,
+			region.loKey, region.hiKey, region.root, region.loVel, region.hiVel, region.gainDb,
+			decode, NbforgeAudio.ready(), NbforgeAudio.masterGain())));
+
+		ClientPlayerEntity player = src.getPlayer();
+		NbforgeAudio.play(instrument, midi, velocity, player.getX(), player.getY(), player.getZ());
+		MinecraftClient client = MinecraftClient.getInstance();
+		new Thread(() -> {
+			try {
+				Thread.sleep(1200L);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				return;
+			}
+			client.execute(() -> src.sendFeedback(Text.literal(String.format(
+				"[nbforge] selftest 1.2s 后：采样缓存=%d 个（%.0fMB）活跃声部=%d 已播=%d 丢弃=%d%s",
+				NbforgeAudio.bufferCount(), NbforgeAudio.cachedBytes() / 1048576.0, NbforgeAudio.activeCount(),
+				NbforgeAudio.playedCount(), NbforgeAudio.droppedCount(),
+				NbforgeAudio.lastError() == null ? "" : "；最后错误：" + NbforgeAudio.lastError()))));
+		}, "nbforge-selftest").start();
 		return 1;
 	}
 }

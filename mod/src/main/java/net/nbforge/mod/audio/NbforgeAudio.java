@@ -57,6 +57,7 @@ public final class NbforgeAudio {
 	private static Thread thread;
 	private static volatile boolean ready = false;
 	private static volatile String lastError = null;
+	private static volatile String alInfo = "（未初始化）";
 	private static volatile float masterGain = 0.85f;
 	private static volatile int playedCount = 0;
 	private static volatile int droppedCount = 0;
@@ -71,6 +72,11 @@ public final class NbforgeAudio {
 
 	public static String lastError() {
 		return lastError;
+	}
+
+	/** OpenAL 设备字符串 + float32 能力（`/nbfc status` 里回显，便于远程诊断） */
+	public static String alInfo() {
+		return alInfo;
 	}
 
 	public static int playedCount() {
@@ -132,6 +138,8 @@ public final class NbforgeAudio {
 			ALCapabilities caps = AL.createCapabilities(alcCaps);
 			boolean floatOk = caps.AL_EXT_FLOAT32;
 			FLOAT_OK = floatOk;
+			alInfo = AL10.alGetString(AL10.AL_VENDOR) + " / " + AL10.alGetString(AL10.AL_RENDERER)
+				+ " / " + AL10.alGetString(AL10.AL_VERSION) + " / float32=" + floatOk;
 			ready = true;
 			NbforgeMod.LOGGER.info("[nbforge] 音频引擎就绪：OpenAL 自有设备；float32 支持={}；上限 {} 声部 / 采样缓存 {}MB / 采样截断 {}s",
 				floatOk, MAX_SOURCES, MAX_CACHE_BYTES / 1048576, (int) MAX_SECONDS);
@@ -312,8 +320,8 @@ public final class NbforgeAudio {
 	/** float32 能力（run() 里探测一次） */
 	private static volatile boolean FLOAT_OK = false;
 
-	/** 截到 {@link #MAX_SECONDS} 秒，并在尾部做 0.5s 淡出（避免截断爆音） */
-	private static float[] truncate(float[] pcm, int channels, int sampleRate) {
+	/** 截到 {@link #MAX_SECONDS} 秒，并在尾部做 0.5s 淡出（避免截断爆音）。包内可见：供离线自检直接调。 */
+	static float[] truncate(float[] pcm, int channels, int sampleRate) {
 		int maxFrames = (int) Math.round(MAX_SECONDS * sampleRate);
 		int frames = channels > 0 ? pcm.length / channels : 0;
 		if (frames <= maxFrames) return pcm;
