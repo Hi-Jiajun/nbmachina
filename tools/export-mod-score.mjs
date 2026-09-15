@@ -7,10 +7,17 @@
 //   · velocity   = 1..127（优先用谱面的 `velMidi`；没有就用 `volume × 127` = 现行的恒定口径）
 //   · voice      = 原声部名（只用于诊断）
 //
+// 预设（`--preset`）：
+//   piano（默认）  = 全钢琴：旋律与贝斯都用同一架琴，打击乐跳过
+//                    —— 本曲 STYX HELIX 的参考就是 Animenz 的**钢琴改编**（用户 2026-09-16 拍板"全钢琴最好"），
+//                    原曲里的鼓不属于钢琴改编，硬塞进去反而破坏"一个演奏者"的听感。
+//   ensemble       = 小编制：贝斯→VSCO 低音提琴拨弦、打击乐→VSCO 底鼓/铃鼓（给"不是钢琴改编"的曲子用）
+//
 // 用法：
-//   node tools/export-mod-score.mjs                                   # 默认：旋律&贝斯→salamander48，打击乐跳过
-//   node tools/export-mod-score.mjs --melody disklavier --bass skip    # 换琴 / 只留旋律
-//   node tools/export-mod-score.mjs --deploy                           # 顺带写到客户端与测试服的游戏目录
+//   node tools/export-mod-score.mjs                                    # 默认 = 全钢琴
+//   node tools/export-mod-score.mjs --preset ensemble                   # 低音提琴+打击乐版
+//   node tools/export-mod-score.mjs --melody disklavier --bass skip     # 逐项覆盖
+//   node tools/export-mod-score.mjs --deploy                            # 顺带写到客户端与测试服的游戏目录
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -23,9 +30,12 @@ const has = (n) => argv.includes(`--${n}`);
 
 const SRC = opt('in', P.machineScore);
 const OUT = opt('out', path.join(P.build, 'nbforge_score.csv'));
+const PRESET = opt('preset', 'piano');
+if (!['piano', 'ensemble'].includes(PRESET)) throw new Error('--preset 只支持 piano/ensemble');
 const MELODY = opt('melody', 'salamander48');
-const BASS = opt('bass', 'vsco_contrabass_pizz');   // VSCO 低音提琴拨弦（M3-18 起）
-const PERC = opt('perc', 'vsco_perc');              // VSCO 打击乐：底鼓 + 铃鼓（VSCO 无闭合踩镲，用铃鼓替代）
+// 默认（piano 预设）：贝斯也用同一架琴（左手弹），打击乐跳过
+const BASS = opt('bass', PRESET === 'ensemble' ? 'vsco_contrabass_pizz' : MELODY);
+const PERC = opt('perc', PRESET === 'ensemble' ? 'vsco_perc' : 'skip');
 const DEPLOY = has('deploy');
 const CLIENT_GAME_DIR = 'C:/Program Files/PCL2/.minecraft/versions/1.21.10-Fabric 0.19.5';
 const TEST_SERVER_DIR = 'C:/Users/hiliang/Documents/minecraft/_toolchain/spike-testserver';
