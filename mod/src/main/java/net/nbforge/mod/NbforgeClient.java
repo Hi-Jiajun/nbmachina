@@ -97,13 +97,13 @@ public final class NbforgeClient implements ClientModInitializer {
 	private static int status(FabricClientCommandSource src) {
 		src.sendFeedback(Text.literal(String.format(
 			"[nbforge] 引擎就绪=%s 乐器=%d 采样缓存=%d 个/%.0fMB 活跃声部=%d 峰值=%d 已播=%d 丢弃=%d 主增益=%.2f\n"
-				+ "  收到 %d 条 nbforge:play；上下文重建 %d 次\n"
+				+ "  收到 %d 条 nbforge:play；上下文重建 %d 次；被抢走的声部 %d\n"
 				+ "  OpenAL：%s\n"
 				+ "  资源包：%s%s",
 			NbforgeAudio.ready(), NbforgeInstruments.size(), NbforgeAudio.bufferCount(),
 			NbforgeAudio.cachedBytes() / 1048576.0, NbforgeAudio.activeCount(), NbforgeAudio.peakActive(),
 			NbforgeAudio.playedCount(), NbforgeAudio.droppedCount(), NbforgeAudio.masterGain(),
-			NbforgeAudio.receivedCount(), NbforgeAudio.restartCount(),
+			NbforgeAudio.receivedCount(), NbforgeAudio.restartCount(), NbforgeAudio.stolenCount(),
 			NbforgeAudio.alInfo(),
 			packHint(),
 			NbforgeAudio.lastError() == null ? "" : "；最后错误：" + NbforgeAudio.lastError())));

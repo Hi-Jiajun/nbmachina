@@ -40,8 +40,12 @@ import net.nbforge.mod.NbforgeMod;
  * <p>接口是线程安全的：{@link #play} / {@link #setListener} 从游戏线程调用，入队即返回。
  */
 public final class NbforgeAudio {
-	/** 同时发声上限（钢琴密集段实测要几十路；超了会偷最早的那个 source） */
-	public static final int MAX_SOURCES = 128;
+	/**
+	 * 同时发声上限。钢琴密集段实测峰值 **124 路**（曲中段每 0.12s 一颗、采样截断 10s），
+	 * 所以 128 会贴着天花板——超了就要偷最早那路（听感=提前掐掉一颗音）。抬到 192 留余量；
+	 * OpenAL Soft 开几百路 source 没有问题，source 本身只是句柄。
+	 */
+	public static final int MAX_SOURCES = 192;
 	/** 采样缓存**按字节**上限（不是按个数）：Salamander 单个采样最长 25.7s，float 立体声 ≈ 9.9MB */
 	public static final long MAX_CACHE_BYTES = 512L * 1024 * 1024;
 	/** 采样截断长度：钢琴 10s 之后只剩极轻的尾音，截断直接决定"能同时响多少音"与内存占用 */
@@ -66,6 +70,7 @@ public final class NbforgeAudio {
 	private static volatile int droppedCount = 0;
 	private static volatile int receivedCount = 0;
 	private static volatile int restartCount = 0;
+	private static volatile int stolenCount = 0;
 	private static volatile int peakActive = 0;
 
 	private NbforgeAudio() {
@@ -100,6 +105,11 @@ public final class NbforgeAudio {
 	/** OpenAL 上下文重建次数（资源重载/设备抖动后自愈用；正常应为 0） */
 	public static int restartCount() {
 		return restartCount;
+	}
+
+	/** 因为并发上限被抢走的声部数（>0 说明"有音被提前掐掉"，需要抬上限或缩短采样） */
+	public static int stolenCount() {
+		return stolenCount;
 	}
 
 	public static int activeCount() {
@@ -352,6 +362,7 @@ public final class NbforgeAudio {
 		if (oldest == 0) return 0;
 		AL10.alSourceStop(oldest);
 		ACTIVE.remove(oldest);
+		stolenCount++;
 		return oldest;
 	}
 
