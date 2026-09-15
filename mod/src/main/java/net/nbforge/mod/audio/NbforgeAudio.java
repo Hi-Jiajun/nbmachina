@@ -51,16 +51,21 @@ public final class NbforgeAudio {
 	private static final Map<String, Integer> BUFFERS = new LinkedHashMap<>(64, 0.75f, true);
 	private static final Map<Integer, Long> BUFFER_BYTES = new HashMap<>();
 	private static long cachedBytes = 0L;
+	private static long DEVICE = 0L;
+	private static long CONTEXT = 0L;
 	private static final Map<Integer, Long> ACTIVE = new HashMap<>();   // source -> 开始时间(ms)
 	private static final ArrayDeque<Integer> FREE = new ArrayDeque<>();
 
 	private static Thread thread;
 	private static volatile boolean ready = false;
+	private static volatile boolean broken = false;
 	private static volatile String lastError = null;
 	private static volatile String alInfo = "（未初始化）";
 	private static volatile float masterGain = 0.85f;
 	private static volatile int playedCount = 0;
 	private static volatile int droppedCount = 0;
+	private static volatile int receivedCount = 0;
+	private static volatile int restartCount = 0;
 	private static volatile int peakActive = 0;
 
 	private NbforgeAudio() {
@@ -85,6 +90,16 @@ public final class NbforgeAudio {
 
 	public static int droppedCount() {
 		return droppedCount;
+	}
+
+	/** 客户端一共收到多少条 `nbforge:play`（与"已播/丢弃"配合判断链路断在哪一段） */
+	public static int receivedCount() {
+		return receivedCount;
+	}
+
+	/** OpenAL 上下文重建次数（资源重载/设备抖动后自愈用；正常应为 0） */
+	public static int restartCount() {
+		return restartCount;
 	}
 
 	public static int activeCount() {
@@ -118,64 +133,122 @@ public final class NbforgeAudio {
 		thread.start();
 	}
 
+	/**
+	 * 音频线程主循环。
+	 *
+	 * <p>**可自愈**：Minecraft 在资源重载/切设备时会重启它自己的声音引擎，实测日志里出现过
+	 * `[Sound engine/ERROR] Allocate new source: Invalid name parameter`（OpenAL 对象名失效）。
+	 * 我们虽然用自己的设备/上下文，但底层一旦抖动，旧 buffer/source 也会一起失效——
+	 * 所以这里只要检测到 AL 错误，就把自己整套（设备/上下文/缓存/声部）拆掉重建，
+	 * 而不是从此静音（2026-09-15 09:42 用户实测"关资源包后听不到"就是这个场景）。
+	 */
 	private static void run() {
+		IntBuffer state = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder()).asIntBuffer();
+		while (!Thread.currentThread().isInterrupted()) {
+			if (!ready) {
+				if (!initContext()) {
+					try {
+						Thread.sleep(1000L);
+					} catch (InterruptedException e) {
+						Thread.currentThread().interrupt();
+					}
+					continue;
+				}
+			}
+			Runnable task = TASKS.poll();
+			if (task != null) {
+				try {
+					task.run();
+				} catch (Throwable t) {
+					lastError = t.getClass().getSimpleName() + ": " + t.getMessage();
+					broken = true;
+					NbforgeMod.LOGGER.warn("[nbforge] 音频任务异常（将重建上下文）：{}", lastError);
+				}
+			} else {
+				try {
+					Thread.sleep(15L);
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+					break;
+				}
+			}
+			int err = AL10.alGetError();
+			if (err != AL10.AL_NO_ERROR) {
+				broken = true;
+				lastError = "OpenAL 错误 0x" + Integer.toHexString(err);
+			}
+			if (broken) {
+				teardown(lastError);
+				continue;
+			}
+			recycle(state);
+		}
+		teardown(null);
+	}
+
+	private static boolean initContext() {
 		long device = 0L;
 		long context = 0L;
 		try {
 			device = ALC10.alcOpenDevice((ByteBuffer) null);
 			if (device == 0L) {
 				lastError = "alcOpenDevice 失败（没有可用的 OpenAL 设备）";
-				NbforgeMod.LOGGER.warn("[nbforge] {}", lastError);
-				return;
+				return false;
 			}
 			context = ALC10.alcCreateContext(device, (IntBuffer) null);
 			if (context == 0L || !ALC10.alcMakeContextCurrent(context)) {
 				lastError = "alcCreateContext/alcMakeContextCurrent 失败";
-				NbforgeMod.LOGGER.warn("[nbforge] {}", lastError);
-				return;
+				if (context != 0L) ALC10.alcDestroyContext(context);
+				ALC10.alcCloseDevice(device);
+				return false;
 			}
 			ALCCapabilities alcCaps = ALC.createCapabilities(device);
 			ALCapabilities caps = AL.createCapabilities(alcCaps);
-			boolean floatOk = caps.AL_EXT_FLOAT32;
-			FLOAT_OK = floatOk;
+			FLOAT_OK = caps.AL_EXT_FLOAT32;
 			alInfo = AL10.alGetString(AL10.AL_VENDOR) + " / " + AL10.alGetString(AL10.AL_RENDERER)
-				+ " / " + AL10.alGetString(AL10.AL_VERSION) + " / float32=" + floatOk;
+				+ " / " + AL10.alGetString(AL10.AL_VERSION) + " / float32=" + FLOAT_OK;
+			DEVICE = device;
+			CONTEXT = context;
+			broken = false;
 			ready = true;
 			NbforgeMod.LOGGER.info("[nbforge] 音频引擎就绪：OpenAL 自有设备；float32 支持={}；上限 {} 声部 / 采样缓存 {}MB / 采样截断 {}s",
-				floatOk, MAX_SOURCES, MAX_CACHE_BYTES / 1048576, (int) MAX_SECONDS);
-
-			IntBuffer state = ByteBuffer.allocateDirect(4).order(ByteOrder.nativeOrder()).asIntBuffer();
-			while (!Thread.currentThread().isInterrupted()) {
-				Runnable task = TASKS.poll();
-				if (task == null) {
-					try {
-						Thread.sleep(15L);
-					} catch (InterruptedException e) {
-						Thread.currentThread().interrupt();
-						break;
-					}
-				} else {
-					try {
-						task.run();
-					} catch (Throwable t) {
-						lastError = t.getClass().getSimpleName() + ": " + t.getMessage();
-						NbforgeMod.LOGGER.warn("[nbforge] 音频任务异常：{}", lastError);
-					}
-				}
-				recycle(state, floatOk);
-			}
+				FLOAT_OK, MAX_SOURCES, MAX_CACHE_BYTES / 1048576, (int) MAX_SECONDS);
+			return true;
 		} catch (Throwable t) {
 			lastError = t.getClass().getSimpleName() + ": " + t.getMessage();
-			NbforgeMod.LOGGER.warn("[nbforge] 音频引擎启动失败", t);
-		} finally {
-			ready = false;
-			if (context != 0L) ALC10.alcDestroyContext(context);
-			if (device != 0L) ALC10.alcCloseDevice(device);
+			NbforgeMod.LOGGER.warn("[nbforge] 音频引擎初始化失败", t);
+			return false;
+		}
+	}
+
+	/** 拆掉设备/上下文与全部缓存（重建前调用；why=null 表示正常退出） */
+	private static void teardown(String why) {
+		ready = false;
+		try {
+			for (int source : ACTIVE.keySet()) AL10.alDeleteSources(source);
+			ACTIVE.clear();
+			while (!FREE.isEmpty()) AL10.alDeleteSources(FREE.pop());
+			for (int buffer : BUFFERS.values()) AL10.alDeleteBuffers(buffer);
+			BUFFERS.clear();
+			BUFFER_BYTES.clear();
+			cachedBytes = 0L;
+		} catch (Throwable ignored) {
+			// 上下文已经不可用时删除对象会抛错，忽略即可
+		}
+		if (CONTEXT != 0L) ALC10.alcMakeContextCurrent(0L);
+		if (CONTEXT != 0L) ALC10.alcDestroyContext(CONTEXT);
+		if (DEVICE != 0L) ALC10.alcCloseDevice(DEVICE);
+		CONTEXT = 0L;
+		DEVICE = 0L;
+		if (why != null) {
+			restartCount++;
+			NbforgeMod.LOGGER.warn("[nbforge] 重建音频上下文（第 {} 次）：{} —— 旧缓存已清空，下一颗音会重新解码",
+				restartCount, why);
 		}
 	}
 
 	/** 回收播放结束的 source（必须在本线程调用） */
-	private static void recycle(IntBuffer state, boolean floatOk) {
+	private static void recycle(IntBuffer state) {
 		if (ACTIVE.isEmpty()) return;
 		Long now = System.currentTimeMillis();
 		for (Iterator<Map.Entry<Integer, Long>> it = ACTIVE.entrySet().iterator(); it.hasNext(); ) {
@@ -202,6 +275,11 @@ public final class NbforgeAudio {
 	 * @param x,y,z      世界坐标（世界的音源位置；听者位置由 {@link #setListener} 同步）
 	 */
 	public static void play(String instrument, int midi, int velocity, double x, double y, double z) {
+		receivedCount++;
+		if (receivedCount % 25 == 0) {
+			NbforgeMod.LOGGER.info("[nbforge] 已收到 {} 条音符（引擎就绪={} 已播={} 丢弃={} 重建={}）",
+				receivedCount, ready, playedCount, droppedCount, restartCount);
+		}
 		if (!ready) {
 			droppedCount++;
 			return;
@@ -249,6 +327,14 @@ public final class NbforgeAudio {
 		AL10.alSourcef(source, AL10.AL_ROLLOFF_FACTOR, 0.0f);      // 不做距离衰减：琴声该整片都听得到
 		AL10.alSourcei(source, AL10.AL_LOOPING, AL10.AL_FALSE);
 		AL10.alSourcePlay(source);
+		int err = AL10.alGetError();
+		if (err != AL10.AL_NO_ERROR) {
+			// 上下文失配（例如 MC 重启声音引擎之后）：标记坏掉，主循环会重建设备/上下文并重试
+			broken = true;
+			lastError = "alSourcePlay 错误 0x" + Integer.toHexString(err);
+			FREE.push(source);
+			return;
+		}
 		ACTIVE.put(source, System.currentTimeMillis());
 		playedCount++;
 		if (ACTIVE.size() > peakActive) peakActive = ACTIVE.size();
