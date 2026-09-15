@@ -153,7 +153,9 @@ const dynOf = (e) => {
       return { vel127: Math.max(1, Math.min(127, Math.round(v))), gain: velMidiToAmplitude(v) };
     }
   }
-  const vol = Number.isFinite(Number(e.volume)) ? Number(e.volume) : 0.8;
+  // 注意用 `e.vol`（谱面原始 volume 列）：`e.volume` 已经是 planHifi 按 velMidi 算出来的播放音量，
+  // 拿它当"flat"会变成"二次应用力度"（实测这会悄悄改变 flat 的输出）。
+  const vol = Number.isFinite(Number(e.vol)) ? Number(e.vol) : 0.8;
   return { vel127: Math.max(1, Math.min(127, Math.round(vol * 127))), gain: 0.55 + 0.45 * vol };
 };
 for (const e of events) {
