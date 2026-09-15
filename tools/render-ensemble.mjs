@@ -28,7 +28,7 @@ import { resolvePaths } from '../src/core/paths.mjs';
 import { STEP_SECONDS } from '../src/emit/tick-map.mjs';
 import { parseScoreCsv, planHifi } from '../src/emit/playsound-hifi.mjs';
 import { loadSfz, pickRegion } from '../src/sample/sfz.mjs';
-import { phraseVelMidi, velMidiToAmplitude } from '../src/arrange/dynamics.mjs';
+import { interpretVelMidi, phraseVelMidi, velMidiToAmplitude } from '../src/arrange/dynamics.mjs';
 
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
@@ -49,7 +49,10 @@ const ONLY = String(opt('only', '')).split(',').filter(Boolean);
 //     量出来的**实测力度**（逐音不同），这才是"真力度"；实测里有 2172 这种野值，统一夹到 [0.3,1]。
 const SCORE = opt('score', P.machineScore);
 const DYNAMICS = String(opt('dynamics', 'flat'));
-if (!['flat', 'measured', 'phrase'].includes(DYNAMICS)) throw new Error('--dynamics 只支持 flat/measured/phrase');
+if (!['flat', 'measured', 'phrase', 'interpret'].includes(DYNAMICS)) {
+  throw new Error('--dynamics 只支持 flat/measured/phrase/interpret');
+}
+const SECTIONS_JSON = opt('sections', path.join(P.build, 'dynamics-sections.json'));
 
 const MELODIES = {
   // 默认 = 48kHz/24bit 完整母版（30 个录音点 / 16 层力度，最大 1 半音微调）。
@@ -148,6 +151,13 @@ if (DYNAMICS === 'phrase') {
   if (opt('dyn-ceiling') !== undefined) phraseOpts.ceiling = Number(opt('dyn-ceiling'));
   const phrase = phraseVelMidi(notes.map((n) => ({ ...n, timeSec: n.step * STEP_SECONDS })), phraseOpts);
   scoreNotes = notes.map((n, i) => ({ ...n, velMidi: phrase[i].velMidi }));
+} else if (DYNAMICS === 'interpret') {
+  if (!fs.existsSync(SECTIONS_JSON)) {
+    throw new Error(`缺少段落表 ${SECTIONS_JSON} —— 先跑 node tools/dynamics-report.mjs 生成（可用 --sections 指定别的文件）`);
+  }
+  const { sections } = JSON.parse(fs.readFileSync(SECTIONS_JSON, 'utf8'));
+  const out = interpretVelMidi(notes.map((n) => ({ ...n, timeSec: n.step * STEP_SECONDS })), sections);
+  scoreNotes = notes.map((n, i) => ({ ...n, velMidi: out[i].velMidi }));
 }
 const { events } = planHifi(scoreNotes);     // 与数据包同一套声部判定/音高口径
 const GM = { basedrum: 36, hat: 42 };
@@ -156,7 +166,7 @@ const triggers = [];
 //   measured：用 M3-14 的 velMidi（1..127）——既决定选哪一层采样，也决定增益（-16.7dB..0dB）；
 //   flat：维持原状（volume × 127 选层 + 0.55+0.45·volume 的微调）——所以 flat 输出与改造前逐字节一致。
 const dynOf = (e) => {
-  if (DYNAMICS === 'measured' || DYNAMICS === 'phrase') {
+  if (DYNAMICS !== 'flat') {
     const v = Number(e.velMidi);
     if (Number.isFinite(v) && v > 0) {
       return { vel127: Math.max(1, Math.min(127, Math.round(v))), gain: velMidiToAmplitude(v) };

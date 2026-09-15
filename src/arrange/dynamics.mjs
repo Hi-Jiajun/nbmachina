@@ -106,6 +106,51 @@ export const PHRASE_DEFAULTS = {
   ceiling: 104,
 };
 
+export const INTERPRET_DEFAULTS = {
+  floor: 56,        // 最安静的段落 → 中弱
+  ceiling: 104,     // 全曲高点 → 强
+  shapeWeight: 0.45, // 段内弧线（平滑实测）的权重；剩下给"段电平"（乐曲结构）
+};
+
+/**
+ * 段落解读（M3-15）：像演奏家那样按"乐曲某段的特点"分配力度，而不是逐音跟测量走。
+ *
+ * 模型 = **段电平**（该段在源曲里的相对响度，0..1，按段落分位排名得到）× (1-w)
+ *      + **段内弧线**（该段内部平滑后的实测曲线，归一化到 0..1）× w
+ * 然后压到 floor..ceiling。段电平负责"这一段的性格"（前奏弱/副歌强/尾声收），
+ * 段内弧线负责"这一句内部的走向"（渐强、渐弱、落句）。
+ *
+ * 段落表是可编辑的 JSON（`build/dynamics-sections.json`）——改 `level` 就是改"我的理解"。
+ * @param {Array<{timeSec?:number, time?:number}>} notes
+ * @param {Array<{start:number,end:number,level:number}>} sections
+ */
+export function interpretVelMidi(notes, sections, opts = {}) {
+  const cfg = { ...INTERPRET_DEFAULTS, ...opts };
+  const phrase = phraseVelMidi(notes, cfg.base ?? {});
+  const ts = notes.map((n, i) => Number(n.timeSec ?? n.time ?? phrase[i]?.timeSec ?? NaN));
+  const secOf = (t) => sections.find((s) => t >= s.start && t < s.end) ?? sections.at(-1);
+
+  // 段内归一：拿该段内部各音的音高走线当"弧线形状"
+  const shapes = new Map();
+  for (const s of sections) {
+    const vals = [];
+    ts.forEach((t, i) => { if (t >= s.start && t < s.end && phrase[i].velMidi !== null) vals.push(phrase[i].velMidi); });
+    if (!vals.length) { shapes.set(s, null); continue; }
+    const sorted = [...vals].sort((a, b) => a - b);
+    const at = (p) => sorted[Math.min(sorted.length - 1, Math.max(0, Math.round((sorted.length - 1) * p)))];
+    shapes.set(s, { lo: at(0.1), hi: at(0.9) });
+  }
+  return phrase.map((n, i) => {
+    if (n.velMidi === null || !Number.isFinite(ts[i])) return { ...n, velMidi: n.velMidi };
+    const sec = secOf(ts[i]);
+    const sh = shapes.get(sec);
+    const shape = sh && sh.hi > sh.lo ? Math.max(0, Math.min(1, (n.velMidi - sh.lo) / (sh.hi - sh.lo))) : 0.5;
+    const level = Math.max(0, Math.min(1, Number(sec.level) || 0));
+    const mixed = level * (1 - cfg.shapeWeight) + shape * cfg.shapeWeight;
+    return { ...n, velMidi: Math.round(cfg.floor + (cfg.ceiling - cfg.floor) * mixed) };
+  });
+}
+
 /**
  * 乐句级力度（M3-14b）：把逐音 velMidi 用**时间窗中位数**平滑，再压到较窄的范围。
  *

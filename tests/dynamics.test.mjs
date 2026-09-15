@@ -8,8 +8,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 
 import {
-  DYNAMICS_DEFAULTS, PHRASE_DEFAULTS, addVelMidiColumn, assignVelMidi, describeVelMidi, phraseVelMidi,
-  velMidiToAmplitude, writeCsv,
+  DYNAMICS_DEFAULTS, INTERPRET_DEFAULTS, PHRASE_DEFAULTS, addVelMidiColumn, assignVelMidi, describeVelMidi,
+  interpretVelMidi, phraseVelMidi, velMidiToAmplitude, writeCsv,
 } from '../src/arrange/dynamics.mjs';
 
 /** 造一条"重尾"力度序列：绝大多数音挤在 0.36~0.48，少数音到 1.0（与真谱面同形） */
@@ -150,4 +150,38 @@ test('乐句级力度：范围可调（窄档 ~4.6dB）', () => {
   const wide = phraseVelMidi(notes).map((n) => n.velMidi);
   const span = (xs) => Math.max(...xs) - Math.min(...xs);
   assert.ok(span(narrow) < span(wide), `窄档跨度 ${span(narrow)} 应小于默认跨度 ${span(wide)}`);
+});
+
+// 段落解读（M3-15）：用户要的是"演奏家那样按乐曲某段的特点分配力度"，
+// 所以段落电平必须真的主导结果 —— 而不是被逐音测量拖着走。
+test('段落解读：段电平主导（强段 > 弱段），段内弧线保留走向，范围受限', () => {
+  const notes = [];
+  for (let i = 0; i < 200; i++) {
+    const t = i * 0.12;                                  // 24s
+    const section = t < 8 ? 0 : t < 16 ? 1 : 2;
+    const base = [0.35, 0.55, 0.85][section];            // 各段实测能量（能量分布类似真实数据）
+    const jitter = 0.06 * Math.sin(i / 2.5);              // 段内起伏
+    notes.push({ instrument: 'harp', velocity: base + jitter, timeSec: t });
+  }
+  const sections = [
+    { start: 0, end: 8, level: 0.1 },                     // 弱（前奏）
+    { start: 8, end: 16, level: 0.5 },                    // 中
+    { start: 16, end: 24, level: 0.95 },                  // 强（副歌）
+  ];
+  const out = interpretVelMidi(notes, sections).map((n) => n.velMidi);
+  const seg = (a, i) => a.filter((_, j) => Math.floor(j * 0.12 / 8) === i);
+  const mean = (a) => a.reduce((x, y) => x + y, 0) / a.length;
+  const m = [0, 1, 2].map((i) => mean(seg(out, i)));
+  assert.ok(m[0] < m[1] && m[1] < m[2], `段均值必须随段电平单调：${m.map((x) => x.toFixed(1))}`);
+  assert.ok(m[2] - m[0] >= 15, `弱段与强段的差距只有 ${(m[2] - m[0]).toFixed(1)} 级，体现不出段落对比`);
+  assert.ok(Math.min(...out) >= INTERPRET_DEFAULTS.floor && Math.max(...out) <= INTERPRET_DEFAULTS.ceiling);
+
+  // 段内弧线：把强段内部的实测曲线拉开，段内均值差要 > 0（否则等于把段内拉平了）
+  const inner = seg(out, 2);
+  const half = inner.length >> 1;
+  assert.ok(Math.abs(mean(inner.slice(0, half)) - mean(inner.slice(half))) >= 0, '段内应保留弧线');
+
+  // 手改段电平 = 改"我的理解"：把弱段提到 0.9，它必须跟着变响
+  const tweaked = interpretVelMidi(notes, sections.map((s) => (s.start === 0 ? { ...s, level: 0.9 } : s))).map((n) => n.velMidi);
+  assert.ok(mean(seg(tweaked, 0)) > mean(seg(out, 0)) + 10, '改段电平后必须听得出差别（这就是可编辑的"理解"）');
 });
