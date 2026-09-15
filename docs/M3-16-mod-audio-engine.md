@@ -88,3 +88,29 @@
 | `TruncateProbe`（采样截断） | ✅ Salamander `25.69s → 10.00s`，淡出段峰值单调 `0.0198→0.0117→0.0103→0.0060→0.0027`，尾帧 0；Yamaha 8.2s 不截断 |
 | 副本服自检（新 jar 44916 B） | ✅ `S2C 协议已注册`、命令树 `info,note,sustain,stopall,play`、36 击发 / 峰值 3 / 残留 0 |
 | 构建 + 部署 | ✅ `BUILD SUCCESSFUL` → 客户端 `mods/`（44916 B）+ `config/nbforge/instruments.json`（385590 B） |
+
+## 7. 客户端实测（2026-09-15 09:21–09:24，用户跑完 6 步）
+
+**新引擎全绿**（客户端 `logs/latest.log` 原文）：
+
+```
+09:21:41 [nbforge] 乐器库已加载：4 个乐器（…\config\nbforge\instruments.json）
+09:21:41 [nbforge-audio] 音频引擎就绪：OpenAL 自有设备；float32 支持=true；上限 128 声部 / 采样缓存 512MB / 采样截断 10s
+09:22:55 selftest salamander48 midi=60 vel=100 → C4v13.wav（存在=true）区域 59..61 root=60 力度 97..104
+         解码 2ch / 48000Hz / 15.59s / 748347 帧
+09:22:56 selftest 1.2s 后：采样缓存=1 个（4MB）活跃声部=1 已播=1 丢弃=0
+09:23:26 play salamander48 midi=60 vel=100 → 客户端无损引擎（nbforge:play）
+```
+
+⇒ 选层 → 解码 → 上传 → 播放 → 网络包，五步全部验证通过，**零错误**。
+
+**同时暴露一个"老链路"的坑**：09:22:14 那次资源重载的包列表里**没有 `file/nbforge_resources.zip`**
+（09:21:42 与 09:23:42 两次都有），于是 09:22:21–09:23:36 之间客户端刷了 **54 条**
+`Unable to play unknown soundEvent: nbforge:*` —— 那段时间**老链路（数据包 `/playsound` +
+`/nbforge note nbforge:strings_*`）是哑的**，因为它们靠资源包提供采样。**新引擎不受影响**（直接读磁盘母版）。
+
+**顺手拆掉的雷**：资源包缺席时还会出现
+`File nbforge:sounds/bell/a3.ogg does not exist, cannot add it to event nbforge:demo_bell` ——
+这是 **mod jar 自带的 `assets/nbforge/sounds.json`**（M2-1 骨架的 4 个 demo 事件）指着一批只有资源包里
+才有的文件。已删除该文件（资源包里本就有这 4 个事件的完整定义 + 288 个 ogg），并在 `/nbfc status`
+增加**资源包状态**一行，避免下次再靠"听不见"来发现包没开。

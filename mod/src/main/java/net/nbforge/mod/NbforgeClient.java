@@ -97,13 +97,35 @@ public final class NbforgeClient implements ClientModInitializer {
 	private static int status(FabricClientCommandSource src) {
 		src.sendFeedback(Text.literal(String.format(
 			"[nbforge] 引擎就绪=%s 乐器=%d 采样缓存=%d 个/%.0fMB 活跃声部=%d 峰值=%d 已播=%d 丢弃=%d 主增益=%.2f\n"
-				+ "  OpenAL：%s%s",
+				+ "  OpenAL：%s\n"
+				+ "  资源包：%s%s",
 			NbforgeAudio.ready(), NbforgeInstruments.size(), NbforgeAudio.bufferCount(),
 			NbforgeAudio.cachedBytes() / 1048576.0, NbforgeAudio.activeCount(), NbforgeAudio.peakActive(),
 			NbforgeAudio.playedCount(), NbforgeAudio.droppedCount(), NbforgeAudio.masterGain(),
 			NbforgeAudio.alInfo(),
+			packHint(),
 			NbforgeAudio.lastError() == null ? "" : "；最后错误：" + NbforgeAudio.lastError())));
 		return 1;
+	}
+
+	/**
+	 * 资源包是否启用（`nbforge_resources.zip`）。
+	 *
+	 * <p>为什么值得单独报：**老链路**（数据包/`/playsound` 播 `nbforge:*`）完全依赖这个包——
+	 * 实测 2026-09-15 09:22 有一次资源重载没带上它，客户端立刻刷了 54 条
+	 * `Unable to play unknown soundEvent: nbforge:*`（机器那段时间是哑的）。
+	 * 新链路（`nbforge:play` → 我们的 OpenAL 引擎）不吃资源包，所以这条只影响老链路。
+	 */
+	private static String packHint() {
+		try {
+			boolean enabled = MinecraftClient.getInstance().getResourcePackManager().getEnabledIds().stream()
+				.anyMatch(id -> id.contains("nbforge_resources"));
+			return enabled
+				? "nbforge_resources.zip 已启用（老链路可用）"
+				: "**未启用** —— 老链路（数据包 /playsound）会静音；无损引擎不受影响";
+		} catch (Throwable t) {
+			return "状态未知（" + t.getClass().getSimpleName() + "）";
+		}
 	}
 
 	private static int reload(FabricClientCommandSource src) {
