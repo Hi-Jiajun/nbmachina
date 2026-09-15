@@ -56,7 +56,48 @@ const INSTRUMENTS = [
     license: 'CC-BY 3.0 · Zenph Studios / R. G. Saez',
     sfz: `${TC}/piano/disklavier_sfz/acoustic_grand_piano_ydp_20080910.sfz`,
   },
+  // ---- 下面三件来自 VSCO 2 CE（CC0）：把贝斯/内声部/打击乐从"钢琴顶替"换成真乐器 ----
+  {
+    id: 'vsco_harp',
+    name: 'VSCO 2 CE Harp（竖琴）',
+    license: 'CC0 1.0 · Versilian Studios',
+    sfz: `${TC}/piano/vsco2ce/VSCO-2-CE-SFZ/Harp.sfz`,
+  },
+  {
+    id: 'vsco_contrabass_pizz',
+    name: 'VSCO 2 CE Solo Contrabass Pizzicato（低音提琴拨弦）',
+    license: 'CC0 1.0 · Versilian Studios',
+    sfz: `${TC}/piano/vsco2ce/VSCO-2-CE-SFZ/ContrabassPizz.sfz`,
+  },
+  {
+    id: 'vsco_perc',
+    name: 'VSCO 2 CE 打击乐（底鼓 + 铃鼓代踩镲）',
+    license: 'CC0 1.0 · Versilian Studios',
+    // 非音高乐器：键位是我们自己的声部键（basedrum=36 / hat=42），不做八度折叠
+    pitched: false,
+    custom: () => percussionRegions(`${TC}/piano/vsco2ce/VSCO-2-CE-SFZ/GM-StylePerc.sfz`),
+  },
 ];
+
+/**
+ * 打击乐是**非音高乐器**：直接复用 GM-StylePerc.sfz 的两件，按我们的声部键位重映射
+ *   · BDrumNewhit（GM36 底鼓）→ 我们的 `basedrum` 键 36
+ *   · Tamb1-Hit（GM54 铃鼓）→ 我们的 `hat` 键 42（VSCO 2 CE **没有**闭合踩镲，用铃鼓替代；与离线渲染同一处理）
+ * 只取 rr1（round robin 一号），避免同一力度层两个文件争抢。
+ */
+function percussionRegions(sfzPath) {
+  const { regions } = loadSfz(sfzPath);
+  const out = [];
+  for (const r of regions) {
+    const base = r.file.replace(/\\/g, '/').split('/').pop();
+    if (base.startsWith('BDrumNewhit') && base.includes('rr1')) {
+      out.push({ ...r, loKey: 36, hiKey: 36, root: 36 });
+    } else if (base.startsWith('Tamb1-Hit') && base.includes('rr1')) {
+      out.push({ ...r, loKey: 42, hiKey: 42, root: 42 });
+    }
+  }
+  return out;
+}
 
 const only = opt('only');
 const list = only ? INSTRUMENTS.filter((i) => i.id === only) : INSTRUMENTS;
@@ -65,11 +106,12 @@ if (only && !list.length) throw new Error(`没有这个乐器：${only}（可选
 const out = { generatedAt: new Date().toISOString(), instruments: [] };
 const summary = [];
 for (const def of list) {
-  if (!fs.existsSync(def.sfz)) {
+  if (!def.custom && !fs.existsSync(def.sfz)) {
     console.warn(`  跳过 ${def.id}：找不到 ${def.sfz}`);
     continue;
   }
-  const { regions, droppedTrigger, droppedRange } = loadSfz(def.sfz);
+  const loaded = def.custom ? { regions: def.custom(), droppedTrigger: 0, droppedRange: 0 } : loadSfz(def.sfz);
+  const { regions, droppedTrigger, droppedRange } = loaded;
   const missing = regions.filter((r) => !fs.existsSync(r.file));
   if (missing.length) {
     console.warn(`  跳过 ${def.id}：${missing.length} 个采样文件不存在（例：${missing[0].file}）`);
@@ -80,6 +122,7 @@ for (const def of list) {
     name: def.name,
     license: def.license,
     isDefault: !!def.isDefault,
+    pitched: def.pitched !== false,
     regions: regions.map((r) => ({
       file: r.file.replace(/\\/g, '/'),
       loKey: r.loKey,

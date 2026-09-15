@@ -24,13 +24,19 @@ const has = (n) => argv.includes(`--${n}`);
 const SRC = opt('in', P.machineScore);
 const OUT = opt('out', path.join(P.build, 'nbforge_score.csv'));
 const MELODY = opt('melody', 'salamander48');
-const BASS = opt('bass', MELODY);          // 还没有低音提琴采样，先让钢琴弹贝斯声部
-const PERC = opt('perc', 'skip');          // 打击乐采样还没入库 → 默认跳过
+const BASS = opt('bass', 'vsco_contrabass_pizz');   // VSCO 低音提琴拨弦（M3-18 起）
+const PERC = opt('perc', 'vsco_perc');              // VSCO 打击乐：底鼓 + 铃鼓（VSCO 无闭合踩镲，用铃鼓替代）
 const DEPLOY = has('deploy');
 const CLIENT_GAME_DIR = 'C:/Program Files/PCL2/.minecraft/versions/1.21.10-Fabric 0.19.5';
 const TEST_SERVER_DIR = 'C:/Users/hiliang/Documents/minecraft/_toolchain/spike-testserver';
 
 const VOICE_MAP = { harp: MELODY, bell: MELODY, bass: BASS, basedrum: PERC, hat: PERC };
+/**
+ * 打击乐的键位修正：机器谱面里 basedrum/hat 的 `midi` 列其实是**音符盒行号**（0 与 24），
+ * 不是 GM 键位（实测：basedrum midi=0 row=0、hat midi=24 row=24）。
+ * 离线渲染 `render-ensemble` 也是按声部名映射到 GM（basedrum=36 / hat=42），这里保持同一口径。
+ */
+const PERC_KEY = { basedrum: 36, hat: 42 };
 
 const lines = fs.readFileSync(SRC, 'utf8').trim().split(/\r?\n/);
 const header = lines[0].split(',');
@@ -41,6 +47,7 @@ for (const need of ['time_seconds', 'instrument', 'midi', 'volume']) {
 
 const out = ['time_seconds,instrument,midi,velocity,voice'];
 const stats = { total: 0, written: 0, skipped: 0, byVoice: {}, byInstrument: {} };
+const keyRange = {};
 for (const line of lines.slice(1)) {
   if (!line.trim()) continue;
   const c = line.split(',');
@@ -52,7 +59,8 @@ for (const line of lines.slice(1)) {
     continue;
   }
   const t = Number(c[idx.time_seconds]);
-  const midi = Number(c[idx.midi]);
+  let midi = Number(c[idx.midi]);
+  if (PERC_KEY[voice] !== undefined) midi = PERC_KEY[voice];
   if (!Number.isFinite(t) || !Number.isFinite(midi)) {
     stats.skipped++;
     continue;
@@ -66,6 +74,9 @@ for (const line of lines.slice(1)) {
   stats.written++;
   stats.byVoice[voice] = (stats.byVoice[voice] ?? 0) + 1;
   stats.byInstrument[target] = (stats.byInstrument[target] ?? 0) + 1;
+  const kr = keyRange[target] ?? (keyRange[target] = { lo: midi, hi: midi });
+  kr.lo = Math.min(kr.lo, midi);
+  kr.hi = Math.max(kr.hi, midi);
 }
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
@@ -73,6 +84,7 @@ fs.writeFileSync(OUT, out.join('\n') + '\n', 'utf8');
 console.log(`写出 ${OUT}：${stats.written} 颗音（源 ${stats.total} 行，跳过 ${stats.skipped}）`);
 console.log(`  声部：${JSON.stringify(stats.byVoice)}`);
 console.log(`  乐器：${JSON.stringify(stats.byInstrument)}`);
+console.log(`  键位：${Object.entries(keyRange).map(([k, v]) => `${k}=${v.lo}..${v.hi}`).join('  ')}`);
 console.log(`  时长：${(Number(lines.at(-1).split(',')[idx.time_seconds])).toFixed(1)}s`);
 
 if (DEPLOY) {

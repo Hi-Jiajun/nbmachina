@@ -59,7 +59,40 @@ public final class NbforgeInstruments {
 		public String name;
 		public String license;
 		public boolean isDefault;
+		/** 是否有音高：钢琴/竖琴/低音提琴 = true；打击乐 = false（JSON 里可省，省了按 true 处理） */
+		public Boolean pitched;
 		public List<Region> regions = new ArrayList<>();
+
+		public boolean isPitched() {
+			return pitched == null || pitched;
+		}
+
+		public int minKey() {
+			int m = 127;
+			for (Region r : regions) m = Math.min(m, r.loKey);
+			return m;
+		}
+
+		public int maxKey() {
+			int m = 0;
+			for (Region r : regions) m = Math.max(m, r.hiKey);
+			return m;
+		}
+
+		/**
+		 * 把超出乐器音域的键**整八度**折回来（不改和声，只换八度）——
+		 * 与离线渲染 `render-ensemble` 的 `foldIntoRange` 同一口径。
+		 * 例：低音提琴只到 C1(24)，谱面里的 A0(21) 会被折到 A1(33)，而不是硬降 3 个半音。
+		 */
+		public int foldKey(int midi) {
+			int lo = minKey();
+			int hi = maxKey();
+			if (regions.isEmpty() || lo > hi) return midi;
+			int m = midi;
+			while (m < lo) m += 12;
+			while (m > hi) m -= 12;
+			return m;
+		}
 
 		/** 精确命中 → 退化命中（键位最近、再力度最近）；永不返回 null（除非该乐器没有区域） */
 		public Region pick(int midi, int velocity) {

@@ -71,6 +71,7 @@ public final class NbforgeAudio {
 	private static volatile int receivedCount = 0;
 	private static volatile int restartCount = 0;
 	private static volatile int stolenCount = 0;
+	private static volatile int foldedCount = 0;
 	private static volatile int peakActive = 0;
 
 	private NbforgeAudio() {
@@ -110,6 +111,11 @@ public final class NbforgeAudio {
 	/** 因为并发上限被抢走的声部数（>0 说明"有音被提前掐掉"，需要抬上限或缩短采样） */
 	public static int stolenCount() {
 		return stolenCount;
+	}
+
+	/** 因为超出乐器音域而被**整八度**折回来的音符数（低音提琴/竖琴这类窄音域乐器会有） */
+	public static int foldedCount() {
+		return foldedCount;
 	}
 
 	public static int activeCount() {
@@ -300,14 +306,18 @@ public final class NbforgeAudio {
 			lastError = "没有这个乐器：" + instrument;
 			return;
 		}
-		NbforgeInstruments.Region region = inst.pick(midi, velocity);
+		// 有音高的乐器：先把超出音域的键整八度折回来（与离线渲染同一口径）；
+		// 打击乐（pitched=false）按 GM 键位原样用。
+		int playMidi = inst.isPitched() ? inst.foldKey(midi) : midi;
+		if (playMidi != midi) foldedCount++;
+		NbforgeInstruments.Region region = inst.pick(playMidi, velocity);
 		if (region == null || region.file == null) {
 			droppedCount++;
 			lastError = "乐器 " + instrument + " 里没有可用区域";
 			return;
 		}
 		float gain = NbforgeInstruments.velocityGain(velocity) * (float) Math.pow(10.0, region.gainDb / 20.0);
-		float pitch = (float) region.pitchRatio(midi);
+		float pitch = (float) region.pitchRatio(playMidi);
 		TASKS.offer(() -> playNow(region.file, gain, pitch, x, y, z));
 	}
 

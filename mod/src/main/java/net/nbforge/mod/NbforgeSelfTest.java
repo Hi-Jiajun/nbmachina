@@ -24,6 +24,8 @@ public final class NbforgeSelfTest {
 
 	private static boolean running;
 	private static int ticks;
+	/** 谱面播放器自检用：前 2.0s 应有的到点数（由谱面算出来，不写死——打击乐入库后会变） */
+	private static int expectAt2s = -1;
 
 	private NbforgeSelfTest() {
 	}
@@ -46,8 +48,9 @@ public final class NbforgeSelfTest {
 				NbforgeMod.LOGGER.info("[nbforge][selftest] t=40 活跃延音作业={} 累计击发={}",
 					NbforgeSustainQueue.activeJobs(), NbforgeSustainQueue.totalPlays());
 				NbforgeMod.LOGGER.info("[nbforge][selftest] 谱面播放器 t=40（约 2.0s）：到点 {} 颗 / 已发 {} 条 / 收件人 {}"
-					+ "（无玩家时只计数不发送；谱面前 2.0s 应为 13 颗）",
-					NbforgeScorePlayer.due(), NbforgeScorePlayer.sent(), NbforgeScorePlayer.recipients());
+					+ "（无玩家时只计数不发送；谱面前 2.0s 应为 {} 颗）→ {}",
+					NbforgeScorePlayer.due(), NbforgeScorePlayer.sent(), NbforgeScorePlayer.recipients(),
+					expectAt2s, Math.abs(NbforgeScorePlayer.due() - expectAt2s) <= 1 ? "通过" : "不符");
 			}
 			if (ticks >= 120) {
 				running = false;
@@ -93,7 +96,9 @@ public final class NbforgeSelfTest {
 				NbforgeMod.LOGGER.info("[nbforge][selftest] 谱面自检 {}", all == sc.size() && at0 <= at60 ? "通过" : "失败");
 				// 真跑一次播放器（没有玩家 → 不发送，只验证"到点计数随时间推进"）
 				NbforgeScorePlayer.start(new Vec3d(0.5D, 70.0D, 0.5D));
-				NbforgeMod.LOGGER.info("[nbforge][selftest] 已启动谱面播放器（自检用，t=120 停）");
+				expectAt2s = NbforgeScorePlayer.dryRunDue(sc, 2.0 + 0.03);
+				NbforgeMod.LOGGER.info("[nbforge][selftest] 已启动谱面播放器（自检用，t=120 停；前 2.0s 期望到点 {} 颗）",
+					expectAt2s);
 			} catch (Exception e) {
 				NbforgeMod.LOGGER.warn("[nbforge][selftest] 谱面自检失败：{}", e.toString());
 			}
