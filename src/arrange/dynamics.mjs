@@ -1,0 +1,170 @@
+#!/usr/bin/env node
+// M3-14 · 实测力度 → 可用力度（velMidi，1..127）
+//
+// 要解决的问题（用户 2026-09-15 听感反馈："力度强弱关系我没有听出来"）：
+// M0 T5b 量出来的 `velocity` = 该音**自己的音级 + 自己的八度**上的短时窄带能量，
+// 按 p10/p90 **线性**映到 0.35..1.0。能量是重尾分布，线性映射的结果是绝大多数音挤在
+// 0.35~0.48 这一小段（实测旋律 n=1639：p5 0.359 / 中位 0.422 / p95 0.504），
+// 于是采样力度层几乎不变、增益差不到 1dB —— 听起来就是"没有强弱"。
+//
+// 这里做两件事（都只依赖谱面自身的统计，不需要再听音频）：
+//   ① **分位数拉伸**：按声部（旋律/贝斯分别统计）把 p5→floor、p95→ceiling 线性拉开，
+//      保留原有的强弱**次序**，只是把被压缩的动态范围还原；
+//   ② 输出 **1..127 的 MIDI 力度**（`velMidi`）：这是唯一能让"采样力度层选择"
+//      （SFZ 的 lovel/hivel）和"播放音量"共用同一把尺子的口径。
+//
+// 下游两处消费同一列：
+//   · 离线渲染 `tools/render-ensemble.mjs --dynamics measured`：velMidi → 采样层 + 增益；
+//   · 游戏内 hifi `src/emit/playsound-hifi.mjs`：velMidi → playsound 的 volume 参数。
+//
+// 打击乐（basedrum/hat）没有"力度"概念 → velMidi 留空，渲染时走它们各自的峰值定标。
+//
+// 用法：node src/arrange/dynamics.mjs --in <csv> --out <csv>
+import fs from 'node:fs';
+
+import { resolvePaths } from '../core/paths.mjs';
+import { voiceOfInstrument } from './velocity.mjs';
+
+export const DYNAMICS_DEFAULTS = {
+  pLow: 0.05,      // 分位数下界（p5 → floor）
+  pMid: 0.5,       // 中位数（p50 → mid）
+  pHigh: 0.95,     // 分位数上界（p95 → ceiling）
+  floor: 10,       // 最轻的 MIDI 力度（≈ -16.7dB，见 velMidiToAmplitude）
+  mid: 64,         // 中位音落位：让全曲坐在"中强"而不是"极弱"（只有两端按分位数拉伸会整体偏轻）
+  ceiling: 127,    // 最响
+  curve: 1.0,      // >1 更压动态、<1 更拉动态
+  rangeDb: 18,     // 满量程动态范围：velMidi 从 1 → 127 对应 -18dB → 0dB
+};
+
+const clamp01 = (x) => Math.max(0, Math.min(1, x));
+
+/**
+ * 给每个音符补 `velMidi`（1..127；打击乐与"没有力度证据"的音为 null）。
+ * @param {Array<{instrument?:string, velocity?:number|string}>} notes
+ * @param {object} [opts] 见 DYNAMICS_DEFAULTS
+ * @returns {Array<object>} 新数组（不改输入）
+ */
+export function assignVelMidi(notes, opts = {}) {
+  const cfg = { ...DYNAMICS_DEFAULTS, ...opts };
+  const voices = notes.map((n) => voiceOfInstrument(n.instrument));
+
+  // 按声部分别统计（旋律与贝斯的能量分布差得远，共用一套分位数会把贝斯压平）
+  const pools = new Map();
+  notes.forEach((n, i) => {
+    if (voices[i] === 'perc') return;
+    const v = Number(n.velocity);
+    if (!Number.isFinite(v) || v <= 0) return;              // 0 = 音频里没有证据（weak）
+    if (!pools.has(voices[i])) pools.set(voices[i], []);
+    pools.get(voices[i]).push(v);
+  });
+  const stats = new Map();
+  for (const [voice, arr] of pools) {
+    const s = arr.slice().sort((a, b) => a - b);
+    const at = (p) => s[Math.min(s.length - 1, Math.max(0, Math.round((s.length - 1) * p)))];
+    const lo = at(cfg.pLow);
+    const hi = Math.max(at(cfg.pHigh), lo + 1e-9);
+    const mid = Math.min(Math.max(at(cfg.pMid), lo), hi);
+    stats.set(voice, { n: s.length, lo, mid, hi, min: s[0], max: s.at(-1) });
+  }
+
+  // 三点分段线性：p5→floor、p50→mid、p95→ceiling。只用两端拉伸会让整首曲子偏轻
+  // （绝大多数音落在被压缩的低段），加上中点锚才既拉开动态又不丢"中强"的基本位置。
+  const toMidi = (v, st) => {
+    let x;
+    if (v <= st.lo) x = cfg.floor;
+    else if (v <= st.mid) x = cfg.floor + (cfg.mid - cfg.floor) * ((v - st.lo) / (st.mid - st.lo));
+    else if (v <= st.hi) x = cfg.mid + (cfg.ceiling - cfg.mid) * ((v - st.mid) / (st.hi - st.mid));
+    else x = cfg.ceiling;
+    if (cfg.curve !== 1) {
+      const t = clamp01((x - cfg.floor) / (cfg.ceiling - cfg.floor));
+      x = cfg.floor + (cfg.ceiling - cfg.floor) * t ** cfg.curve;
+    }
+    return Math.round(x);
+  };
+  return notes.map((n, i) => {
+    const voice = voices[i];
+    if (voice === 'perc') return { ...n, velMidi: null };
+    const st = stats.get(voice);
+    if (!st) return { ...n, velMidi: null };
+    const v = Number(n.velocity);
+    if (!Number.isFinite(v) || v <= 0) return { ...n, velMidi: cfg.floor };   // 无证据 → 地板
+    return { ...n, velMidi: Math.max(cfg.floor, Math.min(cfg.ceiling, toMidi(v, st))) };
+  });
+}
+
+/** velMidi → 线性振幅（1 → -18dB，127 → 0dB）；volume 参数直接用它 */
+export function velMidiToAmplitude(velMidi, rangeDb = DYNAMICS_DEFAULTS.rangeDb) {
+  const v = Math.max(1, Math.min(127, Number(velMidi)));
+  return 10 ** (((v - 127) / 126) * rangeDb / 20);
+}
+
+/** 给日志/报告用的可读统计 */
+export function describeVelMidi(notes) {
+  const out = {};
+  for (const n of notes) {
+    const voice = voiceOfInstrument(n.instrument);
+    if (!out[voice]) out[voice] = { n: 0, withVel: 0, min: null, max: null, hist: {} };
+    const rec = out[voice];
+    rec.n++;
+    if (n.velMidi === null || n.velMidi === undefined) continue;
+    rec.withVel++;
+    rec.min = rec.min === null ? n.velMidi : Math.min(rec.min, n.velMidi);
+    rec.max = rec.max === null ? n.velMidi : Math.max(rec.max, n.velMidi);
+    const bucket = `${Math.floor(n.velMidi / 16) * 16}-${Math.floor(n.velMidi / 16) * 16 + 15}`;
+    rec.hist[bucket] = (rec.hist[bucket] ?? 0) + 1;
+  }
+  return out;
+}
+
+/* ---------------------------------------------------------------- CLI */
+export function readCsv(text) {
+  const lines = text.trim().split(/\r?\n/);
+  const header = lines[0].split(',').map((s) => s.trim());
+  const rows = lines.slice(1).filter((l) => l.trim()).map((l) => l.split(','));
+  return { header, rows };
+}
+
+/** 按 header 对齐写出（不足的列补空——修掉"主谱面 12 列 + 打击乐 7 列"混排的历史问题） */
+export function writeCsv(header, rows) {
+  const body = rows.map((r) => header.map((_, i) => (r[i] ?? '').toString().trim()).join(','));
+  return [header.join(','), ...body].join('\n') + '\n';
+}
+
+export function addVelMidiColumn(text, opts = {}) {
+  const { header, rows } = readCsv(text);
+  const iInstr = header.indexOf('instrument');
+  const iVel = header.indexOf('velocity');
+  const notes = rows.map((r) => ({
+    instrument: iInstr >= 0 ? r[iInstr] : '',
+    velocity: iVel >= 0 ? Number(r[iVel]) : NaN,
+  }));
+  const withDyn = assignVelMidi(notes, opts);
+  const outHeader = header.includes('velMidi') ? header : [...header, 'velMidi'];
+  const iOut = outHeader.indexOf('velMidi');
+  const outRows = rows.map((r, i) => {
+    const aligned = outHeader.map((col) => {
+      const j = header.indexOf(col);
+      return j >= 0 ? (r[j] ?? '') : '';
+    });
+    aligned[iOut] = withDyn[i].velMidi === null ? '' : String(withDyn[i].velMidi);
+    return aligned;
+  });
+  return { header: outHeader, rows: outRows, notes: withDyn };
+}
+
+const isMain = process.argv[1] && process.argv[1].replace(/\\/g, '/').endsWith('src/arrange/dynamics.mjs');
+if (isMain) {
+  const argv = process.argv.slice(2);
+  const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
+  const P = resolvePaths();
+  const IN = opt('in', P.machineScore);
+  const OUT = opt('out', P.file('pipeline_6b_dynamics.csv'));
+  const { header, rows, notes } = addVelMidiColumn(fs.readFileSync(IN, 'utf8'));
+  fs.writeFileSync(OUT, writeCsv(header, rows), 'utf8');
+  const stats = describeVelMidi(notes);
+  console.log(`${IN.split(/[\\/]/).pop()} + velMidi → ${OUT.split(/[\\/]/).pop()}（${rows.length} 行）`);
+  for (const [voice, s] of Object.entries(stats)) {
+    console.log(`  ${voice}: ${s.n} 行，其中 ${s.withVel} 行有力度；velMidi ${s.min ?? '-'}..${s.max ?? '-'}`
+      + `；分布 ${Object.entries(s.hist).sort((a, b) => a[0].localeCompare(b[0])).map(([k, v]) => `${k}:${v}`).join(' ')}`);
+  }
+}

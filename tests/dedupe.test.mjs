@@ -199,3 +199,27 @@ test('真实数据：v3 CSV 的 276 个撞格 → 0', (t) => {
       `合并掉 ${report.summary.mergedAway} 颗（${JSON.stringify(report.summary.collisionsByRule)}）`,
   );
 });
+
+test('M3-14：去撞格不得吞掉追加列（velocity/velMidi 要能到 emit）', () => {
+  // 编曲链在去撞格之前会追加 velocity / velocityRaw / velocityReason / velMidi 四列，
+  // 去撞格是它们的必经之路：一旦被"固定 7 列"重写掉，实测力度就永远到不了数据包。
+  const header = 'step,tick,time_seconds,instrument,midi,row,volume,velocity,velocityRaw,velocityReason,velMidi';
+  const row = (step, midi, vol, vel, raw, semis) =>
+    [step, step * 12, (step * 0.12).toFixed(3), 'harp', midi, midi - 60, vol.toFixed(3), vel, raw, 'measured', semis].join(',');
+  const withExtra = [header, row(0, 72, 0.35, 0.42, 0.15), row(1, 74, 0.5, 0.61, 0.9)].join('\n') + '\n';
+  // 对照：同样的音符、没有追加列（旧口径）
+  const plain = withExtra.split('\n').map((l) => l.split(',').slice(0, 7).join(',')).join('\n');
+
+  const a = dedupeCsvText(withExtra);
+  const b = dedupeCsvText(plain);
+  assert.equal(a.csv.split('\n')[0], header, '追加列必须原样保留在表头里');
+  const rows = a.csv.trim().split('\n').slice(1);
+  assert.equal(rows.length, 2);
+  assert.equal(rows[0].split(',').slice(7).join(','), '0.42,0.15,measured,', '追加列逐字符保留');
+  // 去撞格的决策字段（前 7 列）必须与旧口径完全一致
+  assert.deepEqual(
+    a.csv.trim().split('\n').map((l) => l.split(',').slice(0, 7).join(',')),
+    b.csv.trim().split('\n').map((l) => l.split(',').slice(0, 7).join(',')),
+    '追加列不得影响去撞格结果',
+  );
+});

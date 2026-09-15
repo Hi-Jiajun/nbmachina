@@ -232,13 +232,27 @@ export function dedupeNotes(notes, options = {}) {
 
 /* ---------- CSV 读写（列名与 v3 完全一致，可直接替换给 layout） ---------- */
 
-/** 读 v3 风格 CSV → 音符对象数组 */
+/**
+ * 读 v3 风格 CSV → 音符对象数组。
+ *
+ * 除 7 个已知列外，**其余列原样保留**在 `extra` 里（字符串，逐字符回写）——
+ * 编曲链后面的步骤会追加 velocity / velocityRaw / velocityReason / velMidi 等列，
+ * 去撞格这一步不该把它们吞掉（否则"实测力度"永远到不了 emit 与离线渲染）。
+ * `n.velocity` 仍是去撞格内部用于排序的 0..127 口径（= round(volume × 127)），
+ * 与 `extra.velocity`（管线里的 0..1 实测力度）互不干扰。
+ */
 export function readNotesCsv(text) {
   const lines = text.trim().split(/\r?\n/);
   const header = lines[0].split(',').map((s) => s.trim());
   const idx = Object.fromEntries(header.map((h, i) => [h, i]));
-  return lines.slice(1).map((line) => {
+  const extraCols = header.filter((h) => !CSV_HEADER.includes(h));
+  const notes = lines.slice(1).filter((l) => l.trim()).map((line) => {
     const c = line.split(',');
+    const extra = {};
+    for (const col of extraCols) {
+      const raw = c[idx[col]];
+      if (raw !== undefined && raw !== '') extra[col] = raw;
+    }
     return {
       step: Number(c[idx.step]),
       tick: Number(c[idx.tick]),
@@ -249,22 +263,34 @@ export function readNotesCsv(text) {
       volume: Number(c[idx.volume]),
       velocity: Math.round(Number(c[idx.volume]) * 127),
       len: 1,
+      extra,
     };
   });
+  // 追加列的**顺序**（含那些"某些行为空"的列）挂在数组上，写回时按它出表头；
+  // 否则打击乐那种空 velMidi 会把整列从输出里抹掉。
+  notes.extraColumns = extraCols;
+  return notes;
 }
 
-/** 音符对象数组 → v3 风格 CSV（固定列顺序，数字格式保持 3 位小数） */
+/** 音符对象数组 → v3 风格 CSV（7 列固定 + 透传列按首次出现顺序追加） */
 export function notesToCsv(notes) {
-  const rows = notes.map((n) =>
-    [n.step, n.tick, n.timeSec.toFixed(3), n.instrument, n.midi, n.row, n.volume.toFixed(3)].join(','),
-  );
-  return [CSV_HEADER.join(','), ...rows].join('\n') + '\n';
+  const extraCols = [...(notes.extraColumns ?? [])];
+  for (const n of notes) {
+    for (const k of Object.keys(n.extra ?? {})) if (!extraCols.includes(k)) extraCols.push(k);
+  }
+  const header = [...CSV_HEADER, ...extraCols];
+  const rows = notes.map((n) => [
+    n.step, n.tick, n.timeSec.toFixed(3), n.instrument, n.midi, n.row, n.volume.toFixed(3),
+    ...extraCols.map((k) => n.extra?.[k] ?? ''),
+  ].join(','));
+  return [header.join(','), ...rows].join('\n') + '\n';
 }
 
 /** CSV 文本 → 去撞格后的 CSV + 报告 */
 export function dedupeCsvText(text, options = {}) {
   const rows = readNotesCsv(text);
   const { notes, report } = dedupeNotes(rows, options);
+  notes.extraColumns = rows.extraColumns;
   return { csv: notesToCsv(notes), report };
 }
 

@@ -12,7 +12,8 @@
 // 混音口径（这条是听感关键）：
 //   · 持续层（旋律/内声部/贝斯）按 **RMS** 定标 —— 它们几乎铺满全曲，RMS 才代表响度；
 //   · 打击乐按 **峰值** 定标 —— 96 颗鼓散在 290 秒里，按 RMS 定标会把它抬成爆音；
-//   · 层内力度：SFZ 的 lovel/hivel 选层 + 谱面力度做小幅微调（0.55 + 0.45·v）；
+//   · 层内力度：SFZ 的 lovel/hivel 选层（`velMidi`，M3-14 的实测力度归一值）
+//     + 同一把尺子的增益（1..127 ≈ -16.7dB..0dB）；老谱面没有 velMidi 时退回 0.55 + 0.45·volume；
 //   · 最后整体归一 -18dBFS + tanh 软限幅（与 audition 同一套），再转 48k/24bit 母版。
 //
 // 用法：
@@ -27,6 +28,7 @@ import { resolvePaths } from '../src/core/paths.mjs';
 import { STEP_SECONDS } from '../src/emit/tick-map.mjs';
 import { parseScoreCsv, planHifi } from '../src/emit/playsound-hifi.mjs';
 import { loadSfz, pickRegion } from '../src/sample/sfz.mjs';
+import { velMidiToAmplitude } from '../src/arrange/dynamics.mjs';
 
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
@@ -141,29 +143,39 @@ const { notes } = parseScoreCsv(fs.readFileSync(SCORE, 'utf8'));
 const { events } = planHifi(notes);          // 与数据包同一套声部判定/音高口径
 const GM = { basedrum: 36, hat: 42 };
 const triggers = [];
+// 力度 → (采样层, 增益)：
+//   measured：用 M3-14 的 velMidi（1..127）——既决定选哪一层采样，也决定增益（-16.7dB..0dB）；
+//   flat：维持原状（volume × 127 选层 + 0.55+0.45·volume 的微调）——所以 flat 输出与改造前逐字节一致。
 const dynOf = (e) => {
   if (DYNAMICS === 'measured') {
-    const v = Number(e.velocity);
-    if (Number.isFinite(v) && v > 0) return Math.min(1, Math.max(0.3, v));
+    const v = Number(e.velMidi);
+    if (Number.isFinite(v) && v > 0) {
+      return { vel127: Math.max(1, Math.min(127, Math.round(v))), gain: velMidiToAmplitude(v) };
+    }
   }
-  return Number.isFinite(Number(e.volume)) ? Number(e.volume) : 0.8;
+  const vol = Number.isFinite(Number(e.volume)) ? Number(e.volume) : 0.8;
+  return { vel127: Math.max(1, Math.min(127, Math.round(vol * 127))), gain: 0.55 + 0.45 * vol };
 };
 for (const e of events) {
   const t = e.step * STEP_SECONDS;
-  const vel = dynOf(e);
+  const { vel127, gain } = dynOf(e);
   if (e.kind === 'vanilla') {
     const layer = e.instr === 'basedrum' ? 'kick' : 'hat';
-    if (keep(layer)) triggers.push({ layer, midi: GM[e.instr] ?? 36, vel, t });
-  } else if (e.timbre === 'strings' && keep('melody')) triggers.push({ layer: 'melody', midi: e.midi, vel, t });
-  else if (e.timbre === 'bell' && keep('inner')) triggers.push({ layer: 'inner', midi: e.midi, vel, t });
-  else if (e.timbre === 'bass' && keep('bass')) triggers.push({ layer: 'bass', midi: e.midi, vel, t });
+    if (keep(layer)) triggers.push({ layer, midi: GM[e.instr] ?? 36, vel127, gain, t });
+  } else if (e.timbre === 'strings' && keep('melody')) triggers.push({ layer: 'melody', midi: e.midi, vel127, gain, t });
+  else if (e.timbre === 'bell' && keep('inner')) triggers.push({ layer: 'inner', midi: e.midi, vel127, gain, t });
+  else if (e.timbre === 'bass' && keep('bass')) triggers.push({ layer: 'bass', midi: e.midi, vel127, gain, t });
 }
 const dur = Math.max(...triggers.map((x) => x.t), 0) + 8;   // 尾巴留 8 秒（钢琴/竖琴自然衰减）
 {
-  const vels = triggers.map((x) => x.vel).sort((a, b) => a - b);
-  const q = (p) => vels[Math.floor((vels.length - 1) * p)].toFixed(3);
+  const vels = triggers.map((x) => x.vel127).sort((a, b) => a - b);
+  const q = (p) => vels[Math.floor((vels.length - 1) * p)];
+  const layers = new Set(triggers.map((x) => x.vel127));
+  const gains = triggers.map((x) => x.gain);
   console.log(`力度口径：${DYNAMICS}（谱面 ${path.basename(SCORE)}）→ `
-    + `min ${vels[0].toFixed(3)} / 中位 ${q(0.5)} / p90 ${q(0.9)} / max ${vels.at(-1).toFixed(3)}`);
+    + `velMidi min ${vels[0]} / 中位 ${q(0.5)} / p90 ${q(0.9)} / max ${vels.at(-1)}；`
+    + `用到 ${layers.size} 个力度层；增益 ${Math.min(...gains).toFixed(3)}..${Math.max(...gains).toFixed(3)}`
+    + `（${(20 * Math.log10(Math.max(...gains) / Math.max(1e-9, Math.min(...gains)))).toFixed(1)}dB 动态）`);
 }
 const N = Math.round(dur * SR);
 console.log(`触发合计 ${triggers.length} 条 → 时长 ${dur.toFixed(1)}s（${N} 帧 @${SR}）`);
@@ -183,7 +195,7 @@ for (const layer of Object.keys(sources)) {
     // 八度移位不改和声、也是编曲标准做法；比硬变调 7 个半音（会把拨弦变成"吱吱声")好得多。
     let midi = trig.midi;
     if (midi < lo || midi > hi) { midi = foldIntoRange(midi, lo, hi); folded++; }
-    const vel127 = Math.max(1, Math.min(127, Math.round(trig.vel * 127)));
+    const vel127 = trig.vel127;
     const key = `${layer}:${midi}`;
     const seq = seqOf.get(key) ?? 0;
     seqOf.set(key, seq + 1);
@@ -192,7 +204,7 @@ for (const layer of Object.keys(sources)) {
     const shift = midi - region.root + region.tuneCents / 100;
     if (Math.abs(shift) > 1e-6) { shifted++; maxShift = Math.max(maxShift, Math.abs(shift)); }
     const s = resample(pcmOf(region.file), 2 ** (shift / 12));
-    const gain = 10 ** (region.gainDb / 20) * (0.55 + 0.45 * trig.vel);
+    const gain = 10 ** (region.gainDb / 20) * trig.gain;
     const off = Math.round(trig.t * SR);
     for (let i = 0; i < s.length; i++) {
       const j = off + i;

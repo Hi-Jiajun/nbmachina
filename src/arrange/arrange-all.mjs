@@ -84,7 +84,14 @@ fs.writeFileSync(merge, [base[0], ...base.slice(1), ...perc.slice(1)].join('\n')
 console.log(`  ⑥ 合并主谱面 ${base.length - 1} + 打击乐 ${perc.length - 1} = ${base.length + perc.length - 2} 行`);
 manifest.merge = { out: merge, sha256_16: sha(merge), notes: rows(merge) };
 
-run('⑦ 去撞格', 'src/arrange/dedupe.mjs', ['--in', merge, '--out', OUT, ...PASS], OUT);
+// ⑥b · 力度归一（M3-14）：M0 的实测力度是重尾分布（旋律 p5 0.36 / p95 0.50），
+// 直接当音量用 = 听不出强弱。这里按声部做分位数拉伸，输出 1..127 的 `velMidi`，
+// 让"采样力度层选择"与"播放音量"共用一把尺子；打击乐没有力度概念（留空）。
+const merge2 = P.file('pipeline_6b_dynamics.csv');
+run('⑥b 力度归一（velMidi）', 'src/arrange/dynamics.mjs', ['--in', merge, '--out', merge2, ...PASS], merge2);
+manifest.dynamics = { out: merge2, sha256_16: sha(merge2), notes: rows(merge2) };
+
+run('⑦ 去撞格', 'src/arrange/dedupe.mjs', ['--in', merge2, '--out', OUT, ...PASS], OUT);
 manifest.out = OUT;
 fs.writeFileSync(P.file('manifest.json'), JSON.stringify(manifest, null, 2) + '\n', 'utf8');
 console.log(`完成 → ${OUT}（${manifest.steps.at(-1).sha256_16}）；清单 → ${P.file('manifest.json')}`);

@@ -27,6 +27,7 @@ import {
 } from '../synth/voices.mjs';
 import { makePos } from './layout-pos.mjs';
 import { resolvePaths } from '../core/paths.mjs';
+import { velMidiToAmplitude } from '../arrange/dynamics.mjs';
 
 // M2-3：build 目录与数据包目录都走 paths.mjs
 const P = resolvePaths();
@@ -80,6 +81,8 @@ export function parseScoreCsv(text) {
   // M0 T5b 的**实测力度**（从参考演奏里逐音量出来的，`pipeline_*.csv` 里有，machine 谱面没有）。
   // 可选列：解析出来但没有列时就给 null，让调用方决定要不要退回 volume。
   const iVel = idx('velocity');
+  // M3-14 的**归一力度**（1..127）：由 src/arrange/dynamics.mjs 写入谱面，是"采样层 + 音量"的共用尺子
+  const iVelMidi = idx('velMidi');
   // M3-1 的可选溯源列：有就用，没有就按老口径（启发式）判定声部
   const iRole = idx('voiceRole');
   if ([iStep, iInstr, iRow, iVol].some((i) => i < 0)) throw new Error(`谱面 CSV 缺列：${header.join(',')}`);
@@ -90,6 +93,7 @@ export function parseScoreCsv(text) {
       midi: iMidi >= 0 ? +c[iMidi] : null,
       role: iRole >= 0 ? (c[iRole] ?? '') : '',
       velocity: iVel >= 0 ? +c[iVel] : null,
+      velMidi: iVelMidi >= 0 && `${c[iVelMidi] ?? ''}`.trim() !== '' ? +c[iVelMidi] : null,
     };
   });
   const byInstrument = {};
@@ -140,7 +144,11 @@ export function planHifi(notes, { bassOctave = 0, inner = 'bell', melody = 'stri
     octaveFallback: 0, bassOctaveSkipped: 0,
     strings: 0, pad: 0, bell: 0, bass: 0, piano: 0, bassOctaveUp: 0, unknownInstrument: 0, fallback: 0,
     byTimbre: {}, byInstrument: {},
+    withDynamics: 0,   // 有多少颗音用上了 M3-14 的实测力度（velMidi）
   };
+  // 音量口径（M3-14）：有 `velMidi` 就用它（实测力度 → 振幅；1..127 ≈ -16.7dB..0dB），
+  // 没有（老谱面、打击乐）就退回原来的 `volume` 列。0.35 那套恒定音量是"没有强弱"的根因。
+  const volumeOf = (n) => (Number.isFinite(n.velMidi) ? velMidiToAmplitude(n.velMidi).toFixed(2) : vol2(n.vol));
   const events = [];
   notes.forEach((n, i) => {
     const instr = String(n.instr ?? '').toLowerCase();
@@ -153,12 +161,15 @@ export function planHifi(notes, { bassOctave = 0, inner = 'bell', melody = 'stri
     }
     // `velocity` = M0 T5b 从参考演奏量出来的实测力度（可选列；没有就是 null）。
     // 只做透传，不在这里改音量口径——要不要用它做"真力度"由调用方（离线渲染/emit）决定。
-    const base = { step: n.step, instr: n.instr, row: n.row, vol: n.vol, velocity: n.velocity ?? null };
+    const base = {
+      step: n.step, instr: n.instr, row: n.row, vol: n.vol,
+      velocity: n.velocity ?? null, velMidi: n.velMidi ?? null,
+    };
     if (VANILLA_SOUND[family]) {
       stats.vanilla++;
       events.push({
         ...base, kind: 'vanilla', timbre: null, midi: null, event: VANILLA_SOUND[family],
-        volume: vol2(n.vol), pitch: pitchMul(n.row),
+        volume: volumeOf(n), pitch: pitchMul(n.row),
       });
       return;
     }
@@ -209,11 +220,12 @@ export function planHifi(notes, { bassOctave = 0, inner = 'bell', melody = 'stri
         + '请调整 src/synth/voices.mjs 的 REGISTERS 后重跑 render-all');
     }
     stats.synth++;
+    if (Number.isFinite(n.velMidi)) stats.withDynamics++;
     stats[timbre]++;
     stats.byTimbre[timbre] = (stats.byTimbre[timbre] ?? 0) + 1;
     events.push({
       ...base, kind: 'synth', timbre, midi, note: noteFileName(midi),
-      event: eventIdOf(timbre, midi), volume: vol2(n.vol), pitch: '1',
+      event: eventIdOf(timbre, midi), volume: volumeOf(n), pitch: '1',
     });
   });
 
