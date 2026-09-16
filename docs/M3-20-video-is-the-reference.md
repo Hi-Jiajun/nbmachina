@@ -65,3 +65,24 @@
 2. 视频里的**踏板/延音**还没有建模（当前靠采样自然衰减 + 放音规则）；
 3. 若要以视频为唯一标准，下一步应该是拿视频**逐音校对谱面本身**
    （音高/时值/遗漏音），这需要钢琴转谱模型（MIT 的 `piano_transcription_inference` 已确认可装）。
+
+## 6. 用户听感定稿：**乐句级**（2026-09-16）
+
+用户听完三档（恒定 / 视频逐音 / 视频乐句级）后的原话："**乐句级好得多**"。
+
+- **已部署的是乐句级档**：`score.csv` 2915 颗音、力度 52..104（中位 79）；
+  每 20s 平均力度 `75 69 69 79 80 93 82 68 62 91 88 97 92 75`——跟曲子的强弱结构对得上
+  （引子/主歌弱、100s 与 180–240s 副歌高潮强、140–160s 收、尾声回落）。
+- 逐音档（16.7dB）作为对照保留，可用一条命令切回。
+
+## 7. 复现 / 迭代：一条命令
+
+```bash
+node tools/build-video-score.mjs                 # 默认：乐句级 + 部署到客户端与测试服
+node tools/build-video-score.mjs --mode measured # 切逐音档
+node tools/build-video-score.mjs --lag 4.35      # 微调对齐
+```
+
+它内部按顺序跑：对齐音频（ffmpeg `-ss lag -af atempo=scale`）→ `velocity.mjs --accent`（从视频量力度）
+→ `make-velocity-score.mjs`（并入谱面）→ `dynamics.mjs --mode`（归一）→ `export-mod-score.mjs --preset piano --deploy`。
+整条链 **约 4 秒**（视频解码 3s 是大头）。
