@@ -9,6 +9,9 @@
 	],
 	"license": "MIT",
 	"environment": "*",
+	"mixins": [
+		"nbforge.mixins.json"
+	],
 	"entrypoints": {
 		"main": [
 			"net.nbforge.mod.NbforgeMod"

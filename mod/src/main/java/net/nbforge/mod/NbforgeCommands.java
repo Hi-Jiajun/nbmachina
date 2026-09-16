@@ -91,10 +91,18 @@ public final class NbforgeCommands {
 	private static int info(CommandContext<ServerCommandSource> ctx) {
 		ServerCommandSource source = ctx.getSource();
 		source.sendFeedback(() -> Text.literal(String.format(
-			"[nbforge] 后端 A 骨架在线；活跃延音作业=%d 累计击发=%d 峰值并发=%d",
+			"[nbforge] 后端 A 在线；活跃延音作业=%d 累计击发=%d 峰值并发=%d\n"
+				+ "  音符盒接管（mixin）：事件 %d / 已派发 %d / 跳过 %d；机器映射 %d 个位置\n"
+				+ "  声部→乐器：旋律=%s 低音=%s 打击乐=%s",
 			NbforgeSustainQueue.activeJobs(),
 			NbforgeSustainQueue.totalPlays(),
-			NbforgeSustainQueue.peakActiveJobs())), false);
+			NbforgeSustainQueue.peakActiveJobs(),
+			net.nbforge.mod.note.NbforgeNoteBlocks.eventCount(),
+			net.nbforge.mod.note.NbforgeNoteBlocks.dispatched(),
+			net.nbforge.mod.note.NbforgeNoteBlocks.skipped(),
+			net.nbforge.mod.note.NbforgeNoteBlocks.mapSize(),
+			NbforgeMod.MELODY_INSTRUMENT, NbforgeMod.BASS_INSTRUMENT,
+			String.valueOf(NbforgeMod.PERC_INSTRUMENT))), false);
 		return 1;
 	}
 

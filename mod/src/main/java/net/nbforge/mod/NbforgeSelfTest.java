@@ -8,9 +8,11 @@ import net.minecraft.registry.Registries;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.world.ServerWorld;
+import net.minecraft.block.Blocks;
 import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 
+import net.nbforge.mod.note.NbforgeNoteBlocks;
 import net.nbforge.mod.score.NbforgeScore;
 import net.nbforge.mod.score.NbforgeScorePlayer;
 
@@ -47,6 +49,11 @@ public final class NbforgeSelfTest {
 			if (ticks == 40) {
 				NbforgeMod.LOGGER.info("[nbforge][selftest] t=40 活跃延音作业={} 累计击发={}",
 					NbforgeSustainQueue.activeJobs(), NbforgeSustainQueue.totalPlays());
+				NbforgeMod.LOGGER.info("[nbforge][selftest] 音符盒注入（mixin）：事件 {} 次 / 已派发 {} / 跳过 {} → {}",
+					NbforgeNoteBlocks.eventCount(), NbforgeNoteBlocks.dispatched(), NbforgeNoteBlocks.skipped(),
+					NbforgeNoteBlocks.eventCount() > 0 ? "注入生效" : "注入未生效（refmap 问题仍在）");
+				NbforgeMod.LOGGER.info("[nbforge][selftest] 机器映射（位置→谱面音符）：{} 个位置",
+					NbforgeNoteBlocks.mapSize());
 				NbforgeMod.LOGGER.info("[nbforge][selftest] 谱面播放器 t=40（约 2.0s）：到点 {} 颗 / 已发 {} 条 / 收件人 {}"
 					+ "（无玩家时只计数不发送；谱面前 2.0s 应为 {} 颗）→ {}",
 					NbforgeScorePlayer.due(), NbforgeScorePlayer.sent(), NbforgeScorePlayer.recipients(),
@@ -104,6 +111,22 @@ public final class NbforgeSelfTest {
 			}
 		} else {
 			NbforgeMod.LOGGER.info("[nbforge][selftest] 谱面文件不存在（{}），跳过谱面自检", scoreFile);
+		}
+
+		// M3-21 音符盒注入：真放一个音符盒 + 红石块触发，看 mixin 有没有真的进来
+		try {
+			ServerWorld world = server.getOverworld();
+			net.minecraft.util.math.BlockPos pos = new net.minecraft.util.math.BlockPos(0, 100, 0);
+			// 先清空：上一轮自检留下的方块还在，重复 setBlockState 同样的方块**不会产生方块更新**，
+			// 音符盒就不会再触发一次（实测第二轮回放时事件数为 0，误判成"注入失效"）。
+			world.setBlockState(pos, Blocks.AIR.getDefaultState(), 3);
+			world.setBlockState(pos.south(), Blocks.AIR.getDefaultState(), 3);
+			world.setBlockState(pos, Blocks.NOTE_BLOCK.getDefaultState(), 3);
+			world.setBlockState(pos.south(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3);
+			NbforgeMod.LOGGER.info("[nbforge][selftest] 已放置音符盒 {} + 红石块（触发一次，看注入计数）",
+				pos.toShortString());
+		} catch (Exception e) {
+			NbforgeMod.LOGGER.warn("[nbforge][selftest] 音符盒注入自检布置失败：{}", e.toString());
 		}
 
 		ServerWorld overworld = server.getOverworld();

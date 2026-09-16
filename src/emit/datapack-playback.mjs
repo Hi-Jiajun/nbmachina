@@ -81,10 +81,11 @@ for (const mode of MODES) {
     for (const t of bucket.ticks) {
       const list = groups.get(t);
       const guard = `execute if score #t styx.t matches ${t} run`;
-      // `#hifi=1`（自研音色模式）时**不触发**音符盒：否则原版 harp/bass 与数据包播的自研音色叠在一起
-      // （玩家实测"音符盒还是原版声音"就是这个叠加）。条件必须写在 `run` **之前**——
-      // `execute ... run unless ... run ...` 是非法语法，会让整个函数加载失败（实测 331 条 Failed to load）。
-      const guardNoHifi = `execute if score #t styx.t matches ${t} unless score #hifi styx.flag matches 1 run`;
+      // M3-21：**音符盒永远照常触发**。声音由 mod（mixin 拦 NoteBlock.onSyncedBlockEvent）接管：
+      //   · 装了 mod  → 原版声音被掐掉，改播无损采样（力度取谱面里的真实力度）；
+      //   · 没装 mod  → 就是原版音符盒声音（可用的降级路径）。
+      // 旧行为（`#hifi=1` 时不触发 + 数据包用 /playsound 补音）会与 mod 双响，故废弃。
+      const guardNoHifi = guard;
       if (!switched && t >= sw) {
         switched = true;
         out.push(`${guard} forceload remove all`);

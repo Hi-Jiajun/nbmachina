@@ -1,6 +1,7 @@
 package net.nbforge.mod;
 
 import net.fabricmc.api.ModInitializer;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
@@ -36,6 +37,27 @@ public class NbforgeMod implements ModInitializer {
 		return Identifier.of(MOD_ID, path);
 	}
 
+	// ------------------------------------------------------------------ 声部 → 乐器
+	/** 旋律声部用的乐器（默认 Salamander 48k/24bit 母版） */
+	public static volatile String MELODY_INSTRUMENT = "salamander48";
+	/** 低声声部用的乐器（全钢琴预设下与旋律同琴；小编制预设可换成 vsco_contrabass_pizz） */
+	public static volatile String BASS_INSTRUMENT = "salamander48";
+	/** 打击乐声部用的乐器（全钢琴预设下为 null = 跳过；小编制预设可换成 vsco_perc） */
+	public static volatile String PERC_INSTRUMENT = null;
+
+	/**
+	 * 声部名（harp/bass/basedrum/hat…）→ 乐器库 id；null 表示"这个声部现在不发声"。
+	 * 机器（音符盒）触发时用它决定播哪个乐器——与 `score.csv` 的映射保持同一套预设。
+	 */
+	public static String instrumentForVoice(String voice) {
+		return switch (String.valueOf(voice).toLowerCase()) {
+			case "harp", "bell", "inner", "melody" -> MELODY_INSTRUMENT;
+			case "bass" -> BASS_INSTRUMENT;
+			case "basedrum", "hat", "snare", "perc" -> PERC_INSTRUMENT;
+			default -> MELODY_INSTRUMENT;
+		};
+	}
+
 	private static SoundEvent registerSound(String path) {
 		Identifier soundId = id(path);
 		return Registry.register(Registries.SOUND_EVENT, soundId, SoundEvent.of(soundId));
@@ -51,5 +73,16 @@ public class NbforgeMod implements ModInitializer {
 		NbforgeSustainQueue.register();
 		NbforgeScorePlayer.register();
 		NbforgeSelfTest.register();
+		// 机器映射（位置 → 谱面音符）：起服时读一次，红石触发时就能查到"这颗音该多大力"
+		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
+			java.nio.file.Path map = server.getRunDirectory().resolve("nbforge").resolve("machine_map.csv");
+			try {
+				int n = net.nbforge.mod.note.NbforgeNoteBlocks.loadMap(map);
+				LOGGER.info("[nbforge] 机器映射已加载：{} 个音符盒位置 ← {}", n, map);
+			} catch (java.io.IOException e) {
+				LOGGER.warn("[nbforge] 机器映射未加载（{}）：{} —— 音符盒仍会发声，但力度用默认值",
+					map, e.getMessage());
+			}
+		});
 	}
 }
