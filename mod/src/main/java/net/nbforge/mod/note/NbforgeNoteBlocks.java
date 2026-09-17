@@ -48,6 +48,8 @@ public final class NbforgeNoteBlocks {
 	}
 
 	private static final Map<Long, Mapped> BY_POS = new ConcurrentHashMap<>();
+	/** 监听模式：声音锚在玩家自己身上（整条机器都能听到），而不是方块位置（默认：物理位置） */
+	private static volatile boolean listenMode = false;
 
 	private NbforgeNoteBlocks() {
 	}
@@ -74,6 +76,42 @@ public final class NbforgeNoteBlocks {
 
 	public static int mapSize() {
 		return BY_POS.size();
+	}
+
+	public static boolean listenMode() {
+		return listenMode;
+	}
+
+	public static void setListenMode(boolean value) {
+		listenMode = value;
+	}
+
+	/** 按位置查谱面音符（数据包 `/nbforge playat` 与 mixin 共用） */
+	public static Mapped mappedAt(BlockPos pos) {
+		return BY_POS.get(pos.asLong());
+	}
+
+	/** 把"这个位置该发的那颗音"发给附近玩家；返回发送人数 */
+	public static int playAt(ServerWorld world, BlockPos pos, Mapped mapped) {
+		double x = pos.getX() + 0.5, y = pos.getY() + 0.5, z = pos.getZ() + 0.5;
+		int sent = 0;
+		for (ServerPlayerEntity player : world.getServer().getPlayerManager().getPlayerList()) {
+			if (player.getEntityWorld() != world) continue;
+			// 物理位置模式：只发给听得到的玩家（64 格内）
+			if (!listenMode && player.squaredDistanceTo(x, y, z) > 64 * 64) continue;
+			double px = listenMode ? player.getX() : x;
+			double py = listenMode ? player.getY() : y;
+			double pz = listenMode ? player.getZ() : z;
+			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
+				new NbforgePlayPayload(mapped.instrument(), mapped.voice(), mapped.midi(), mapped.velocity(), px, py, pz));
+			sent++;
+		}
+		dispatched.incrementAndGet();
+		if (dispatched.get() <= 5 || dispatched.get() % 200 == 0) {
+			NbforgeMod.LOGGER.info("[nbforge] playat {} → {} midi={} vel={}（第 {} 次，发给 {} 人）",
+				pos.toShortString(), mapped.instrument(), mapped.midi(), mapped.velocity(), dispatched.get(), sent);
+		}
+		return sent;
 	}
 
 	/**

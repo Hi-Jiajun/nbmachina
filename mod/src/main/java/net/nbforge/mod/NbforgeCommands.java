@@ -78,6 +78,16 @@ public final class NbforgeCommands {
 						.executes(ctx -> play(ctx, 100))
 						.then(CommandManager.argument("velocity", IntegerArgumentType.integer(1, 127))
 							.executes(ctx -> play(ctx, IntegerArgumentType.getInteger(ctx, "velocity")))))))
+			// M3-21c：自研演奏器入口——数据包逐音调用它，mod 按"位置 → 谱面音符"表发声
+			.then(CommandManager.literal("playat")
+				.then(CommandManager.argument("x", IntegerArgumentType.integer(-30000000, 30000000))
+					.then(CommandManager.argument("y", IntegerArgumentType.integer(-1024, 2048))
+						.then(CommandManager.argument("z", IntegerArgumentType.integer(-30000000, 30000000))
+							.executes(NbforgeCommands::playAt)))))
+			// 监听模式：声音锚在玩家身上（整条机器都能听到）；默认按物理位置发声
+			.then(CommandManager.literal("listen")
+				.then(CommandManager.literal("on").executes(ctx -> keepListening(ctx, true)))
+				.then(CommandManager.literal("off").executes(ctx -> keepListening(ctx, false))))
 			.then(CommandManager.literal("score")
 				.then(CommandManager.literal("load")
 					.executes(ctx -> scoreLoad(ctx, null))
@@ -184,6 +194,43 @@ public final class NbforgeCommands {
 	}
 
 	/** `/nbforge score load [路径]`：默认读 `<游戏目录>/nbforge/score.csv` */
+	/**
+	 * M3-21c · 自研演奏器入口：`/nbforge playat <x> <y> <z>`。
+	 *
+	 * <p>数据包在播放函数里逐音调用它；mod 按 `machine_map.csv`（位置 → 谱面音符）
+	 * 取乐器/声部/midi/力度，发给附近玩家的无损引擎——声音与机器同 tick，不会漂移。
+	 * 由函数调用时（没有玩家实体）不刷聊天栏，只写日志。
+	 */
+	private static int playAt(CommandContext<ServerCommandSource> ctx) {
+		ServerCommandSource source = ctx.getSource();
+		int x = IntegerArgumentType.getInteger(ctx, "x");
+		int y = IntegerArgumentType.getInteger(ctx, "y");
+		int z = IntegerArgumentType.getInteger(ctx, "z");
+		net.minecraft.util.math.BlockPos pos = new net.minecraft.util.math.BlockPos(x, y, z);
+		net.nbforge.mod.note.NbforgeNoteBlocks.Mapped mapped = net.nbforge.mod.note.NbforgeNoteBlocks.mappedAt(pos);
+		if (mapped == null) {
+			source.sendError(Text.literal("[nbforge] playat " + x + " " + y + " " + z
+				+ " 不在机器映射里（先跑 node tools/export-mod-machine-map.mjs --deploy）"));
+			return 0;
+		}
+		int sent = net.nbforge.mod.note.NbforgeNoteBlocks.playAt(source.getWorld(), pos, mapped);
+		if (source.getEntity() instanceof ServerPlayerEntity) {
+			source.sendFeedback(() -> Text.literal(String.format(
+				"[nbforge] playat %d %d %d → %s midi=%d vel=%d（%s，发给 %d 人）",
+				x, y, z, mapped.instrument(), mapped.midi(), mapped.velocity(), mapped.voice(), sent)), false);
+		}
+		return 1;
+	}
+
+	/** `/nbforge listen on|off`：监听模式（声音锚在玩家身上，整条机器都听得到） */
+	private static int keepListening(CommandContext<ServerCommandSource> ctx, boolean on) {
+		net.nbforge.mod.note.NbforgeNoteBlocks.setListenMode(on);
+		ctx.getSource().sendFeedback(() -> Text.literal(on
+			? "[nbforge] 监听模式：开（声音锚在你身上，站在哪儿都能听到整条机器；代价是没有方位感）"
+			: "[nbforge] 监听模式：关（按方块物理位置发声，需要站在音轨附近）"), false);
+		return 1;
+	}
+
 	private static int scoreLoad(CommandContext<ServerCommandSource> ctx, String fileArg) {
 		ServerCommandSource source = ctx.getSource();
 		java.nio.file.Path file = fileArg == null || fileArg.isBlank()

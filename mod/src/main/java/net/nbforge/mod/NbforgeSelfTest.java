@@ -117,14 +117,19 @@ public final class NbforgeSelfTest {
 		try {
 			ServerWorld world = server.getOverworld();
 			net.minecraft.util.math.BlockPos pos = new net.minecraft.util.math.BlockPos(0, 100, 0);
-			// 先清空：上一轮自检留下的方块还在，重复 setBlockState 同样的方块**不会产生方块更新**，
-			// 音符盒就不会再触发一次（实测第二轮回放时事件数为 0，误判成"注入失效"）。
+			// 复刻机器的真实布局：y-1 触发行（红石块）/ y 甲板 / y+1 音符盒（上方必须空气）
+			// —— M3-21b 的关键：触发位必须在**甲板下方**，不能压在音符盒上方，
+			//    否则 NoteBlock.playNote 的"上方必须是空气"检查会直接 return（机器从来没响过就是这个）。
+			// 先清空：上一轮自检留下的方块还在，重复 setBlockState 同样的方块**不会产生方块更新**。
 			world.setBlockState(pos, Blocks.AIR.getDefaultState(), 3);
+			world.setBlockState(pos.up(), Blocks.AIR.getDefaultState(), 3);
+			world.setBlockState(pos.down(), Blocks.AIR.getDefaultState(), 3);
 			world.setBlockState(pos.south(), Blocks.AIR.getDefaultState(), 3);
-			world.setBlockState(pos, Blocks.NOTE_BLOCK.getDefaultState(), 3);
-			world.setBlockState(pos.south(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3);
-			NbforgeMod.LOGGER.info("[nbforge][selftest] 已放置音符盒 {} + 红石块（触发一次，看注入计数）",
-				pos.toShortString());
+			world.setBlockState(pos, Blocks.SAND.getDefaultState(), 3);            // y   = 甲板（harp）
+			world.setBlockState(pos.up(), Blocks.NOTE_BLOCK.getDefaultState(), 3); // y+1 = 音符盒
+			world.setBlockState(pos.down(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3); // y-1 = 触发
+			NbforgeMod.LOGGER.info("[nbforge][selftest] 已按机器布局放置：红石块 {}/甲板 {}/音符盒 {}（触发一次，看注入计数）",
+				pos.down().toShortString(), pos.toShortString(), pos.up().toShortString());
 		} catch (Exception e) {
 			NbforgeMod.LOGGER.warn("[nbforge][selftest] 音符盒注入自检布置失败：{}", e.toString());
 		}

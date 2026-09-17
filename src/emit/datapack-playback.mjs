@@ -100,10 +100,20 @@ for (const mode of MODES) {
         // M3-4：`#hifi=1`（自研音色模式）时**不触发**音符盒 —— 否则原版 harp/bass 会和
         // 数据包播的自研音色叠在一起（玩家实测"音符盒还是原版声音"就是这个叠加）。
         // 音符粒子由 styx:play/hifi/* 用粒子命令补回来，灯与计数照旧。
-        out.push(`${guardNoHifi} setblock ${x} ${y + 2} ${z} minecraft:redstone_block`);
-        out.push(`${guardNoHifi} setblock ${x} ${y + 2} ${z} minecraft:air`);
-        out.push(`${guard} scoreboard players add #hits styx.flag 1`);
+        // M3-21c（实测结论）：这个密集单排布局里**音符盒本体发不出声**——
+        //   ① 旧触发位在音符盒正上方（y+2）：`NoteBlock.playNote` 里
+        //      `if (!INSTRUMENT.isNotBaseBlock() && !world.getBlockState(pos.up()).isAir()) return;`
+        //      直接把它拦掉（harp/bass 都是基座类乐器，上方必须空气）；
+        //   ② 改成"红石块给甲板充能（y-1）"后实测**仍然不响**（这条间接充能路径在 1.21.10 不成立）。
+        // 所以发声交给**自研演奏器**：数据包逐音调用 mod 的 `/nbforge playat`，
+        // 由 mod 的无损引擎在同一刻发声（与机器同 tick，不会漂移）；机器这边只保留灯与粒子。
+        out.push(`${guard} nbforge playat ${x} ${y} ${z}`);
+        // 音符粒子：本题材里音符盒本体发不出声（见上），粒子也就没有；这里按 vanilla 的
+        // addParticle(NOTE, x+0.5, y+1.2, z+0.5, row/24, 0, 0) 口径补一发。
+        out.push(`${guard} particle minecraft:note ${x + 0.5} ${y + 1.2} ${z + 0.5} `
+          + `${(n.pitch / 24).toFixed(3)} 0 0 1 1 normal`);
         out.push(`${guard} setblock ${x} ${y - 1} ${z} minecraft:redstone_lamp[lit=true]`);
+        out.push(`${guard} scoreboard players add #hits styx.flag 1`);
         // 监听模式（#mon=1）：在每位玩家自己脚下再放一遍同样的音，保证多远都听得到
         //   实体音符盒照常发声，播放的只是同一音高/音色的提示音
         out.push(`${guard} execute if score #mon styx.flag matches 1 as @a at @s run playsound ${soundName(n.instr)} master @s ~ ~ ~ ${n.vol.toFixed(2)} ${pitchMul(n.pitch)}`);
@@ -217,10 +227,15 @@ fs.writeFileSync(`${DP}/function/play/doctor.mcfunction`, [
   'scoreboard players set #dt styx.t 0',
   'execute if score #on styx.flag matches 1 run schedule function styx:play/doctor/check 20t',
   'execute unless score #on styx.flag matches 1 run tellraw @a {"text":"[Styx] 当前未在播放（#on=0）——刻率自检跳过；请先 styx:play/start 再自检","color":"yellow"}',
+  // 机器布局（profile.y = 84）：灯/触发位 83、甲板 84、音符盒 85、音符盒上方 86 必须是空气
   'execute if block 480 85 -160 minecraft:note_block run say [Styx/doctor] 音符盒在位 ✔',
   'execute unless block 480 85 -160 minecraft:note_block run say [Styx/doctor] 音符盒缺失 ✘（先跑 styx:redo）',
-  'execute if block 480 86 -160 minecraft:air run say [Styx/doctor] 触发位空闲 ✔',
-  'execute unless block 480 86 -160 minecraft:air run say [Styx/doctor] 触发位被占 ✘（有方块挡住红石触发）',
+  'execute if block 480 84 -160 minecraft:oak_planks run say [Styx/doctor] 甲板在位 ✔',
+  'execute unless block 480 84 -160 minecraft:oak_planks run say [Styx/doctor] 甲板缺失 ✘（先跑 styx:redo）',
+  'execute if block 480 83 -160 minecraft:redstone_lamp run say [Styx/doctor] 指示灯在位 ✔',
+  'execute unless block 480 83 -160 minecraft:redstone_lamp run say [Styx/doctor] 指示灯缺失 ✘（先跑 styx:redo）',
+  'execute unless block 480 86 -160 minecraft:air run say [Styx/doctor] ⚠ 音符盒上方被占（不影响 mod 发声，但原版音符盒不会响）',
+  'tellraw @a {"text":"[Styx/doctor] 声音由 mod 无损引擎出（/nbforge playat 逐音驱动）；机器负责灯与粒子","color":"gray"}',
 ].join('\n') + '\n', 'utf8');
 fs.writeFileSync(`${DP}/function/play/doctor/check.mcfunction`, [
   'scoreboard players operation #dt styx.t = #t styx.t',
