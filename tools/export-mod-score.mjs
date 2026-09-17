@@ -55,7 +55,8 @@ for (const need of ['time_seconds', 'instrument', 'midi', 'volume']) {
   if (idx[need] === undefined) throw new Error(`谱面缺列 ${need}：${header.join(',')}`);
 }
 
-const out = ['time_seconds,instrument,midi,velocity,voice'];
+// 第 6 列 `dur_ms`（M3-22）：实际发声时长（毫秒，来自参考演奏校准）；没有时值写 0
+const out = ['time_seconds,instrument,midi,velocity,voice,dur_ms'];
 const stats = { total: 0, written: 0, skipped: 0, byVoice: {}, byInstrument: {} };
 const keyRange = {};
 for (const line of lines.slice(1)) {
@@ -80,7 +81,11 @@ for (const line of lines.slice(1)) {
     ? Number(c[idx.velMidi])
     : Math.round(Number(c[idx.volume]) * 127);
   const velocity = Math.max(1, Math.min(127, Number.isFinite(velMidi) ? velMidi : 100));
-  out.push(`${t.toFixed(3)},${target},${midi},${velocity},${voice}`);
+  const durMs = idx.durMs !== undefined && c[idx.durMs] !== undefined && c[idx.durMs] !== ''
+    ? Math.max(0, Math.round(Number(c[idx.durMs])))
+    : 0;
+  if (durMs > 0) stats.withDur = (stats.withDur ?? 0) + 1;
+  out.push(`${t.toFixed(3)},${target},${midi},${velocity},${voice},${durMs}`);
   stats.written++;
   stats.byVoice[voice] = (stats.byVoice[voice] ?? 0) + 1;
   stats.byInstrument[target] = (stats.byInstrument[target] ?? 0) + 1;
@@ -95,6 +100,7 @@ console.log(`写出 ${OUT}：${stats.written} 颗音（源 ${stats.total} 行，
 console.log(`  声部：${JSON.stringify(stats.byVoice)}`);
 console.log(`  乐器：${JSON.stringify(stats.byInstrument)}`);
 console.log(`  键位：${Object.entries(keyRange).map(([k, v]) => `${k}=${v.lo}..${v.hi}`).join('  ')}`);
+console.log(`  时值：${stats.withDur ?? 0}/${stats.written} 颗带 dur_ms`);
 console.log(`  时长：${(Number(lines.at(-1).split(',')[idx.time_seconds])).toFixed(1)}s`);
 
 if (DEPLOY) {

@@ -43,7 +43,7 @@ public final class NbforgeClient implements ClientModInitializer {
 		NbforgeMod.LOGGER.info("[nbforge] 客户端入口：乐器 {} 个（{}）", loaded, NbforgeInstruments.lastError());
 
 		ClientPlayNetworking.registerGlobalReceiver(NbforgePlayPayload.ID, (payload, context) ->
-			NbforgeAudio.play(payload.instrument(), payload.voice(), payload.midi(), payload.velocity(),
+			NbforgeAudio.play(payload.instrument(), payload.voice(), payload.midi(), payload.velocity(), payload.durMs(),
 				payload.x(), payload.y(), payload.z()));
 
 		ClientTickEvents.END_CLIENT_TICK.register(NbforgeClient::tick);
@@ -98,14 +98,17 @@ public final class NbforgeClient implements ClientModInitializer {
 	private static int status(FabricClientCommandSource src) {
 		src.sendFeedback(Text.literal(String.format(
 			"[nbforge] 引擎就绪=%s 乐器=%d 采样缓存=%d 个/%.0fMB 活跃声部=%d 峰值=%d 已播=%d 丢弃=%d 主增益=%.2f\n"
-				+ "  收到 %d 条 nbforge:play；上下文重建 %d 次；被抢声部 %d；八度折叠 %d；放音 %d\n"
+				+ "  收到 %d 条 nbforge:play（带时值 %d 条）；上下文重建 %d 次；被抢声部 %d；八度折叠 %d\n"
+				+ "  放音：按谱面时值 %d 次 / 旧规则（低音单声部+同键重击）%d 次\n"
 				+ "  OpenAL：%s\n"
 				+ "  资源包：%s%s",
 			NbforgeAudio.ready(), NbforgeInstruments.size(), NbforgeAudio.bufferCount(),
 			NbforgeAudio.cachedBytes() / 1048576.0, NbforgeAudio.activeCount(), NbforgeAudio.peakActive(),
 			NbforgeAudio.playedCount(), NbforgeAudio.droppedCount(), NbforgeAudio.masterGain(),
-			NbforgeAudio.receivedCount(), NbforgeAudio.restartCount(), NbforgeAudio.stolenCount(),
-			NbforgeAudio.foldedCount(), NbforgeAudio.dampedCount(),
+			NbforgeAudio.receivedCount(), NbforgeAudio.withDurationCount(),
+			NbforgeAudio.restartCount(), NbforgeAudio.stolenCount(),
+			NbforgeAudio.foldedCount(),
+			NbforgeAudio.releasedByScore(), NbforgeAudio.dampedCount(),
 			NbforgeAudio.alInfo(),
 			packHint(),
 			NbforgeAudio.lastError() == null ? "" : "；最后错误：" + NbforgeAudio.lastError())));
@@ -161,7 +164,7 @@ public final class NbforgeClient implements ClientModInitializer {
 			return 0;
 		}
 		ClientPlayerEntity player = src.getPlayer();
-		NbforgeAudio.play(instrument, "manual", midi, velocity, player.getX(), player.getY(), player.getZ());
+		NbforgeAudio.play(instrument, "manual", midi, velocity, 0, player.getX(), player.getY(), player.getZ());
 		src.sendFeedback(Text.literal(String.format(
 			"[nbforge] 本地试听 %s midi=%d vel=%d（增益 %.3f）", instrument, midi, velocity,
 			NbforgeInstruments.velocityGain(velocity))));
@@ -191,7 +194,7 @@ public final class NbforgeClient implements ClientModInitializer {
 			try {
 				for (int v : vels) {
 					for (int midi : notes) {
-						NbforgeAudio.play(instrument, "manual", midi, v, player.getX(), player.getY(), player.getZ());
+						NbforgeAudio.play(instrument, "manual", midi, v, 0, player.getX(), player.getY(), player.getZ());
 						Thread.sleep(350L);
 					}
 				}
@@ -234,7 +237,7 @@ public final class NbforgeClient implements ClientModInitializer {
 			decode, NbforgeAudio.ready(), NbforgeAudio.masterGain())));
 
 		ClientPlayerEntity player = src.getPlayer();
-		NbforgeAudio.play(instrument, "manual", midi, velocity, player.getX(), player.getY(), player.getZ());
+		NbforgeAudio.play(instrument, "manual", midi, velocity, 0, player.getX(), player.getY(), player.getZ());
 		MinecraftClient client = MinecraftClient.getInstance();
 		new Thread(() -> {
 			try {

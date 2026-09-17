@@ -7,9 +7,12 @@
 //
 // 坐标规则与数据包完全同源：`src/emit/layout-pos.mjs` 的 `makePos(profile)`（播放器与摆块共用）。
 //
+// M3-22 增补：第 8 列 `dur_ms` = 这颗音的**实际发声时长**（毫秒，来自参考演奏校准）。
+// mod 到点就把声音放掉（制音器落下），这才是钢琴"该响多久"的真相——不再靠低音单声部硬掐。
+//
 // 用法：
 //   node tools/export-mod-machine-map.mjs                     # 用默认（视频力度·乐句级）谱面
-//   node tools/export-mod-machine-map.mjs --in <csv> --deploy
+//   node tools/export-mod-machine-map.mjs --in build/machine_pipeline_calibrated.csv --deploy
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -41,8 +44,9 @@ for (const need of ['step', 'row', 'instrument', 'midi']) {
 const profile = JSON.parse(fs.readFileSync(PROFILE, 'utf8'));
 const pos = makePos(profile);
 
-const out = ['x,y,z,instrument,voice,midi,velocity'];
+const out = ['x,y,z,instrument,voice,midi,velocity,dur_ms'];
 let written = 0, skipped = 0;
+let withDur = 0;
 const byVoice = {};
 for (const line of lines.slice(1)) {
   if (!line.trim()) continue;
@@ -58,8 +62,13 @@ for (const line of lines.slice(1)) {
     ? Number(c[idx.velMidi])
     : Math.round(Number(c[idx.volume]) * 127);
   const velocity = Math.max(1, Math.min(127, Number.isFinite(velMidi) ? velMidi : 100));
+  // 实际发声时长（毫秒）：M3-22 校准谱面里有 durMs 列（键释放 + 踏板抬起）；没有就写 0
+  const durMs = idx.durMs !== undefined && c[idx.durMs] !== undefined && c[idx.durMs] !== ''
+    ? Math.max(0, Math.round(Number(c[idx.durMs])))
+    : 0;
+  if (durMs > 0) withDur++;
   const p = pos(step, row);
-  out.push(`${p.x},${p.y},${p.z},${target},${voice},${midi},${velocity}`);
+  out.push(`${p.x},${p.y},${p.z},${target},${voice},${midi},${velocity},${durMs}`);
   written++;
   byVoice[voice] = (byVoice[voice] ?? 0) + 1;
 }
@@ -68,6 +77,7 @@ fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, out.join('\n') + '\n', 'utf8');
 console.log(`写出 ${OUT}：${written} 个音符盒位置（跳过 ${skipped} 颗打击乐）`);
 console.log(`  声部：${JSON.stringify(byVoice)}`);
+console.log(`  时值：${withDur}/${written} 颗带 dur_ms（其余按采样自然衰减）`);
 console.log(`  坐标示例：${out[1]}`);
 
 if (DEPLOY) {

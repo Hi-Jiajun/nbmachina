@@ -116,7 +116,7 @@ public final class NbforgeScorePlayer {
 			due++;
 			for (ServerPlayerEntity player : players) {
 				ServerPlayNetworking.send(player, new NbforgePlayPayload(
-					n.instrument(), n.voice(), n.midi(), n.velocity(), anchor.x, anchor.y, anchor.z));
+					n.instrument(), n.voice(), n.midi(), n.velocity(), n.durMs(), anchor.x, anchor.y, anchor.z));
 				sent++;
 			}
 			recipients = players.size();

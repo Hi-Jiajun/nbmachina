@@ -101,16 +101,18 @@ public final class NbforgeCommands {
 	private static int info(CommandContext<ServerCommandSource> ctx) {
 		ServerCommandSource source = ctx.getSource();
 		source.sendFeedback(() -> Text.literal(String.format(
-			"[nbforge] 后端 A 在线；活跃延音作业=%d 累计击发=%d 峰值并发=%d\n"
-				+ "  音符盒接管（mixin）：事件 %d / 已派发 %d / 跳过 %d；机器映射 %d 个位置\n"
+			"[nbforge] 后端 A 在线\n"
+				+ "  自研演奏器：已派发 %d 次（音符盒本体事件 %d / 跳过 %d）；机器映射 %d 个位置\n"
+				+ "  旧路径（/nbforge note|sustain）：活跃作业 %d 累计击发 %d 峰值并发 %d"
+				+ "（走自研演奏器时这里一直是 0，是正常的——声音走 nbforge:play 到客户端无损引擎）\n"
 				+ "  声部→乐器：旋律=%s 低音=%s 打击乐=%s",
+			net.nbforge.mod.note.NbforgeNoteBlocks.dispatched(),
+			net.nbforge.mod.note.NbforgeNoteBlocks.eventCount(),
+			net.nbforge.mod.note.NbforgeNoteBlocks.skipped(),
+			net.nbforge.mod.note.NbforgeNoteBlocks.mapSize(),
 			NbforgeSustainQueue.activeJobs(),
 			NbforgeSustainQueue.totalPlays(),
 			NbforgeSustainQueue.peakActiveJobs(),
-			net.nbforge.mod.note.NbforgeNoteBlocks.eventCount(),
-			net.nbforge.mod.note.NbforgeNoteBlocks.dispatched(),
-			net.nbforge.mod.note.NbforgeNoteBlocks.skipped(),
-			net.nbforge.mod.note.NbforgeNoteBlocks.mapSize(),
 			NbforgeMod.MELODY_INSTRUMENT, NbforgeMod.BASS_INSTRUMENT,
 			String.valueOf(NbforgeMod.PERC_INSTRUMENT))), false);
 		return 1;
@@ -186,7 +188,7 @@ public final class NbforgeCommands {
 		String instrument = StringArgumentType.getString(ctx, "instrument");
 		int midi = IntegerArgumentType.getInteger(ctx, "midi");
 		NbforgePlayPayload payload = new NbforgePlayPayload(
-			instrument, "manual", midi, velocity, player.getX(), player.getY(), player.getZ());
+			instrument, "manual", midi, velocity, 0, player.getX(), player.getY(), player.getZ());
 		ServerPlayNetworking.send(player, payload);
 		source.sendFeedback(() -> Text.literal(String.format(
 			"[nbforge] play %s midi=%d vel=%d → 客户端无损引擎（nbforge:play）", instrument, midi, velocity)), false);

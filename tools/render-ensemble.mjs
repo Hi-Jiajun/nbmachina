@@ -53,6 +53,13 @@ if (!['flat', 'measured', 'phrase', 'interpret'].includes(DYNAMICS)) {
   throw new Error('--dynamics 只支持 flat/measured/phrase/interpret');
 }
 const SECTIONS_JSON = opt('sections', path.join(P.build, 'dynamics-sections.json'));
+// M3-22：`durMs`（每颗音的实际发声时长）→ 渲染时在"该放音"的时刻加一段放音包络。
+//   钢琴上"声音什么时候停"由两件事决定：手指松开（键释放）与踏板抬起（制音器落下），
+//   这两个量由 tools/calibrate-from-reference.mjs 从参考演奏里量出来，写进谱面的 `durMs` 列。
+//   `--no-lengths` 可退回旧行为（让采样自然衰减到底），用于 A/B。
+const LENGTHS = !argv.includes('--no-lengths');
+/** 制音器放音时长：低音弦重、放音慢；高音弦轻、放音快（听感上等价于真实制音器） */
+const releaseMsOf = (midi) => (midi >= 60 ? 140 : midi >= 45 ? 200 : 300);
 
 const MELODIES = {
   // 默认 = 48kHz/24bit 完整母版（30 个录音点 / 16 层力度，最大 1 半音微调）。
@@ -67,22 +74,38 @@ const MELODIES = {
 };
 const MELODY = opt('melody', 'salamander');
 if (!MELODIES[MELODY]) throw new Error(`--melody 只支持 ${Object.keys(MELODIES).join('/')}`);
+// M3-22：`--preset piano` = 与 mod 的 `--preset piano` 同一套编制（旋律/内声部/左手都是同一架琴，
+// 打击乐跳过）。用户 2026-09-16 拍板"这首歌就该全钢琴"，离线成品与游戏内必须用同一套口径。
+const PRESET = opt('preset', 'ensemble');
+if (!['ensemble', 'piano'].includes(PRESET)) throw new Error('--preset 只支持 ensemble/piano');
 
 // 每层的响度目标与声像（pan：-1 全左 / 0 中 / +1 全右）
-const LAYER_GAIN = {
-  melody: { rms: -20, pan: -0.08 },
-  inner: { rms: -26, pan: 0.22 },
-  bass: { rms: -21, pan: 0 },
-  kick: { peak: -6, pan: 0 },
-  hat: { peak: -15, pan: 0.12 },
-};
-const keep = (layer) => !ONLY.length || ONLY.includes(layer);
+const LAYER_GAIN = PRESET === 'piano'
+  // 同一架琴的三层不各自定标：让谱面里的力度自己决定强弱（与 mod 引擎一致），只做总线归一
+  ? { melody: { gain: 1, pan: 0 }, inner: { gain: 1, pan: 0 }, bass: { gain: 1, pan: 0 } }
+  : {
+    melody: { rms: -20, pan: -0.08 },
+    inner: { rms: -26, pan: 0.22 },
+    bass: { rms: -21, pan: 0 },
+    kick: { peak: -6, pan: 0 },
+    hat: { peak: -15, pan: 0.12 },
+  };
+// 全钢琴预设：打击乐不属于钢琴改编（与 mod 的 --preset piano 同一口径：basedrum/hat 直接跳过）
+const keep = (layer) => (PRESET === 'piano' && (layer === 'kick' || layer === 'hat'))
+  ? false
+  : (!ONLY.length || ONLY.includes(layer));
 
 /* ------------------------------------------------------------------ 采样来源 */
 const sources = {};
-if (keep('melody')) sources.melody = { ...loadSfz(MELODIES[MELODY].sfz), label: MELODIES[MELODY].label };
-if (keep('inner')) sources.inner = { ...loadSfz(`${VSCO}/Harp.sfz`), label: 'VSCO 竖琴 / CC0' };
-if (keep('bass')) sources.bass = { ...loadSfz(`${VSCO}/ContrabassPizz.sfz`), label: 'VSCO 低音提琴拨弦 / CC0' };
+const loadPiano = () => ({ ...loadSfz(MELODIES[MELODY].sfz), label: MELODIES[MELODY].label });
+if (keep('melody')) sources.melody = loadPiano();
+if (PRESET === 'piano') {
+  if (keep('inner')) sources.inner = loadPiano();
+  if (keep('bass')) sources.bass = loadPiano();
+} else {
+  if (keep('inner')) sources.inner = { ...loadSfz(`${VSCO}/Harp.sfz`), label: 'VSCO 竖琴 / CC0' };
+  if (keep('bass')) sources.bass = { ...loadSfz(`${VSCO}/ContrabassPizz.sfz`), label: 'VSCO 低音提琴拨弦 / CC0' };
+}
 if (keep('kick')) sources.kick = { ...loadSfz(`${VSCO}/GM-StylePerc.sfz`), label: 'VSCO 贝斯鼓（GM36）/ CC0' };
 if (keep('hat')) {
   // 铃鼓：VSCO 2 CE 无闭合踩镲（全库无 hi-hat），用两档力度的铃鼓击打做替代，如实标注
@@ -180,12 +203,12 @@ const dynOf = (e) => {
 for (const e of events) {
   const t = e.step * STEP_SECONDS;
   const { vel127, gain } = dynOf(e);
-  if (e.kind === 'vanilla') {
-    const layer = e.instr === 'basedrum' ? 'kick' : 'hat';
-    if (keep(layer)) triggers.push({ layer, midi: GM[e.instr] ?? 36, vel127, gain, t });
-  } else if (e.timbre === 'strings' && keep('melody')) triggers.push({ layer: 'melody', midi: e.midi, vel127, gain, t });
-  else if (e.timbre === 'bell' && keep('inner')) triggers.push({ layer: 'inner', midi: e.midi, vel127, gain, t });
-  else if (e.timbre === 'bass' && keep('bass')) triggers.push({ layer: 'bass', midi: e.midi, vel127, gain, t });
+    if (e.kind === 'vanilla') {
+      const layer = e.instr === 'basedrum' ? 'kick' : 'hat';
+      if (keep(layer)) triggers.push({ layer, midi: GM[e.instr] ?? 36, vel127, gain, t, durMs: e.durMs });
+    } else if (e.timbre === 'strings' && keep('melody')) triggers.push({ layer: 'melody', midi: e.midi, vel127, gain, t, durMs: e.durMs });
+    else if (e.timbre === 'bell' && keep('inner')) triggers.push({ layer: 'inner', midi: e.midi, vel127, gain, t, durMs: e.durMs });
+    else if (e.timbre === 'bass' && keep('bass')) triggers.push({ layer: 'bass', midi: e.midi, vel127, gain, t, durMs: e.durMs });
 }
 const dur = Math.max(...triggers.map((x) => x.t), 0) + 8;   // 尾巴留 8 秒（钢琴/竖琴自然衰减）
 {
@@ -209,7 +232,7 @@ for (const layer of Object.keys(sources)) {
   const src = sources[layer];
   const lo = Math.min(...src.regions.map((r) => r.loKey));
   const hi = Math.max(...src.regions.map((r) => r.hiKey));
-  let shifted = 0, maxShift = 0, missed = 0, folded = 0;
+  let shifted = 0, maxShift = 0, missed = 0, folded = 0, lenApplied = 0, lenMissing = 0;
   for (const trig of triggers) {
     if (trig.layer !== layer) continue;
     // 音域折叠：真乐器音域比钢琴窄（低音提琴最低就到不了 A0），超出部分一律**整八度**移进音域。
@@ -227,15 +250,32 @@ for (const layer of Object.keys(sources)) {
     const s = resample(pcmOf(region.file), 2 ** (shift / 12));
     const gain = 10 ** (region.gainDb / 20) * trig.gain;
     const off = Math.round(trig.t * SR);
-    for (let i = 0; i < s.length; i++) {
+    // 发声时长：有 durMs 就按它放音（+ 一段制音器包络），没有就照旧让采样自然衰减
+    let stop = s.length;
+    let rel = 0;
+    if (LENGTHS && Number.isFinite(trig.durMs) && trig.durMs > 0) {
+      const d = Math.round((trig.durMs / 1000) * SR);
+      rel = Math.round((releaseMsOf(midi) / 1000) * SR);
+      stop = Math.min(s.length, d + rel);
+      lenApplied++;
+    } else if (Number.isFinite(trig.durMs)) {
+      lenMissing++;
+    }
+    for (let i = 0; i < stop; i++) {
       const j = off + i;
       if (j >= N) break;
-      buf[j] += s[i] * gain;
+      let g = 1;
+      if (rel > 0 && i > stop - rel) {
+        // raised-cosine 放音（1 → 0），比线性更接近制音器的实际衰减
+        g = 0.5 * (1 + Math.cos(Math.PI * (i - (stop - rel)) / rel));
+      }
+      buf[j] += s[i] * gain * g;
     }
   }
   layerBuf.set(layer, buf);
   console.log(`  ${layer}: 触发 ${triggers.filter((x) => x.layer === layer).length} 条；`
-    + `整八度折叠 ${folded} 条（音域 ${lo}..${hi}）；变调 ${shifted} 条（最大 ${maxShift.toFixed(2)} 半音）；缺区域 ${missed}`);
+    + `整八度折叠 ${folded} 条（音域 ${lo}..${hi}）；变调 ${shifted} 条（最大 ${maxShift.toFixed(2)} 半音）；缺区域 ${missed}`
+    + `；按谱面时值放音 ${lenApplied} 条${lenMissing ? `（${lenMissing} 条没有时值，自然衰减）` : ''}`);
 }
 
 /* ------------------------------------------------------------------ 定标 + 声像 + 求和 */
@@ -249,13 +289,16 @@ const R = new Float64Array(N);
 for (const [layer, buf] of layerBuf) {
   const cfg = LAYER_GAIN[layer] ?? { rms: -20, pan: 0 };
   const s = stat(buf);
-  const target = cfg.rms !== undefined
-    ? (s.rms > 0 ? 10 ** (cfg.rms / 20) / s.rms : 0)
-    : (s.peak > 0 ? 10 ** (cfg.peak / 20) / s.peak : 0);
+  const target = cfg.gain !== undefined
+    ? cfg.gain
+    : cfg.rms !== undefined
+      ? (s.rms > 0 ? 10 ** (cfg.rms / 20) / s.rms : 0)
+      : (s.peak > 0 ? 10 ** (cfg.peak / 20) / s.peak : 0);
   const gl = target * Math.cos((cfg.pan + 1) * Math.PI / 4);
   const gr = target * Math.sin((cfg.pan + 1) * Math.PI / 4);
   for (let i = 0; i < N; i++) { L[i] += buf[i] * gl; R[i] += buf[i] * gr; }
-  console.log(`  ${layer} 定标 ${cfg.rms !== undefined ? `RMS ${cfg.rms}dB` : `峰值 ${cfg.peak}dB`}`
+  console.log(`  ${layer} 定标 ${cfg.gain !== undefined ? `固定 ×${cfg.gain}`
+    : cfg.rms !== undefined ? `RMS ${cfg.rms}dB` : `峰值 ${cfg.peak}dB`}`
     + `：原始峰值 ${s.peak.toFixed(3)} / RMS ${(20 * Math.log10(s.rms + 1e-12)).toFixed(1)}dBFS → 增益 ×${target.toFixed(2)}`);
 }
 

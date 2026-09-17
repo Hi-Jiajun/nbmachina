@@ -85,6 +85,9 @@ export function parseScoreCsv(text) {
   const iVelMidi = idx('velMidi');
   // M3-1 的可选溯源列：有就用，没有就按老口径（启发式）判定声部
   const iRole = idx('voiceRole');
+  // M3-22 的可选列：这颗音的**实际发声时长**（毫秒）——由 tools/calibrate-from-reference.mjs
+  // 从参考演奏里量出来（键释放 + 踏板抬起）。没有这一列时下游按"自然衰减到底"处理（旧行为）。
+  const iDur = idx('durMs');
   if ([iStep, iInstr, iRow, iVol].some((i) => i < 0)) throw new Error(`谱面 CSV 缺列：${header.join(',')}`);
   const notes = lines.slice(1).filter((l) => l.trim()).map((l) => {
     const c = l.split(',');
@@ -94,6 +97,7 @@ export function parseScoreCsv(text) {
       role: iRole >= 0 ? (c[iRole] ?? '') : '',
       velocity: iVel >= 0 ? +c[iVel] : null,
       velMidi: iVelMidi >= 0 && `${c[iVelMidi] ?? ''}`.trim() !== '' ? +c[iVelMidi] : null,
+      durMs: iDur >= 0 && `${c[iDur] ?? ''}`.trim() !== '' ? +c[iDur] : null,
     };
   });
   const byInstrument = {};
@@ -163,7 +167,7 @@ export function planHifi(notes, { bassOctave = 0, inner = 'bell', melody = 'stri
     // 只做透传，不在这里改音量口径——要不要用它做"真力度"由调用方（离线渲染/emit）决定。
     const base = {
       step: n.step, instr: n.instr, row: n.row, vol: n.vol,
-      velocity: n.velocity ?? null, velMidi: n.velMidi ?? null,
+      velocity: n.velocity ?? null, velMidi: n.velMidi ?? null, durMs: n.durMs ?? null,
     };
     if (VANILLA_SOUND[family]) {
       stats.vanilla++;

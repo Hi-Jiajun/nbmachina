@@ -43,8 +43,11 @@ public final class NbforgeNoteBlocks {
 	/** 位置 → 该处方块的"力度"（如果谱面提供过）——先留空，后续由谱面导出填充 */
 	private static final Map<Long, Integer> VELOCITY_BY_POS = new ConcurrentHashMap<>();
 
-	/** 谱面音符：位置 → 用哪个乐器 / 哪个声部 / 多高 / 多重（由 tools/export-mod-machine-map.mjs 生成） */
-	public record Mapped(String instrument, String voice, int midi, int velocity) {
+	/**
+	 * 谱面音符：位置 → 用哪个乐器 / 哪个声部 / 多高 / 多重 / 响多久
+	 * （由 tools/export-mod-machine-map.mjs 生成；`durMs` 来自 M3-22 的参考演奏校准）
+	 */
+	public record Mapped(String instrument, String voice, int midi, int velocity, int durMs) {
 	}
 
 	private static final Map<Long, Mapped> BY_POS = new ConcurrentHashMap<>();
@@ -103,7 +106,8 @@ public final class NbforgeNoteBlocks {
 			double py = listenMode ? player.getY() : y;
 			double pz = listenMode ? player.getZ() : z;
 			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
-				new NbforgePlayPayload(mapped.instrument(), mapped.voice(), mapped.midi(), mapped.velocity(), px, py, pz));
+				new NbforgePlayPayload(mapped.instrument(), mapped.voice(), mapped.midi(), mapped.velocity(),
+					mapped.durMs(), px, py, pz));
 			sent++;
 		}
 		dispatched.incrementAndGet();
@@ -116,7 +120,7 @@ public final class NbforgeNoteBlocks {
 
 	/**
 	 * 读入 `机器位置 → 谱面音符` 映射（`<游戏目录>/nbforge/machine_map.csv`）。
-	 * 表头：`x,y,z,instrument,voice,midi,velocity`。
+	 * 表头：`x,y,z,instrument,voice,midi,velocity[,dur_ms]`（第 8 列 M3-22 新增，缺了也能跑）。
 	 */
 	public static int loadMap(Path file) throws IOException {
 		List<String> lines = Files.readAllLines(file, StandardCharsets.UTF_8);
@@ -131,8 +135,14 @@ public final class NbforgeNoteBlocks {
 				int x = Integer.parseInt(c[0].trim());
 				int y = Integer.parseInt(c[1].trim());
 				int z = Integer.parseInt(c[2].trim());
+				int durMs = 0;
+				if (c.length >= 8) {
+					String d = c[7].trim();
+					if (!d.isEmpty()) durMs = Math.round(Float.parseFloat(d));
+				}
 				BY_POS.put(BlockPos.asLong(x, y, z),
-					new Mapped(c[3].trim(), c[4].trim(), Integer.parseInt(c[5].trim()), Integer.parseInt(c[6].trim())));
+					new Mapped(c[3].trim(), c[4].trim(), Integer.parseInt(c[5].trim()),
+						Integer.parseInt(c[6].trim()), Math.max(0, durMs)));
 			} catch (RuntimeException ignored) {
 				// 坏行跳过
 			}
@@ -170,7 +180,8 @@ public final class NbforgeNoteBlocks {
 			if (player.getEntityWorld() != serverWorld) continue;
 			if (player.squaredDistanceTo(x, y, z) > 48 * 48) continue;   // 只发给听得到的玩家
 			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
-				new NbforgePlayPayload(target, voice, midi, velocity, x, y, z));
+				new NbforgePlayPayload(target, voice, midi, velocity,
+					mapped != null ? mapped.durMs() : 0, x, y, z));
 			sent++;
 		}
 		dispatched.incrementAndGet();

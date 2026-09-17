@@ -19,14 +19,16 @@ import java.util.Map;
  *
  * <p>CSV 口径（导出工具写死，解析按表头取列，不猜列序）：
  * <pre>
- * time_seconds,instrument,midi,velocity,voice
- * 0.000,salamander48,75,127,harp
+ * time_seconds,instrument,midi,velocity,voice[,dur_ms]
+ * 0.000,salamander48,75,127,harp,890
  * </pre>
+ * 第 6 列 `dur_ms`（M3-22 可选）：这颗音的实际发声时长（键释放 + 踏板，来自参考演奏校准）；
+ * 没有这一列就按"采样自然衰减到底"播（旧行为）。
  * `instrument` 必须是 `config/nbforge/instruments.json` 里的乐器 id；解析不了的行会被计数跳过。
  */
 public final class NbforgeScore {
-	/** 一颗音：什么时候、用什么乐器、多高、多重、来自哪个声部（voice 只用于诊断） */
-	public record Note(double timeSec, String instrument, int midi, int velocity, String voice) {
+	/** 一颗音：什么时候、用什么乐器、多高、多重、响多久、来自哪个声部（voice 只用于诊断） */
+	public record Note(double timeSec, String instrument, int midi, int velocity, String voice, int durMs) {
 	}
 
 	private final Path source;
@@ -97,9 +99,14 @@ public final class NbforgeScore {
 				int velocity = Integer.parseInt(c[idx.get("velocity")].trim());
 				String voice = idx.containsKey("voice") && c.length > idx.get("voice")
 					? c[idx.get("voice")].trim() : "";
+				int durMs = 0;
+				if (idx.containsKey("dur_ms") && c.length > idx.get("dur_ms")) {
+					String d = c[idx.get("dur_ms")].trim();
+					if (!d.isEmpty()) durMs = Math.max(0, Math.round(Float.parseFloat(d)));
+				}
 				if (instrument.isEmpty() || midi < 0 || midi > 127) throw new NumberFormatException("字段越界");
 				velocity = Math.max(1, Math.min(127, velocity));
-				notes.add(new Note(t, instrument, midi, velocity, voice));
+				notes.add(new Note(t, instrument, midi, velocity, voice, durMs));
 				byVoice.merge(voice.isEmpty() ? "(未知)" : voice, 1, Integer::sum);
 			} catch (RuntimeException e) {
 				skipped++;

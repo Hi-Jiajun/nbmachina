@@ -62,6 +62,14 @@ public final class NbforgeAudio {
 	/** 同键重击的放音时长（ms）：同一根弦被重新敲响，上一个声音被自然替换 */
 	public static final long RESTRIKE_FADE_MS = 60L;
 
+	/**
+	 * 制音器放音时长（ms，M3-22）：谱面给了实际发声时长时用它。
+	 * 低音弦又粗又重、制音器压下去要更久；高音弦轻，收得干脆——与离线渲染同一套口径。
+	 */
+	public static long damperMs(int midi) {
+		return midi >= 60 ? 140L : midi >= 45 ? 200L : 300L;
+	}
+
 	/** 一路正在发声的音：谁（乐器 + 键位 + 声部）、增益、起始时间与放音状态 */
 	private static final class Voice {
 		final int source;
@@ -71,15 +79,18 @@ public final class NbforgeAudio {
 		final float gain;
 		final long startMs = System.currentTimeMillis();
 		final long fadeMs;
+		/** 谱面给的**实际发声时长**（ms，0 = 没这信息，靠采样自然衰减）——M3-22 */
+		final long durMs;
 		long releaseStartMs = -1L;
 
-		Voice(int source, String instrument, String voice, int midi, float gain, long fadeMs) {
+		Voice(int source, String instrument, String voice, int midi, float gain, long fadeMs, long durMs) {
 			this.source = source;
 			this.instrument = instrument;
 			this.voice = voice;
 			this.midi = midi;
 			this.gain = gain;
 			this.fadeMs = fadeMs;
+			this.durMs = durMs;
 		}
 
 		boolean isReleasing() {
@@ -91,6 +102,11 @@ public final class NbforgeAudio {
 			if (releaseStartMs < 0L) return 1f;
 			if (fadeMs <= 0L) return 0f;
 			return Math.max(0f, 1f - (nowMs - releaseStartMs) / (float) fadeMs);
+		}
+
+		/** 到点了该放音吗（谱面给了时值才用；这就是"手指松开/踏板抬起"那一刻） */
+		boolean dueToRelease(long nowMs) {
+			return durMs > 0L && releaseStartMs < 0L && nowMs - startMs >= durMs;
 		}
 	}
 
@@ -111,6 +127,10 @@ public final class NbforgeAudio {
 	private static volatile int foldedCount = 0;
 	/** 被"放音"规则提前放掉的声部数（低音单音线 + 同键重击）——M3-19 的低音"糊"就是靠它解决 */
 	private static volatile int dampedCount = 0;
+	/** 因为**谱面时值到点**而放音的声部数（M3-22：手指松开 / 踏板抬起） */
+	private static volatile int releasedByScore = 0;
+	/** 收到过时值的音符数（用于确认 machine_map.csv 里的 dur_ms 真的生效了） */
+	private static volatile int withDuration = 0;
 	private static volatile int peakActive = 0;
 
 	private NbforgeAudio() {
@@ -159,6 +179,16 @@ public final class NbforgeAudio {
 
 	public static int dampedCount() {
 		return dampedCount;
+	}
+
+	/** 按谱面时值放音的次数（M3-22） */
+	public static int releasedByScore() {
+		return releasedByScore;
+	}
+
+	/** 带时值播放的音符数（0 说明 machine_map.csv 还没有 dur_ms 列） */
+	public static int withDurationCount() {
+		return withDuration;
 	}
 
 	public static int activeCount() {
@@ -313,6 +343,11 @@ public final class NbforgeAudio {
 		for (Iterator<Map.Entry<Integer, Voice>> it = ACTIVE.entrySet().iterator(); it.hasNext(); ) {
 			Map.Entry<Integer, Voice> e = it.next();
 			Voice v = e.getValue();
+			// M3-22：谱面时值到点 → 进入放音（制音器落下）
+			if (v.dueToRelease(now)) {
+				v.releaseStartMs = now;
+				releasedByScore++;
+			}
 			if (v.isReleasing()) {
 				float f = v.fadeFactor(now);
 				AL10.alSourcef(v.source, AL10.AL_GAIN, Math.max(0f, v.gain * masterGain * f));
@@ -345,9 +380,11 @@ public final class NbforgeAudio {
 	 *   <li><b>同键重击</b>：同一（乐器 + 键位）再响 → 上一个放掉（同一根弦被重新敲响，物理上就是替换）。</li>
 	 * </ul>
 	 */
-	private static void dampConflicts(String instrument, String voice, int midi) {
+	private static void dampConflicts(String instrument, String voice, int midi, boolean hasScoreDuration) {
 		long now = System.currentTimeMillis();
-		boolean monophonic = "bass".equalsIgnoreCase(voice);
+		// 谱面给了时值就**不再**按"低音单声部"硬掐：那颗音该响多久由演奏者决定
+		// （踏板踩着的时候低音本来就会一直响，这正是要的效果）。
+		boolean monophonic = !hasScoreDuration && "bass".equalsIgnoreCase(voice);
 		for (Voice v : ACTIVE.values()) {
 			if (v.isReleasing()) continue;
 			// 同一时刻的和弦（同一 tick 派发下来的几颗音）不能互相放掉：
@@ -370,7 +407,8 @@ public final class NbforgeAudio {
 	 * @param velocity   1..127（决定力度层与增益）
 	 * @param x,y,z      世界坐标（世界的音源位置；听者位置由 {@link #setListener} 同步）
 	 */
-	public static void play(String instrument, String voice, int midi, int velocity, double x, double y, double z) {
+	public static void play(String instrument, String voice, int midi, int velocity, int durMs,
+							double x, double y, double z) {
 		receivedCount++;
 		if (receivedCount % 25 == 0) {
 			NbforgeMod.LOGGER.info("[nbforge] 已收到 {} 条音符（引擎就绪={} 已播={} 丢弃={} 重建={}）",
@@ -398,14 +436,14 @@ public final class NbforgeAudio {
 		}
 		float gain = NbforgeInstruments.velocityGain(velocity) * (float) Math.pow(10.0, region.gainDb / 20.0);
 		float pitch = (float) region.pitchRatio(playMidi);
-		TASKS.offer(() -> playNow(region.file, gain, pitch, x, y, z, instrument, voice, playMidi));
+		TASKS.offer(() -> playNow(region.file, gain, pitch, x, y, z, instrument, voice, playMidi, durMs));
 	}
 
 	private static void playNow(String file, float gain, float pitch, double x, double y, double z,
-								String instrument, String voice, int midi) {
+								String instrument, String voice, int midi, int durMs) {
 		int buffer = bufferFor(file);
 		if (buffer == 0) return;
-		dampConflicts(instrument, voice, midi);
+		dampConflicts(instrument, voice, midi, durMs > 0);
 		int source;
 		if (!FREE.isEmpty()) {
 			source = FREE.pop();
@@ -439,7 +477,10 @@ public final class NbforgeAudio {
 		}
 		ACTIVE.put(source, new Voice(source, instrument, voice, midi,
 			Math.max(0f, Math.min(4f, gain * masterGain)),
-			"bass".equalsIgnoreCase(voice) ? BASS_FADE_MS : RESTRIKE_FADE_MS));
+			// 有谱面时值 → 用制音器放音时长（低音弦重、放音慢）；没有 → 沿用旧的两条规则
+			durMs > 0 ? damperMs(midi) : ("bass".equalsIgnoreCase(voice) ? BASS_FADE_MS : RESTRIKE_FADE_MS),
+			durMs));
+		if (durMs > 0) withDuration++;
 		playedCount++;
 		if (ACTIVE.size() > peakActive) peakActive = ACTIVE.size();
 	}
