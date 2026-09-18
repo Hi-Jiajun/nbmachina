@@ -51,3 +51,14 @@ return midiFromRow(timbreName === 'bass' ? 'bass' : 'harp', n.row);   // ← 42 
 * 成品：`build/ab/R11_fixed_48k24bit.wav`（全曲）、`build/ab/R11_4m32-4m44.wav`、`build/ab/R11_2m45-2m53.wav`
 * 游戏侧：`instruments.json` 已指向高通库；谱面/映射表不变（mod 一直直接用 `machine_map.csv` 里的 midi，
   所以**游戏里这段本来就是对的**，被这个 bug 影响的只有离线渲染）
+
+## 附：M3-27b · 把"证据不足"过滤器误删的 114 颗真音恢复
+
+上一轮 `verify-notes-against-audio.py` 的严格阈值删了 202 颗，其中 114 颗经"谐波占比"复核
+（`probe-audibility`）：中位 −9.0dB、109/114 强于 −25dB —— **都是原曲里真有的音**（含用户 2:47 那段的 G#2）。
+现在改成两种更保守的判定：
+* `verify-notes-against-audio.py --ratio 1.0 --local 0.6`（宽松档，删 88 颗）
+* `filter-notes-vs-render.py --frac-only --frac -45`（只看"基频带占当时总能量 < −45dB"，删 4 颗 C#1 幻觉音）
+
+最终谱面 **3044 颗音**（3146 → 删 88 可疑 + 4 C#1 + 10 颗 <30ms 碎音）。
+与原始视频的对数包络相关：**0.897**（R10 0.860 → R11 0.894 → R12 0.897）。

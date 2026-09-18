@@ -47,6 +47,8 @@ def main():
     ap.add_argument('--offset', type=float, default=3.904, help='演奏起点（原视频时间）')
     ap.add_argument('--excess', type=float, default=12.0, help='我们比原曲高多少 dB 算异常')
     ap.add_argument('--frac', type=float, default=-35.0, help='原曲该带占比低于多少 dB 算"没有"')
+    ap.add_argument('--frac-only', action='store_true',
+                    help='只用"原曲该频带占比 < --frac"判定（低频幻觉音用；不依赖我们的渲染）')
     ap.add_argument('--report', default=None)
     args = ap.parse_args()
 
@@ -67,7 +69,8 @@ def main():
         eo = 10 * np.log10(bo + 1e-20)
         er = 10 * np.log10(br + 1e-20)
         frac = 10 * np.log10(bo / (to + 1e-20) + 1e-20)
-        if (er - eo) > args.excess and frac < args.frac:
+        hit = (frac < args.frac) if args.frac_only else ((er - eo) > args.excess and frac < args.frac)
+        if hit:
             dropped.append({**n, 'orig_db': eo, 'render_db': er, 'frac_db': frac})
         else:
             kept.append(n)
