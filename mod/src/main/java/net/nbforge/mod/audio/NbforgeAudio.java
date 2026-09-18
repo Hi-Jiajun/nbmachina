@@ -445,7 +445,8 @@ public final class NbforgeAudio {
 		// 打击乐（pitched=false）按 GM 键位原样用。
 		int playMidi = inst.isPitched() ? inst.foldKey(midi) : midi;
 		if (playMidi != midi) foldedCount++;
-		NbforgeInstruments.Region region = inst.pick(playMidi, velocity);
+		// M3-31：短音（durMs ≤ 300ms）优先用 sta 断奏采样；没有 sta 区域时自动退回
+		NbforgeInstruments.Region region = inst.pick(playMidi, velocity, durMs);
 		if (region == null || region.file == null) {
 			droppedCount++;
 			lastError = "乐器 " + instrument + " 里没有可用区域";

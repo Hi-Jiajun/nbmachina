@@ -45,6 +45,9 @@ const INSTRUMENTS = [
     name: 'Yamaha Disklavier Pro（OLPC 完整合集）',
     license: 'CC-BY 3.0 · Zenph Studios / OLPC',
     sfz: `${TC}/olpc/x/yamahaGrandPiano44/yamaha_disklavier_olpc.sfz`,
+    // M3-31：把同目录的 **sta（断奏）采样**也收进来（SFZ 里只有 leg）——短音优先用 sta。
+    // 376 个文件 / 25 个根音 / 86 档力度，命名 `pno<midi><v>v<vel>sta.wav`（另有 pno27 / pno27v85 这类少写前导零的）。
+    extra: () => staccatoRegions(`${TC}/olpc/x/yamahaGrandPiano44`),
   },
   {
     id: 'vsco_upright',
@@ -101,6 +104,38 @@ function percussionRegions(sfzPath) {
   return out;
 }
 
+/**
+ * M3-31 · 扫描 OLPC 目录里的 **sta（断奏）采样**，生成 region 列表。
+ * 命名两种写法都认：`pno021v106sta.wav`（补零）与 `pno27v75sta.wav`（不补零）。
+ * 键位区间按"根音一对一"（loKey=hiKey=root），其余键交给引擎的"最近键位 + 变调"兜底；
+ * 力度区间取相邻两层的中间值（与 SFZ 的 loVel/hiVel 同口径）。
+ */
+function staccatoRegions(dir) {
+  const files = fs.readdirSync(dir).filter((f) => /^pno\d+v\d+sta\.wav$/i.test(f));
+  const byRoot = new Map();
+  for (const f of files) {
+    const m = f.match(/^pno(\d+)v(\d+)sta\.wav$/i);
+    const root = Number(m[1]);
+    const vel = Number(m[2]);
+    if (!byRoot.has(root)) byRoot.set(root, []);
+    byRoot.get(root).push({ vel, file: path.join(dir, f).replace(/\\/g, '/') });
+  }
+  const out = [];
+  for (const [root, list] of byRoot) {
+    list.sort((a, b) => a.vel - b.vel);
+    for (let i = 0; i < list.length; i++) {
+      const loVel = i === 0 ? 1 : Math.floor((list[i - 1].vel + list[i].vel) / 2) + 1;
+      const hiVel = i === list.length - 1 ? 127 : Math.floor((list[i].vel + list[i + 1].vel) / 2);
+      out.push({
+        file: list[i].file, loKey: root, hiKey: root, root,
+        loVel, hiVel, gainDb: 0, tuneCents: 0, staccato: true,
+      });
+    }
+  }
+  console.log(`  sta 断奏采样：${files.length} 个文件 / ${byRoot.size} 个根音 → ${out.length} 个 region`);
+  return out;
+}
+
 const only = opt('only');
 const list = only ? INSTRUMENTS.filter((i) => i.id === only) : INSTRUMENTS;
 if (only && !list.length) throw new Error(`没有这个乐器：${only}（可选 ${INSTRUMENTS.map((i) => i.id).join('/')}）`);
@@ -113,6 +148,7 @@ for (const def of list) {
     continue;
   }
   const loaded = def.custom ? { regions: def.custom(), droppedTrigger: 0, droppedRange: 0 } : loadSfz(def.sfz);
+  if (def.extra) loaded.regions = [...loaded.regions, ...def.extra()];   // M3-31：附加采样（如 sta 断奏）
   const { regions, droppedTrigger, droppedRange } = loaded;
   const missing = regions.filter((r) => !fs.existsSync(r.file));
   if (missing.length) {
@@ -134,6 +170,7 @@ for (const def of list) {
       hiVel: r.hiVel,
       gainDb: Number((r.gainDb ?? 0).toFixed(3)),
       tuneCents: Number((r.tuneCents ?? 0).toFixed(3)),
+      staccato: !!r.staccato,
     })),
   });
   const roots = new Set(regions.map((r) => r.root));

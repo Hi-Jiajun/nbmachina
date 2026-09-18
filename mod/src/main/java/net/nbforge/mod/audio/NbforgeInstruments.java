@@ -121,6 +121,8 @@ public final class NbforgeInstruments {
 		public float gainDb;
 		@SerializedName("tuneCents")
 		public float tuneCents;
+		/** M3-31：sta（断奏）采样 —— 短音优先用它 */
+		public boolean staccato;
 
 		public double pitchRatio(int midi) {
 			return Math.pow(2.0, (midi - root + tuneCents / 100.0) / 12.0);
@@ -169,9 +171,37 @@ public final class NbforgeInstruments {
 
 		/** 精确命中 → 退化命中（键位最近、再力度最近）；永不返回 null（除非该乐器没有区域） */
 		public Region pick(int midi, int velocity) {
+			return pick(midi, velocity, 0);
+		}
+
+		/**
+		 * M3-31：多一个"短音优先用 sta（断奏）采样"的规则。
+		 *
+		 * <p>为什么：OLPC 合集里同一颗音同时录了 leg（连奏）与 sta（断奏）两套。谱面带 `dur_ms`
+		 * （实际发声时长），短于 {@link #STACCATO_MS} 的音用 sta 采样更干净——leg 采样被制音器包络
+		 * 硬切出来的音头会发闷。没有 sta 区域（如 Salamander）或 durMs=0（没有时值信息）时自动退回原逻辑。
+		 */
+		public Region pick(int midi, int velocity, int durMs) {
+			// 有 sta 区域时**互斥**选池：短音只用 sta、长音只用 leg。
+			// 不互斥的话，sta 区域（loKey==hiKey）会在"键位距离"上打平、再靠力度距离把长音也抢走。
+			boolean hasSta = false;
+			for (Region r : regions) {
+				if (r.staccato) { hasSta = true; break; }
+			}
+			if (hasSta) {
+				int mode = (durMs > 0 && durMs <= STACCATO_MS) ? MODE_STA : MODE_LEG;
+				Region r = pickFrom(regions, midi, velocity, mode);
+				if (r != null) return r;
+			}
+			return pickFrom(regions, midi, velocity, MODE_ANY);
+		}
+
+		private static Region pickFrom(List<Region> pool, int midi, int velocity, int mode) {
 			Region best = null;
 			int bestScore = Integer.MAX_VALUE;
-			for (Region r : regions) {
+			for (Region r : pool) {
+				if (mode == MODE_STA && !r.staccato) continue;
+				if (mode == MODE_LEG && r.staccato) continue;
 				int keyDist = midi < r.loKey ? r.loKey - midi : midi > r.hiKey ? midi - r.hiKey : 0;
 				int velDist = velocity < r.loVel ? r.loVel - velocity : velocity > r.hiVel ? velocity - r.hiVel : 0;
 				int score = keyDist * 1000 + velDist;   // 键位优先，其次力度
@@ -183,6 +213,11 @@ public final class NbforgeInstruments {
 			return best;
 		}
 	}
+
+	/** 短于这个时长（ms）的音优先用 sta 断奏采样 */
+	public static final int STACCATO_MS = 300;
+	/** 选池模式：任意 / 只用 sta / 只用 leg */
+	private static final int MODE_ANY = 0, MODE_STA = 1, MODE_LEG = 2;
 
 	private static final class Root {
 		public List<Instrument> instruments = new ArrayList<>();

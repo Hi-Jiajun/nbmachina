@@ -123,8 +123,21 @@ function nearestKey(regions, midi) {
  * @param {number} vel127 力度（0..127）
  * @param {number} seq 触发序号（同一音高多次触发轮换 rr1/rr2，避免机关枪感）
  */
-export function pickRegion(regions, midi, vel127 = 100, seq = 0) {
+export function pickRegion(regions, midi, vel127 = 100, seq = 0, durMs = 0) {
   if (!regions || !regions.length) return null;
+  // M3-31：短音用 sta（断奏）、长音用 leg —— OLPC 合集同一颗音录了两套。
+  // 必须**互斥**：sta 区域的 loKey==hiKey（span 0），会赢下"音域最窄者优先"那条规则，
+  // 若不排除，长音也会被 sta 抢走（实测：midi60/durMs3000 选到 pno060v95sta.wav ✗）。
+  const hasSta = regions.some((r) => r.staccato);
+  if (hasSta) {
+    const useSta = durMs > 0 && durMs <= 300;
+    const pool = regions.filter((r) => !!r.staccato === useSta);
+    if (pool.length) return pickRegionInner(pool, midi, vel127, seq);
+  }
+  return pickRegionInner(regions, midi, vel127, seq);
+}
+
+function pickRegionInner(regions, midi, vel127 = 100, seq = 0) {
   const inKey = regions.filter((r) => midi >= r.loKey && midi <= r.hiKey);
   const pool = inKey.length ? inKey : [nearestKey(regions, midi)];
   const inVel = pool.filter((r) => vel127 >= r.loVel && vel127 <= r.hiVel);

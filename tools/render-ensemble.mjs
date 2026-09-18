@@ -102,7 +102,12 @@ const MELODIES = {
   salamander_ogg: { sfz: `${LIB}/SalamanderGrandPianoV3_OggVorbis/SalamanderGrandPianoV3.sfz`, label: 'Salamander V3 Ogg 精简包（有损 / 16 录音点）/ CC-BY 3.0' },
   upright: { sfz: `${VSCO}/UprightPiano.sfz`, label: 'VSCO 直立钢琴 / CC0' },
   // OLPC 完整合集（30 根音 A0..C8、每根音 12~33 层 leg 力度）——Yamaha 这条线能拿到的最完整母版
-  disklavier: { sfz: 'C:/Users/hiliang/Documents/minecraft/_toolchain/olpc/x/yamahaGrandPiano44/yamaha_disklavier_olpc.sfz', label: 'Yamaha Disklavier Pro 完整合集（Zenph / OLPC v2.7 / CC-BY 3.0）' },
+  // M3-31：把同目录的 sta（断奏）采样一起收进来 —— SFZ 里只有 leg，短音要 sta 才自然
+  disklavier: {
+    sfz: 'C:/Users/hiliang/Documents/minecraft/_toolchain/olpc/x/yamahaGrandPiano44/yamaha_disklavier_olpc.sfz',
+    label: 'Yamaha Disklavier Pro 完整合集（Zenph / OLPC v2.7 / CC-BY 3.0）',
+    staDir: 'C:/Users/hiliang/Documents/minecraft/_toolchain/olpc/x/yamahaGrandPiano44',
+  },
   // 旧的 SF2 编译版（26 根音、3~4 层力度）：只作对照，顶音区要变调 6 个半音
   disklavier_sf2: { sfz: `${LIB}/disklavier_sfz/acoustic_grand_piano_ydp_20080910.sfz`, label: 'Yamaha Disklavier Pro SF2 子集（Zenph / CC-BY 3.0）' },
 };
@@ -131,7 +136,41 @@ const keep = (layer) => (PRESET === 'piano' && (layer === 'kick' || layer === 'h
 
 /* ------------------------------------------------------------------ 采样来源 */
 const sources = {};
-const loadPiano = () => ({ ...loadSfz(MELODIES[MELODY].sfz), label: MELODIES[MELODY].label });
+/** M3-31：扫描 sta（断奏）采样，按根音/力度生成 region（与 tools/export-mod-instruments.mjs 同口径） */
+function scanSta(dir) {
+  const out = [];
+  const byRoot = new Map();
+  for (const f of fs.readdirSync(dir)) {
+    const m = f.match(/^pno(\d+)v(\d+)sta\.wav$/i);
+    if (!m) continue;
+    const root = Number(m[1]);
+    if (!byRoot.has(root)) byRoot.set(root, []);
+    byRoot.get(root).push({ vel: Number(m[2]), file: path.join(dir, f).replace(/\\/g, '/') });
+  }
+  for (const [root, list] of byRoot) {
+    list.sort((a, b) => a.vel - b.vel);
+    for (let i = 0; i < list.length; i++) {
+      out.push({
+        file: list[i].file, loKey: root, hiKey: root, root,
+        loVel: i === 0 ? 1 : Math.floor((list[i - 1].vel + list[i].vel) / 2) + 1,
+        hiVel: i === list.length - 1 ? 127 : Math.floor((list[i].vel + list[i + 1].vel) / 2),
+        gainDb: 0, tuneCents: 0, staccato: true,
+      });
+    }
+  }
+  return out;
+}
+
+const loadPiano = () => {
+  const def = MELODIES[MELODY];
+  const loaded = { ...loadSfz(def.sfz), label: def.label };
+  if (def.staDir && !argv.includes('--no-sta')) {
+    const sta = scanSta(def.staDir);
+    loaded.regions = [...loaded.regions, ...sta];
+    console.log(`  ${MELODY}: 附加 sta（断奏）采样 ${sta.length} 个 region`);
+  }
+  return loaded;
+};
 if (keep('melody')) sources.melody = loadPiano();
 if (PRESET === 'piano') {
   if (keep('inner')) sources.inner = loadPiano();
@@ -279,7 +318,8 @@ for (const layer of Object.keys(sources)) {
     const key = `${layer}:${midi}`;
     const seq = seqOf.get(key) ?? 0;
     seqOf.set(key, seq + 1);
-    const region = pickRegion(src.regions, midi, vel127, seq);
+    // M3-31：短音优先 sta（断奏）采样——与 mod 端同一条规则；trig.durMs 来自谱面
+    const region = pickRegion(src.regions, midi, vel127, seq, trig.durMs);
     if (!region) { missed++; continue; }
     const shift = midi - region.root + region.tuneCents / 100;
     if (Math.abs(shift) > 1e-6) { shifted++; maxShift = Math.max(maxShift, Math.abs(shift)); }
