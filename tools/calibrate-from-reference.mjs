@@ -173,11 +173,14 @@ const used = new Uint8Array(ref.length);
 const stats = { matched: 0, dup: 0, fallbackPedal: 0, fallbackHold: 0, dur: [], keyhold: [] };
 // 输出口径：`midi` 列直接写成**校准后**的音高（下游工具只认 midi，不用各自再加位移），
 // 另附 `midiBefore`/`regShift` 留痕，`durMs` 是这颗音的实际发声时长（毫秒）。
-const outHeader = [...header, 'midiBefore', 'regShift', 'durMs', 'refMatched'];
+// `keyMs` = 只按"手指松开"算的时长（不含踏板延长）；`durMs` = 实际发声时长（含踏板）。
+// 两者的差就是踏板替这颗音"续"的时间 —— 用户若觉得低音太糊，可以用 keyMs 试听对比。
+const outHeader = [...header, 'midiBefore', 'regShift', 'keyMs', 'durMs', 'refMatched'];
 const outRows = [];
 const iMidi = hi.midi;
 for (const n of [...notes].sort((a, b) => a.t - b.t)) {
   let durMs = '';
+  let keyMs = '';
   let matched = 0;
   if (Number.isFinite(n.midi2)) {
     const target = n.t + lagAt(n.t);
@@ -196,10 +199,12 @@ for (const n of [...notes].sort((a, b) => a.t - b.t)) {
       matched = 1;
       stats.matched++;
       stats.keyhold.push(keyoff - ref[best].onset);
+      keyMs = Math.round(Math.max(0.05, Math.min(MAX_SOUND, keyoff - ref[best].onset)) * 1000);
     } else {
       const po = pedalOffAt(target);
       keyoff = po > target ? po : target + FALLBACK_HOLD;
       if (po > target) stats.fallbackPedal++; else stats.fallbackHold++;
+      keyMs = Math.round(FALLBACK_HOLD * 1000);
     }
     const pedalOff = pedalOffAt(keyoff);
     const sound = Math.min(MAX_SOUND, Math.max(MIN_SOUND, Math.max(keyoff, pedalOff) - target));
@@ -208,7 +213,7 @@ for (const n of [...notes].sort((a, b) => a.t - b.t)) {
   }
   const cells = [...n.cells];
   cells[iMidi] = String(n.midi2);
-  outRows.push([...cells, n.midi, n.shift, durMs, matched].join(','));
+  outRows.push([...cells, n.midi, n.shift, keyMs, durMs, matched].join(','));
 }
 
 /* ---------------------------------------------- 写出 + 报告 */

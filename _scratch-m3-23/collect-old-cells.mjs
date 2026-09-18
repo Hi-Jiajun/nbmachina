@@ -12,6 +12,10 @@ const FILES = [
   'machine_pipeline_velocity.csv',
   'machine_final.csv',
   'machine_from_reference.csv',          // M3-23（本次）
+  'machine_ref_dyn.csv',                 // M3-25（实测力度版）
+  'machine_ref_vel.csv',
+  'machine_nocap.csv',
+  'machine_nocap_dyn.csv',
 ];
 const cells = new Set();
 for (const f of FILES) {

@@ -51,8 +51,14 @@ public final class NbforgeNoteBlocks {
 	}
 
 	private static final Map<Long, Mapped> BY_POS = new ConcurrentHashMap<>();
-	/** 监听模式：声音锚在玩家自己身上（整条机器都能听到），而不是方块位置（默认：物理位置） */
-	private static volatile boolean listenMode = false;
+	/**
+	 * 监听模式：声音锚在玩家自己身上（整条机器都能听到），而不是方块位置。
+	 *
+	 * <p>M3-23 默认改成 **on**：机器横跨 480..2880 格，按物理位置只有 64 格内的音发得出去——
+	 * 2026-09-18 用户实测就是被这一点坑了（起服后默认 off，听起来只剩零星碎片）。
+	 * 拍视频要"方位感"时可以手动 `/nbforge listen off`。
+	 */
+	private static volatile boolean listenMode = true;
 
 	private NbforgeNoteBlocks() {
 	}
