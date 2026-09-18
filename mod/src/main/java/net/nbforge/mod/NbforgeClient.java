@@ -95,7 +95,7 @@ public final class NbforgeClient implements ClientModInitializer {
 					.then(ClientCommandManager.argument("fromSec",
 							com.mojang.brigadier.arguments.DoubleArgumentType.doubleArg(0.0))
 						.executes(ctx -> play(ctx.getSource(),
-							com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(ctx, "fromSec"))))
+							com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(ctx, "fromSec")))))
 				.then(ClientCommandManager.literal("stop")
 					.executes(ctx -> {
 						NbforgeClientPlayer.stop();
@@ -105,7 +105,16 @@ public final class NbforgeClient implements ClientModInitializer {
 				// M3-30：运行时音色切换（不用改 machine_map.csv / score.csv）
 				.then(ClientCommandManager.literal("instrument")
 					.executes(ctx -> instrumentList(ctx.getSource()))
-					.then(ClientCommandManager.literal("reset")
+					.then(ClientCommandManager.literal("list")
+						.executes(ctx -> instrumentList(ctx.getSource())))
+					// 子命令一律用字面量（set / clear）：字面量与自由词同层会被 Brigadier 判为歧义
+					.then(ClientCommandManager.literal("set")
+						.then(ClientCommandManager.argument("voice", StringArgumentType.word())
+							.then(ClientCommandManager.argument("id", StringArgumentType.word())
+								.executes(ctx -> instrumentSet(ctx.getSource(),
+									StringArgumentType.getString(ctx, "voice"),
+									StringArgumentType.getString(ctx, "id"))))))
+					.then(ClientCommandManager.literal("clear")
 						.executes(ctx -> {
 							NbforgeInstruments.clearAllOverrides();
 							ctx.getSource().sendFeedback(Text.literal("[nbforge] 音色映射已清空：全部按谱面原值播"));
@@ -117,14 +126,7 @@ public final class NbforgeClient implements ClientModInitializer {
 								NbforgeInstruments.clearOverride(v);
 								ctx.getSource().sendFeedback(Text.literal("[nbforge] 声部 " + v + " 已恢复谱面原值"));
 								return 1;
-							})))
-					.then(ClientCommandManager.argument("first", StringArgumentType.word())
-						.executes(ctx -> instrumentSet(ctx.getSource(),
-							StringArgumentType.getString(ctx, "first"), null))
-						.then(ClientCommandManager.argument("id", StringArgumentType.word())
-							.executes(ctx -> instrumentSet(ctx.getSource(),
-								StringArgumentType.getString(ctx, "first"),
-								StringArgumentType.getString(ctx, "id")))))))));
+							}))))));
 	}
 
 	/** 每刻：把相机位置/朝向同步给音频线程，并把原版主音量接过来 */
@@ -153,7 +155,8 @@ public final class NbforgeClient implements ClientModInitializer {
 				+ "  /nbfc demo [乐器]            一键试听琶音\n"
 				+ "  /nbfc selftest [乐器] [midi] [力度]  单音自检\n"
 				+ "  /nbfc instrument [声部] [乐器]  运行时换琴（不带参数看当前映射与可选乐器）\n"
-				+ "  /nbfc instrument reset [声部]   恢复谱面原值\n"
+				+ "  /nbfc instrument set <声部|all> <乐器>   运行时换琴（all = 全部声部）\n"
+				+ "  /nbfc instrument clear [声部]   恢复谱面原值\n"
 				+ "  /nbfc reload                 重读 config/nbforge/instruments.json"));
 	}
 
@@ -169,24 +172,19 @@ public final class NbforgeClient implements ClientModInitializer {
 	}
 
 	/**
-	 * `/nbfc instrument <id>`（全部声部）或 `/nbfc instrument <声部> <id>`。
-	 * 单个参数时按"值"消歧：是乐器 id 就当换全部，是声部名就提示缺乐器。
+	 * `/nbfc instrument set <声部> <乐器>`；声部写 `all`（或 `*`）= 全部声部一起换。
 	 */
-	private static int instrumentSet(FabricClientCommandSource src, String first, String idOrNull) {
-		String voice = idOrNull == null ? "*" : first.toLowerCase();
-		String id = idOrNull == null ? first : idOrNull;
-		if (idOrNull == null && NbforgeInstruments.get(first) == null) {
-			src.sendError(Text.literal("[nbforge] 没有这个乐器：" + first
-				+ "（要按声部换就写 /nbfc instrument <声部> <乐器>；/nbfc instrument 看清单）"));
-			return 0;
-		}
+	private static int instrumentSet(FabricClientCommandSource src, String voiceArg, String id) {
+		String v = voiceArg == null ? "all" : voiceArg.trim().toLowerCase();
+		boolean anyVoice = v.equals("all") || v.equals("*") || v.equals("全部");
+		String voice = anyVoice ? "*" : v;
 		if (NbforgeInstruments.get(id) == null) {
 			src.sendError(Text.literal("[nbforge] 没有这个乐器：" + id + "（/nbfc instrument 看清单）"));
 			return 0;
 		}
 		NbforgeInstruments.setOverride(voice, id);
 		src.sendFeedback(Text.literal(String.format("[nbforge] 音色已切换：%s → %s（立即生效，已写入 config/nbforge/voices.json）",
-			voice.equals("*") ? "全部声部" : voice, id)));
+			anyVoice ? "全部声部" : voice, id)));
 		return 1;
 	}
 
