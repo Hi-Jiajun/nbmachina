@@ -127,7 +127,7 @@ export function parseScoreCsv(text) {
  *   旧默认 +1 是为了"小音箱放不出 25Hz 基频"，2026-09-14 按用户要求取消："音高全部按原曲"）
  *   melody = 旋律层音色（默认 piano；可用 strings 回到 M2-1 的拨弦音色做 A/B）
  */
-export function planHifi(notes, { bassOctave = 0, inner = 'bell', melody = 'strings' } = {}) {
+export function planHifi(notes, { bassOctave = 0, inner = 'bell', melody = 'strings', trustScoreMidi = false } = {}) {
   if (!INNER_CHOICES.includes(inner)) throw new Error(`--inner 只支持 ${INNER_CHOICES.join('/')}，收到 ${inner}`);
   if (!TIMBRES.includes(melody)) throw new Error(`--melody 只支持 ${TIMBRES.join('/')}，收到 ${melody}`);
   const fam = (instr) => INSTRUMENT_ALIAS[String(instr ?? '').toLowerCase()] ?? null;
@@ -191,7 +191,11 @@ export function planHifi(notes, { bassOctave = 0, inner = 'bell', melody = 'stri
     // 采样音高：**优先用谱面的真实音高**（`midi` 列，T3 用音频逐音标定过），
     // 只有该音高没有对应采样时才退回"折叠到音符盒音域"的老口径（并计数，便于发现覆盖率问题）。
     const sampleMidi = (timbreName, n) => {
-      if (Number.isFinite(n.midi) && hasEvent(timbreName, n.midi)) {
+      // `trustScoreMidi`（离线渲染/真采样库用）：采样库自己有完整音域（Salamander 21..108），
+      // 不该用**资源包合成器**那套音域表（42..102）去判定——否则 G7/G#7(midi 103/104) 会被
+      // 误判成"没有采样"，退回 `42 + row` 的老口径，变成完全错误的低音（2026-09-18 用户听到的
+      // "4:32–4:44 明显不同"就是这个：谱面是 G7/G#7 的高音颤音，渲染出来却是 C#3/D3）。
+      if (Number.isFinite(n.midi) && (trustScoreMidi || hasEvent(timbreName, n.midi))) {
         return n.midi;
       }
       stats.octaveFallback++;
@@ -228,7 +232,7 @@ export function planHifi(notes, { bassOctave = 0, inner = 'bell', melody = 'stri
       if (isInnerLabel(n)) stats.innerExplicit++;
       else stats.innerHeuristic++;
     }
-    if (!hasEvent(timbre, midi)) {
+    if (!trustScoreMidi && !hasEvent(timbre, midi)) {
       throw new Error(`${timbre} 未渲染 midi ${midi}（row ${n.row}，音域 ${REGISTERS[timbre].join('..')}）—— `
         + '请调整 src/synth/voices.mjs 的 REGISTERS 后重跑 render-all');
     }

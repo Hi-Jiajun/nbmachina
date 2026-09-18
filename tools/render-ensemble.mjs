@@ -95,7 +95,10 @@ function highpass(buf, sr, fc) {
 const MELODIES = {
   // 默认 = 48kHz/24bit 完整母版（30 个录音点 / 16 层力度，最大 1 半音微调）。
   // Ogg 包只留作对照：16 个录音点、最大 4 半音变调、且是有损编码（用户明确否掉过它）。
-  salamander: { sfz: `${LIB}/salamander48/SalamanderGrandPianoV3_48khz24bit/SalamanderGrandPianoV3.sfz`, label: 'Salamander V3 48k/24bit 母版 / CC-BY 3.0' },
+  // M3-26b：改用**按音高分档高通**后的采样（见 _scratch-m3-26/make-hp-samples.ps1）。
+  // 母版的高音区采样自带很强的低频垃圾（F#7/A7 的 60–300Hz 只比基频低 9~10dB，C8 甚至更高），
+  // 一弹就把"不该出现的低音"带出来 —— 用户听到的 4:32–4:44 那个明显不同就是它。
+  salamander: { sfz: `${LIB}/salamander48_hp/SalamanderGrandPianoV3_hp.sfz`, label: 'Salamander V3 48k/24bit 母版（按音高分档高通）/ CC-BY 3.0' },
   salamander_ogg: { sfz: `${LIB}/SalamanderGrandPianoV3_OggVorbis/SalamanderGrandPianoV3.sfz`, label: 'Salamander V3 Ogg 精简包（有损 / 16 录音点）/ CC-BY 3.0' },
   upright: { sfz: `${VSCO}/UprightPiano.sfz`, label: 'VSCO 直立钢琴 / CC0' },
   // OLPC 完整合集（30 根音 A0..C8、每根音 12~33 层 leg 力度）——Yamaha 这条线能拿到的最完整母版
@@ -213,7 +216,8 @@ if (DYNAMICS === 'phrase') {
   const out = interpretVelMidi(notes.map((n) => ({ ...n, timeSec: n.step * STEP_SECONDS })), sections);
   scoreNotes = notes.map((n, i) => ({ ...n, velMidi: out[i].velMidi }));
 }
-const { events } = planHifi(scoreNotes);     // 与数据包同一套声部判定/音高口径
+// 与数据包同一套声部判定；但**音高直接信任谱面**（采样库音域 21..108，见 planHifi 的 trustScoreMidi）
+const { events } = planHifi(scoreNotes, { trustScoreMidi: true });
 const GM = { basedrum: 36, hat: 42 };
 const triggers = [];
 // 力度 → (采样层, 增益)：
