@@ -73,16 +73,22 @@ public class NbforgeMod implements ModInitializer {
 		NbforgeSustainQueue.register();
 		NbforgeScorePlayer.register();
 		NbforgeSelfTest.register();
-		// 机器映射（位置 → 谱面音符）：起服时读一次，红石触发时就能查到"这颗音该多大力"
-		ServerLifecycleEvents.SERVER_STARTED.register(server -> {
-			java.nio.file.Path map = server.getRunDirectory().resolve("nbforge").resolve("machine_map.csv");
-			try {
-				int n = net.nbforge.mod.note.NbforgeNoteBlocks.loadMap(map);
-				LOGGER.info("[nbforge] 机器映射已加载：{} 个音符盒位置 ← {}", n, map);
-			} catch (java.io.IOException e) {
-				LOGGER.warn("[nbforge] 机器映射未加载（{}）：{} —— 音符盒仍会发声，但力度用默认值",
-					map, e.getMessage());
-			}
-		});
+		// 机器映射（位置 → 谱面音符）：起服时读一次，红石触发时就能查到"这颗音该多大力"。
+		// M3-23：`/reload`（数据包重载）与 `/nbforge reloadmap` 也会重读 —— 换谱面时不用重启游戏。
+		ServerLifecycleEvents.SERVER_STARTED.register(NbforgeMod::reloadMachineMap);
+		ServerLifecycleEvents.END_DATA_PACK_RELOAD.register(
+			(server, resourceManager, success) -> reloadMachineMap(server));
+	}
+
+	/** 重新读入 `nbforge/machine_map.csv`（服务端启动、`/reload`、`/nbforge reloadmap` 都走这里） */
+	public static void reloadMachineMap(net.minecraft.server.MinecraftServer server) {
+		java.nio.file.Path map = server.getRunDirectory().resolve("nbforge").resolve("machine_map.csv");
+		try {
+			int n = net.nbforge.mod.note.NbforgeNoteBlocks.loadMap(map);
+			LOGGER.info("[nbforge] 机器映射已加载：{} 个音符盒位置 ← {}", n, map);
+		} catch (java.io.IOException e) {
+			LOGGER.warn("[nbforge] 机器映射未加载（{}）：{} —— 音符盒仍会发声，但力度用默认值",
+				map, e.getMessage());
+		}
 	}
 }

@@ -54,6 +54,9 @@ public final class NbforgeCommands {
 		dispatcher.register(CommandManager.literal("nbforge")
 			.then(CommandManager.literal("info")
 				.executes(NbforgeCommands::info))
+			// M3-23：换谱面（machine_map.csv）时不用重启游戏
+			.then(CommandManager.literal("reloadmap")
+				.executes(NbforgeCommands::reloadMap))
 			.then(CommandManager.literal("note")
 				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
 					.executes(ctx -> note(ctx, 1.0F, 1.0F))
@@ -115,6 +118,15 @@ public final class NbforgeCommands {
 			NbforgeSustainQueue.peakActiveJobs(),
 			NbforgeMod.MELODY_INSTRUMENT, NbforgeMod.BASS_INSTRUMENT,
 			String.valueOf(NbforgeMod.PERC_INSTRUMENT))), false);
+		return 1;
+	}
+
+	/** M3-23：重读 `nbforge/machine_map.csv`（换谱面时不用重启游戏；`/reload` 也会顺手重读） */
+	private static int reloadMap(CommandContext<ServerCommandSource> ctx) {
+		ServerCommandSource source = ctx.getSource();
+		NbforgeMod.reloadMachineMap(source.getServer());
+		source.sendFeedback(() -> Text.literal("[nbforge] 机器映射已重读：当前 "
+			+ net.nbforge.mod.note.NbforgeNoteBlocks.mapSize() + " 个位置"), false);
 		return 1;
 	}
 
