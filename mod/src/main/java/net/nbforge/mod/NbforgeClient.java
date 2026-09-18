@@ -3,6 +3,10 @@ package net.nbforge.mod;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
@@ -61,7 +65,10 @@ public final class NbforgeClient implements ClientModInitializer {
 				})
 				.then(ClientCommandManager.literal("status").executes(ctx -> status(ctx.getSource())))
 				.then(ClientCommandManager.literal("reload").executes(ctx -> reload(ctx.getSource())))
-				.then(ClientCommandManager.literal("instruments").executes(ctx -> list(ctx.getSource())))
+				.then(ClientCommandManager.literal("instruments")
+					.executes(ctx -> list(ctx.getSource(), null))
+					.then(ClientCommandManager.argument("filter", StringArgumentType.word())
+						.executes(ctx -> list(ctx.getSource(), StringArgumentType.getString(ctx, "filter")))))
 				.then(ClientCommandManager.literal("selftest")
 					.executes(ctx -> selftest(ctx.getSource(), defaultInstrument(), 60, 100))
 					.then(ClientCommandManager.argument("instrument", StringArgumentType.word())
@@ -184,7 +191,7 @@ public final class NbforgeClient implements ClientModInitializer {
 		else for (var e : ov.entrySet()) sb.append("  ").append(e.getKey()).append(" → ").append(e.getValue()).append('\n');
 		sb.append("  可选乐器：");
 		src.sendFeedback(Text.literal(sb.toString()));
-		return list(src);
+		return list(src, null);
 	}
 
 	/**
@@ -287,19 +294,50 @@ public final class NbforgeClient implements ClientModInitializer {
 		return n >= 0 ? 1 : 0;
 	}
 
-	private static int list(FabricClientCommandSource src) {
+	/**
+	 * M3-33：乐器库列表。70 件之后一条消息塞不下，所以默认只报**分组统计**，
+	 * 想看具体 id 用 `/nbfc instruments <关键字>`（匹配 id，最多列 25 条）。
+	 */
+	private static int list(FabricClientCommandSource src, String filter) {
 		var all = NbforgeInstruments.all();
 		if (all.isEmpty()) {
 			src.sendError(Text.literal("[nbforge] 没有乐器：" + NbforgeInstruments.lastError()));
 			return 0;
 		}
-		StringBuilder sb = new StringBuilder("[nbforge] 已加载 " + all.size() + " 个乐器：");
-		for (var inst : all) {
-			sb.append("\n  ").append(inst.id).append("（").append(inst.regions.size()).append(" 区域")
-				.append(inst.license == null ? "" : "， " + inst.license).append("）");
+		if (filter == null || filter.isBlank()) {
+			Map<String, Integer> byGroup = new java.util.LinkedHashMap<>();
+			for (var inst : all) byGroup.merge(groupOf(inst.id), 1, Integer::sum);
+			StringBuilder head = new StringBuilder("[nbforge] 已加载 " + all.size() + " 件乐器（VSCO 2 CE 全集已入库 / CC0）：");
+			for (var e : byGroup.entrySet()) head.append("\n  ").append(e.getKey()).append(" ").append(e.getValue()).append(" 件");
+			head.append("\n  用 /nbfc instruments <关键字> 看具体 id（例：violin / trumpet / organ / timpani）");
+			src.sendFeedback(Text.literal(head.toString()));
+			return all.size();
 		}
+		String key = filter.toLowerCase();
+		List<String> hits = new ArrayList<>();
+		for (var inst : all) if (inst.id.contains(key)) hits.add(inst.id + "（" + inst.regions.size() + "）");
+		if (hits.isEmpty()) {
+			src.sendError(Text.literal("[nbforge] 没有匹配「" + filter + "」的乐器"));
+			return 0;
+		}
+		StringBuilder sb = new StringBuilder("[nbforge] 已加载 " + all.size() + " 个乐器：");
+		for (String h : hits.subList(0, Math.min(25, hits.size()))) sb.append("\n  ").append(h);
+		if (hits.size() > 25) sb.append("\n  …还有 ").append(hits.size() - 25).append(" 件");
 		src.sendFeedback(Text.literal(sb.toString()));
-		return all.size();
+		return hits.size();
+	}
+
+	/** 从 id 猜乐器组（只用于列表显示） */
+	private static String groupOf(String id) {
+		if (id.startsWith("vsco_violin") || id.startsWith("vsco_viola") || id.startsWith("vsco_cello")
+			|| id.startsWith("vsco_contrabass") || id.startsWith("vsco_sviolin")) return "Strings";
+		if (id.contains("trumpet") || id.contains("fhorn") || id.contains("trombone") || id.contains("tuba")) return "Brass";
+		if (id.contains("flute") || id.contains("oboe") || id.contains("clarinet") || id.contains("bassoon")
+			|| id.contains("piccolo")) return "Woodwinds";
+		if (id.contains("organ") || id.contains("piano") || id.contains("upright")) return "Keys";
+		if (id.contains("timpani") || id.contains("glocken") || id.contains("marimba") || id.contains("xylophone")
+			|| id.contains("tubular") || id.contains("perc")) return "Percussion";
+		return "其他";
 	}
 
 	private static int note(FabricClientCommandSource src, String instrument, int midi, int velocity) {

@@ -136,6 +136,45 @@ function staccatoRegions(dir) {
   return out;
 }
 
+/**
+ * M3-33 · VSCO 2 CE 全集（CC0）—— 用户："把所有乐器的无损采样可商用的都可以装进我们的mod使用，
+ * 后期创作各类歌曲就不存在音色音源的瓶颈了。" 目录里 75 个 SFZ（弦乐/铜管/木管/键盘/打击乐），
+ * 这里自动生成条目；已经在清单里的 4 件（竖琴/低音提琴拨弦/打击乐/直立钢琴）跳过，避免重复。
+ */
+const VSCO_DIR = `${TC}/piano/vsco2ce/VSCO-2-CE-SFZ`;
+const VSCO_SKIP = new Set(['Harp.sfz', 'ContrabassPizz.sfz', 'GM-StylePerc.sfz', 'UprightPiano.sfz']);
+
+function vscoExtraInstruments() {
+  const files = fs.readdirSync(VSCO_DIR).filter((f) => f.toLowerCase().endsWith('.sfz')).sort();
+  const out = [];
+  for (const f of files) {
+    if (VSCO_SKIP.has(f)) continue;
+    const base = f.replace(/\.sfz$/i, '');
+    const id = 'vsco_' + base.replace(/[^A-Za-z0-9]+/g, '_').replace(/_+$/g, '').toLowerCase();
+    const group = fs.statSync(path.join(VSCO_DIR, f)).isFile() ? '' : '';
+    out.push({
+      id,
+      name: `VSCO 2 CE ${base}（${vscoGroupOf(base)}）`,
+      license: 'CC0 1.0 · Versilian Studios',
+      sfz: path.join(VSCO_DIR, f),
+      _group: group,
+    });
+  }
+  return out;
+}
+
+/** 按名字猜组别，只用于显示（Strings / Brass / Woodwinds / Keys / Percussion） */
+function vscoGroupOf(base) {
+  if (/Violin|Viola|Cello|Contrabass|VSUpright/.test(base)) return 'Strings';
+  if (/Trumpet|FHorn|Trombone|Tuba/.test(base)) return 'Brass';
+  if (/Flute|Oboe|Clarinet|Bassoon|Piccolo/.test(base)) return 'Woodwinds';
+  if (/Organ|Piano/.test(base)) return 'Keys';
+  if (/Timpani|Glockenspiel|Marimba|Xylophone|TubularBells|Perc/.test(base)) return 'Percussion';
+  return 'Misc';
+}
+
+INSTRUMENTS.push(...vscoExtraInstruments());
+
 const only = opt('only');
 const list = only ? INSTRUMENTS.filter((i) => i.id === only) : INSTRUMENTS;
 if (only && !list.length) throw new Error(`没有这个乐器：${only}（可选 ${INSTRUMENTS.map((i) => i.id).join('/')}）`);
