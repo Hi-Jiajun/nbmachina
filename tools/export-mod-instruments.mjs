@@ -33,10 +33,12 @@ const DEPLOY = has('deploy');
 const INSTRUMENTS = [
   {
     id: 'salamander48',
-    name: 'Salamander Grand Piano V3（48kHz/24bit 母版）',
+    // M3-26：改用 **高通版**（48Hz 四阶）—— 原始采样自带 20–40Hz 的隆隆声（-32.6dB，
+    // 而原视频同频带只有 -55.6dB），用户听到的"不该出现的低音"就是它；60Hz 以上几乎无损。
+    name: 'Salamander Grand Piano V3（48kHz/24bit 母版 · 48Hz 高通）',
     license: 'CC-BY 3.0 · Alexander Holm',
     isDefault: true,
-    sfz: `${TC}/piano/salamander48/SalamanderGrandPianoV3_48khz24bit/SalamanderGrandPianoV3.sfz`,
+    sfz: `${TC}/piano/salamander48_hp/SalamanderGrandPianoV3_hp.sfz`,
   },
   {
     id: 'disklavier',

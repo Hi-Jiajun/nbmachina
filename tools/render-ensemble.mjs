@@ -62,7 +62,10 @@ const LENGTHS = !argv.includes('--no-lengths');
 //   `--hpf <Hz>`       总线高通：参考演奏 60Hz 以下几乎没能量（0.01%），我们却有 0.14%+ 的隆隆声
 //   `--bass-hpf <Hz>`  只给左手层高通：把 80–150Hz 的堆积削掉（参考那一带只占 8%，我们 27%）
 //   `--bass-cap <sec>` 左手发声时长上限：不给低音无限延长，避免十几颗音叠在一起
-const HPF = Number(opt('hpf', '0'));
+// M3-26：采样库自带 **20–40Hz 的隆隆声**（单音直出实测占 -32.6dB，而原视频同一频带只有 -55.6dB，
+// 差 26dB）。用户 2026-09-18 听到的"不该出现的低音"就是它。默认给总线加 42Hz 二阶高通：
+// 谱面最低音是 G#1(51.9Hz)，42Hz 高通对它的影响 <1dB，却能把这段原曲根本没有的隆隆声清掉。
+const HPF = Number(opt('hpf', argv.includes('--no-hpf') ? '0' : '42'));
 const BASS_HPF = Number(opt('bass-hpf', '0'));
 const BASS_CAP = Number(opt('bass-cap', '0'));
 // `--bass-key`：左手只按"手指松开"收（不继承踏板延长）——用于判断低音糊是不是踏板拖出来的
@@ -335,8 +338,10 @@ for (const [layer, buf] of layerBuf) {
 
 /* ------------------------------------------------------------------ 总线：归一 + 软限幅 */
 if (HPF > 0) {
-  const Lh = highpass(L, SR, HPF);
-  const Rh = highpass(R, SR, HPF);
+  // 两级级联 = 四阶（-24dB/oct）：采样库的隆隆声在 20–40Hz，需要更陡才削得干净，
+  // 而 48Hz 以上的真实低音（谱面最低 G#1 = 51.9Hz）只掉 ~1dB。
+  let Lh = highpass(highpass(L, SR, HPF), SR, HPF);
+  let Rh = highpass(highpass(R, SR, HPF), SR, HPF);
   L.set(Lh); R.set(Rh);
 }
 if (HPF > 0 || BASS_HPF > 0 || BASS_CAP > 0) {
