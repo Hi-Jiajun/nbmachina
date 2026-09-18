@@ -52,6 +52,12 @@ public final class NbforgeClient implements ClientModInitializer {
 		ClientTickEvents.END_CLIENT_TICK.register(NbforgeClient::tick);
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, access) -> dispatcher.register(
 			ClientCommandManager.literal("nbfc")
+				// 只打 `/nbfc` 不带子命令时，Brigadier 默认报"错误的命令参数，位于第5个字符：nbfc"
+				// （2026-09-18 用户就撞上这个）——这里给它一个人话用法说明，顺便自证有哪些子命令。
+				.executes(ctx -> {
+					usage(ctx.getSource());
+					return 1;
+				})
 				.then(ClientCommandManager.literal("status").executes(ctx -> status(ctx.getSource())))
 				.then(ClientCommandManager.literal("reload").executes(ctx -> reload(ctx.getSource())))
 				.then(ClientCommandManager.literal("instruments").executes(ctx -> list(ctx.getSource())))
@@ -109,6 +115,20 @@ public final class NbforgeClient implements ClientModInitializer {
 		NbforgeAudio.setListener(player.getX(), player.getEyeY(), player.getZ(), fx, fy, fz, 0f, 1f, 0f);
 		float master = client.options.getSoundVolume(SoundCategory.MASTER);
 		NbforgeAudio.setMasterGain(master * 0.85f);
+	}
+
+	/** `/nbfc` 不带子命令时的用法说明（顺便自证子命令清单） */
+	private static void usage(FabricClientCommandSource src) {
+		src.sendFeedback(Text.literal(
+			"[nbforge] 客户端命令：\n"
+				+ "  /nbfc status                 引擎状态（含客户端播放的抖动/队列延迟）\n"
+				+ "  /nbfc play [起始秒]          客户端高精度播放 nbforge/score.csv（不受服务器刻率限制）\n"
+				+ "  /nbfc stop                   停止客户端播放\n"
+				+ "  /nbfc instruments            列出乐器库\n"
+				+ "  /nbfc note <乐器> <midi> [力度]  本地试听一颗音\n"
+				+ "  /nbfc demo [乐器]            一键试听琶音\n"
+				+ "  /nbfc selftest [乐器] [midi] [力度]  单音自检\n"
+				+ "  /nbfc reload                 重读 config/nbforge/instruments.json"));
 	}
 
 	private static int status(FabricClientCommandSource src) {
