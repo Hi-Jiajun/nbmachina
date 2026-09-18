@@ -433,10 +433,12 @@ public final class NbforgeAudio {
 			droppedCount++;
 			return;
 		}
-		NbforgeInstruments.Instrument inst = NbforgeInstruments.get(instrument);
+		// M3-30：运行时音色切换——声部覆盖表优先于谱面里写的乐器（换琴不用改数据）
+		final String instId = NbforgeInstruments.resolve(instrument, voice);
+		NbforgeInstruments.Instrument inst = NbforgeInstruments.get(instId);
 		if (inst == null) {
 			droppedCount++;
-			lastError = "没有这个乐器：" + instrument;
+			lastError = "没有这个乐器：" + instId;
 			return;
 		}
 		// 有音高的乐器：先把超出音域的键整八度折回来（与离线渲染同一口径）；
@@ -451,7 +453,7 @@ public final class NbforgeAudio {
 		}
 		float gain = NbforgeInstruments.velocityGain(velocity) * (float) Math.pow(10.0, region.gainDb / 20.0);
 		float pitch = (float) region.pitchRatio(playMidi);
-		TASKS.offer(new Task(() -> playNow(region.file, gain, pitch, x, y, z, instrument, voice, playMidi, durMs)));
+		TASKS.offer(new Task(() -> playNow(region.file, gain, pitch, x, y, z, instId, voice, playMidi, durMs)));
 	}
 
 	private static void playNow(String file, float gain, float pitch, double x, double y, double z,

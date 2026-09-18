@@ -33,6 +33,79 @@ public final class NbforgeInstruments {
 	private static final Map<String, Instrument> BY_ID = new LinkedHashMap<>();
 	private static String lastError = null;
 
+	/* ------------------------------------------------------------------ M3-30 运行时音色切换
+	 * 谱面里每颗音自带"用哪个乐器"（`machine_map.csv` 的 instrument 列），但**不用改数据**也能换琴：
+	 * 这里维护一张 声部 → 乐器 的覆盖表（客户端本地），解析顺序 = 声部覆盖 → `*` 全局覆盖 → 谱面原值。
+	 * 落盘在 `config/nbforge/voices.json`，重启仍在；换到的乐器**必须已在本机乐器库里**，否则忽略覆盖
+	 * （宁可照谱面播，也不要静音）。
+	 */
+	private static final Map<String, String> VOICE_OVERRIDE = new java.util.concurrent.ConcurrentHashMap<>();
+	private static final String ANY_VOICE = "*";
+
+	/** 用覆盖表解析"这颗音到底用哪件乐器" */
+	public static String resolve(String instrument, String voice) {
+		String v = voice == null ? "" : voice.trim().toLowerCase();
+		String o = VOICE_OVERRIDE.get(v);
+		if (o == null) o = VOICE_OVERRIDE.get(ANY_VOICE);
+		if (o == null) return instrument;
+		return BY_ID.containsKey(o) ? o : instrument;
+	}
+
+	/** 当前映射快照（声部 → 乐器 id） */
+	public static Map<String, String> overrides() {
+		return new LinkedHashMap<>(VOICE_OVERRIDE);
+	}
+
+	public static void setOverride(String voice, String id) {
+		VOICE_OVERRIDE.put(voice == null || voice.isBlank() ? ANY_VOICE : voice.trim().toLowerCase(), id);
+		saveVoices();
+	}
+
+	public static void clearOverride(String voice) {
+		VOICE_OVERRIDE.remove(voice == null || voice.isBlank() ? ANY_VOICE : voice.trim().toLowerCase());
+		saveVoices();
+	}
+
+	public static void clearAllOverrides() {
+		VOICE_OVERRIDE.clear();
+		saveVoices();
+	}
+
+	private static Path voicesFile() {
+		return FabricLoader.getInstance().getGameDir().resolve("config").resolve("nbforge").resolve("voices.json");
+	}
+
+	/** 读覆盖表（客户端启动、`/nbfc reload`、`/nbfc instrument` 都会走） */
+	public static void loadVoices() {
+		Path f = voicesFile();
+		VOICE_OVERRIDE.clear();
+		if (!Files.exists(f)) return;
+		try (Reader r = Files.newBufferedReader(f, StandardCharsets.UTF_8)) {
+			Map<?, ?> m = GSON.fromJson(r, Map.class);
+			if (m == null) return;
+			for (Map.Entry<?, ?> e : m.entrySet()) {
+				String k = String.valueOf(e.getKey()).trim().toLowerCase();
+				String val = String.valueOf(e.getValue()).trim();
+				if (!k.isEmpty() && !val.isEmpty()) VOICE_OVERRIDE.put(k, val);
+			}
+			NbforgeMod.LOGGER.info("[nbforge] 音色覆盖表已载入：{}", VOICE_OVERRIDE);
+		} catch (Exception e) {
+			lastError = "voices.json 读取失败：" + e.getMessage();
+			NbforgeMod.LOGGER.warn("[nbforge] {}", lastError);
+		}
+	}
+
+	private static void saveVoices() {
+		Path f = voicesFile();
+		try {
+			Files.createDirectories(f.getParent());
+			Files.writeString(f, new GsonBuilder().setPrettyPrinting().create().toJson(overrides()), StandardCharsets.UTF_8);
+		} catch (IOException e) {
+			lastError = "voices.json 写入失败：" + e.getMessage();
+			NbforgeMod.LOGGER.warn("[nbforge] {}", lastError);
+		}
+	}
+
 	private NbforgeInstruments() {
 	}
 

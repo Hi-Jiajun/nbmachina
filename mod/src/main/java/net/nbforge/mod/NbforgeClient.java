@@ -42,6 +42,7 @@ public final class NbforgeClient implements ClientModInitializer {
 	@Override
 	public void onInitializeClient() {
 		int loaded = NbforgeInstruments.reload();
+		NbforgeInstruments.loadVoices();   // M3-30：音色覆盖表（config/nbforge/voices.json）
 		NbforgeAudio.start();
 		NbforgeMod.LOGGER.info("[nbforge] 客户端入口：乐器 {} 个（{}）", loaded, NbforgeInstruments.lastError());
 
@@ -100,7 +101,30 @@ public final class NbforgeClient implements ClientModInitializer {
 						NbforgeClientPlayer.stop();
 						ctx.getSource().sendFeedback(Text.literal("[nbforge] 客户端播放已停止"));
 						return 1;
-					})))));
+					}))
+				// M3-30：运行时音色切换（不用改 machine_map.csv / score.csv）
+				.then(ClientCommandManager.literal("instrument")
+					.executes(ctx -> instrumentList(ctx.getSource()))
+					.then(ClientCommandManager.literal("reset")
+						.executes(ctx -> {
+							NbforgeInstruments.clearAllOverrides();
+							ctx.getSource().sendFeedback(Text.literal("[nbforge] 音色映射已清空：全部按谱面原值播"));
+							return 1;
+						})
+						.then(ClientCommandManager.argument("voice", StringArgumentType.word())
+							.executes(ctx -> {
+								String v = StringArgumentType.getString(ctx, "voice");
+								NbforgeInstruments.clearOverride(v);
+								ctx.getSource().sendFeedback(Text.literal("[nbforge] 声部 " + v + " 已恢复谱面原值"));
+								return 1;
+							})))
+					.then(ClientCommandManager.argument("first", StringArgumentType.word())
+						.executes(ctx -> instrumentSet(ctx.getSource(),
+							StringArgumentType.getString(ctx, "first"), null))
+						.then(ClientCommandManager.argument("id", StringArgumentType.word())
+							.executes(ctx -> instrumentSet(ctx.getSource(),
+								StringArgumentType.getString(ctx, "first"),
+								StringArgumentType.getString(ctx, "id")))))))));
 	}
 
 	/** 每刻：把相机位置/朝向同步给音频线程，并把原版主音量接过来 */
@@ -128,7 +152,42 @@ public final class NbforgeClient implements ClientModInitializer {
 				+ "  /nbfc note <乐器> <midi> [力度]  本地试听一颗音\n"
 				+ "  /nbfc demo [乐器]            一键试听琶音\n"
 				+ "  /nbfc selftest [乐器] [midi] [力度]  单音自检\n"
+				+ "  /nbfc instrument [声部] [乐器]  运行时换琴（不带参数看当前映射与可选乐器）\n"
+				+ "  /nbfc instrument reset [声部]   恢复谱面原值\n"
 				+ "  /nbfc reload                 重读 config/nbforge/instruments.json"));
+	}
+
+	/** M3-30：列出当前音色映射 + 可选乐器 */
+	private static int instrumentList(FabricClientCommandSource src) {
+		StringBuilder sb = new StringBuilder("[nbforge] 音色映射（声部 → 乐器，`*` = 全部声部）：\n");
+		var ov = NbforgeInstruments.overrides();
+		if (ov.isEmpty()) sb.append("  （未设置：全部按谱面里的乐器播）\n");
+		else for (var e : ov.entrySet()) sb.append("  ").append(e.getKey()).append(" → ").append(e.getValue()).append('\n');
+		sb.append("  可选乐器：");
+		src.sendFeedback(Text.literal(sb.toString()));
+		return list(src);
+	}
+
+	/**
+	 * `/nbfc instrument <id>`（全部声部）或 `/nbfc instrument <声部> <id>`。
+	 * 单个参数时按"值"消歧：是乐器 id 就当换全部，是声部名就提示缺乐器。
+	 */
+	private static int instrumentSet(FabricClientCommandSource src, String first, String idOrNull) {
+		String voice = idOrNull == null ? "*" : first.toLowerCase();
+		String id = idOrNull == null ? first : idOrNull;
+		if (idOrNull == null && NbforgeInstruments.get(first) == null) {
+			src.sendError(Text.literal("[nbforge] 没有这个乐器：" + first
+				+ "（要按声部换就写 /nbfc instrument <声部> <乐器>；/nbfc instrument 看清单）"));
+			return 0;
+		}
+		if (NbforgeInstruments.get(id) == null) {
+			src.sendError(Text.literal("[nbforge] 没有这个乐器：" + id + "（/nbfc instrument 看清单）"));
+			return 0;
+		}
+		NbforgeInstruments.setOverride(voice, id);
+		src.sendFeedback(Text.literal(String.format("[nbforge] 音色已切换：%s → %s（立即生效，已写入 config/nbforge/voices.json）",
+			voice.equals("*") ? "全部声部" : voice, id)));
+		return 1;
 	}
 
 	private static int status(FabricClientCommandSource src) {
@@ -137,6 +196,7 @@ public final class NbforgeClient implements ClientModInitializer {
 				+ "  收到 %d 条 nbforge:play（带时值 %d 条）；上下文重建 %d 次；被抢声部 %d；八度折叠 %d\n"
 				+ "  放音：按谱面时值 %d 次 / 旧规则（低音单声部+同键重击）%d 次\n"
 				+ "  客户端高精度播放：%s 谱面 %d 颗 / 已调度 %d / 发声 %d / 跳过 %d / 抖动 均 %.2fms 最大 %.2fms；音频队列延迟 %.2fms\n"
+				+ "  音色映射（声部→乐器，`*`=全部）：%s\n"
 				+ "  OpenAL：%s\n"
 				+ "  资源包：%s%s",
 			NbforgeAudio.ready(), NbforgeInstruments.size(), NbforgeAudio.bufferCount(),
@@ -151,6 +211,7 @@ public final class NbforgeClient implements ClientModInitializer {
 			NbforgeClientPlayer.playedCount(), NbforgeClientPlayer.skippedCount(),
 			NbforgeClientPlayer.meanJitterMs(), NbforgeClientPlayer.maxJitterMs(),
 			NbforgeAudio.lastTaskLatencyMs(),
+			NbforgeInstruments.overrides().isEmpty() ? "（未设置，按谱面原值）" : NbforgeInstruments.overrides().toString(),
 			NbforgeAudio.alInfo(),
 			packHint(),
 			NbforgeAudio.lastError() == null ? "" : "；最后错误：" + NbforgeAudio.lastError())));
@@ -205,8 +266,9 @@ public final class NbforgeClient implements ClientModInitializer {
 
 	private static int reload(FabricClientCommandSource src) {
 		int n = NbforgeInstruments.reload();
+		NbforgeInstruments.loadVoices();
 		src.sendFeedback(Text.literal(n >= 0
-			? "[nbforge] 乐器库已重新加载：" + n + " 个"
+			? "[nbforge] 乐器库已重新加载：" + n + " 个；音色映射 " + NbforgeInstruments.overrides()
 			: "[nbforge] 加载失败：" + NbforgeInstruments.lastError()));
 		return n >= 0 ? 1 : 0;
 	}
