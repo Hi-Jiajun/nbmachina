@@ -113,7 +113,10 @@ for (const mode of MODES) {
         //   ② 改成"红石块给甲板充能（y-1）"后实测**仍然不响**（这条间接充能路径在 1.21.10 不成立）。
         // 所以发声交给**自研演奏器**：数据包逐音调用 mod 的 `/nbforge playat`，
         // 由 mod 的无损引擎在同一刻发声（与机器同 tick，不会漂移）；机器这边只保留灯与粒子。
-        out.push(`${guard} nbforge playat ${x} ${y} ${z}`);
+        // M3-29：发声行加 `#snd` 守卫（默认开）。客户端高精度播放（/nbfc play）要接管声音时，
+        // 用 `/function styx:play/sound_off` 把这条关掉，避免数据包与客户端双响；
+        // 机器照样亮灯/出粒子（视觉仍由数据包驱动）。
+        out.push(`${guard} execute unless score #snd styx.flag matches 0 run nbforge playat ${x} ${y} ${z}`);
         // 音符粒子：本题材里音符盒本体发不出声（见上），粒子也就没有；这里按 vanilla 的
         // addParticle(NOTE, x+0.5, y+1.2, z+0.5, row/24, 0, 0) 口径补一发。
         out.push(`${guard} particle minecraft:note ${x + 0.5} ${y + 1.2} ${z + 0.5} `
@@ -218,6 +221,15 @@ fs.writeFileSync(`${DP}/function/play/monitor_off.mcfunction`,
   'scoreboard players set #mon styx.flag 0\n'
   + 'tellraw @a {"text":"[Styx] 监听模式：关（只靠实体音符盒发声，需要站在音轨附近）","color":"gray"}\n', 'utf8');
 
+// M3-29：机器"只做视觉"开关 —— 关掉数据包的发声行，把声音交给客户端高精度播放（/nbfc play），避免双响。
+fs.writeFileSync(`${DP}/function/play/sound_off.mcfunction`,
+  'scoreboard objectives add styx.flag dummy\n'
+  + 'scoreboard players set #snd styx.flag 0\n'
+  + 'tellraw @a {"text":"[Styx] 数据包发声：关（声音交给客户端 /nbfc play，机器照旧亮灯出粒子）","color":"gold"}\n', 'utf8');
+fs.writeFileSync(`${DP}/function/play/sound_on.mcfunction`,
+  'scoreboard players set #snd styx.flag 1\n'
+  + 'tellraw @a {"text":"[Styx] 数据包发声：开（默认；每颗音由数据包派发给 mod 引擎）","color":"gray"}\n', 'utf8');
+
 fs.writeFileSync(`${DP}/function/play/report.mcfunction`, [
   'tellraw @s {"text":"[Styx] 已触发音符数：","color":"aqua","extra":[{"score":{"name":"#hits","objective":"styx.flag"},"color":"yellow"}]}',
   'tellraw @s {"text":"[Styx] 当前刻：","color":"aqua","extra":[{"score":{"name":"#t","objective":"styx.t"},"color":"yellow"},{"text":"  监听模式：","color":"aqua"},{"score":{"name":"#mon","objective":"styx.flag"},"color":"yellow"},{"text":"  播放中：","color":"aqua"},{"score":{"name":"#on","objective":"styx.flag"},"color":"yellow"}]}',
@@ -262,4 +274,4 @@ for (const s of summary) {
 }
 const lo = summary[0], hi = summary[1];
 console.log(`对比旧的单级全扫：100 tps 单刻调用 ${hi.buckets} → ${hi.callsPerTick}（${((1 - hi.callsPerTick / hi.buckets) * 100).toFixed(0)}%↓）；20 tps 单刻调用 ${hi.buckets} → ${lo.callsPerTick}`);
-console.log('已生成 play/{tick,start,start_hi,stop,reset,report,monitor_on,monitor_off}、play/{lo,hi}/{tick,binNN,bNNN}、doctor(+check)');
+console.log('已生成 play/{tick,start,start_hi,stop,reset,report,monitor_on,monitor_off,sound_on,sound_off}、play/{lo,hi}/{tick,binNN,bNNN}、doctor(+check)');

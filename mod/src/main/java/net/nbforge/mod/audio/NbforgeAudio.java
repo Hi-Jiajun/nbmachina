@@ -51,7 +51,20 @@ public final class NbforgeAudio {
 	/** 采样截断长度：钢琴 10s 之后只剩极轻的尾音，截断直接决定"能同时响多少音"与内存占用 */
 	public static final double MAX_SECONDS = 10.0;
 
-	private static final ConcurrentLinkedQueue<Runnable> TASKS = new ConcurrentLinkedQueue<>();
+	/**
+	 * 待执行任务队列。M3-29：换成**阻塞可唤醒**的队列 —— 旧实现是"非阻塞取一次，取不到就睡 15ms"，
+	 * 于是客户端高精度调度发出的音最多会被拖 15ms 才真正播放。现在用 `poll(1ms)`：
+	 * 有任务立刻返回、没任务最多睡 1ms，发声延迟降到亚毫秒级。
+	 */
+	private static final class Task {
+		final Runnable runnable;
+		final long enqueuedNanos = System.nanoTime();
+		Task(Runnable runnable) { this.runnable = runnable; }
+	}
+	private static final java.util.concurrent.LinkedBlockingQueue<Task> TASKS =
+		new java.util.concurrent.LinkedBlockingQueue<>();
+	/** 最近一次"入队 → 执行"的延迟（ms），`/nbfc status` 里显示，用来验证高精度调度真的生效 */
+	private static volatile double lastTaskLatencyMs = -1.0;
 	private static final Map<String, Integer> BUFFERS = new LinkedHashMap<>(64, 0.75f, true);
 	private static final Map<Integer, Long> BUFFER_BYTES = new HashMap<>();
 	private static long cachedBytes = 0L;
@@ -244,22 +257,24 @@ public final class NbforgeAudio {
 					continue;
 				}
 			}
-			Runnable task = TASKS.poll();
-			if (task != null) {
+			Task task;
+			try {
+				task = TASKS.poll(1L, java.util.concurrent.TimeUnit.MILLISECONDS);
+			} catch (InterruptedException e) {
+				Thread.currentThread().interrupt();
+				break;
+			}
+			// 一次把已到的都跑掉（密集段落不排队），但每轮限量，避免饿死 recycle/错误检测
+			for (int drained = 0; task != null && drained < 64; drained++) {
+				lastTaskLatencyMs = (System.nanoTime() - task.enqueuedNanos) / 1e6;
 				try {
-					task.run();
+					task.runnable.run();
 				} catch (Throwable t) {
 					lastError = t.getClass().getSimpleName() + ": " + t.getMessage();
 					broken = true;
 					NbforgeMod.LOGGER.warn("[nbforge] 音频任务异常（将重建上下文）：{}", lastError);
 				}
-			} else {
-				try {
-					Thread.sleep(15L);
-				} catch (InterruptedException e) {
-					Thread.currentThread().interrupt();
-					break;
-				}
+				task = TASKS.poll();
 			}
 			int err = AL10.alGetError();
 			if (err != AL10.AL_NO_ERROR) {
@@ -436,7 +451,7 @@ public final class NbforgeAudio {
 		}
 		float gain = NbforgeInstruments.velocityGain(velocity) * (float) Math.pow(10.0, region.gainDb / 20.0);
 		float pitch = (float) region.pitchRatio(playMidi);
-		TASKS.offer(() -> playNow(region.file, gain, pitch, x, y, z, instrument, voice, playMidi, durMs));
+		TASKS.offer(new Task(() -> playNow(region.file, gain, pitch, x, y, z, instrument, voice, playMidi, durMs)));
 	}
 
 	private static void playNow(String file, float gain, float pitch, double x, double y, double z,
@@ -587,9 +602,19 @@ public final class NbforgeAudio {
 								   float forwardX, float forwardY, float forwardZ,
 								   float upX, float upY, float upZ) {
 		if (!ready) return;
-		TASKS.offer(() -> {
+		TASKS.offer(new Task(() -> {
 			AL10.alListener3f(AL10.AL_POSITION, (float) x, (float) y, (float) z);
 			AL10.alListenerfv(AL10.AL_ORIENTATION, new float[] {forwardX, forwardY, forwardZ, upX, upY, upZ});
-		});
+		}));
+	}
+
+	/** 最近一次"入队 → 执行"延迟（ms）；-1 = 还没跑过任务 */
+	public static double lastTaskLatencyMs() {
+		return lastTaskLatencyMs;
+	}
+
+	/** 当前排队中的任务数（>0 且持续增长说明音频线程跟不上） */
+	public static int queuedTasks() {
+		return TASKS.size();
 	}
 }

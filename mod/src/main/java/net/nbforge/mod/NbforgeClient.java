@@ -19,6 +19,7 @@ import net.nbforge.mod.audio.NbforgeAudio;
 import net.nbforge.mod.audio.NbforgeInstruments;
 import net.nbforge.mod.audio.NbforgeWav;
 import net.nbforge.mod.net.NbforgePlayPayload;
+import net.nbforge.mod.score.NbforgeClientPlayer;
 
 /**
  * M3-16（P2）· 客户端入口：无损音频引擎 + 乐器库 + 客户端命令。
@@ -33,6 +34,8 @@ import net.nbforge.mod.net.NbforgePlayPayload;
  * /nbfc note &lt;乐器&gt; &lt;midi&gt; [力度]  本地试听一颗音（不吃资源包、不走原版音频栈）
  * /nbfc demo [乐器]                一键试听：C 大调琶音 × 三档力度（验证力度层与无损通路）
  * /nbfc selftest [乐器] [midi] [力度]  单音自检：打印采样文件/解码参数/AL 状态（远程诊断用）
+ * /nbfc play [起始秒]              客户端高精度播放（自己读 nbforge/score.csv，不受服务器刻率限制）
+ * /nbfc stop                       停止客户端播放
  * </pre>
  */
 public final class NbforgeClient implements ClientModInitializer {
@@ -78,7 +81,20 @@ public final class NbforgeClient implements ClientModInitializer {
 								.executes(ctx -> note(ctx.getSource(),
 									StringArgumentType.getString(ctx, "instrument"),
 									IntegerArgumentType.getInteger(ctx, "midi"),
-									IntegerArgumentType.getInteger(ctx, "velocity")))))))));
+									IntegerArgumentType.getInteger(ctx, "velocity")))))))
+				// M3-29：客户端高精度播放（自己读 nbforge/score.csv，不受服务器刻率限制）
+				.then(ClientCommandManager.literal("play")
+					.executes(ctx -> play(ctx.getSource(), 0.0))
+					.then(ClientCommandManager.argument("fromSec",
+							com.mojang.brigadier.arguments.DoubleArgumentType.doubleArg(0.0))
+						.executes(ctx -> play(ctx.getSource(),
+							com.mojang.brigadier.arguments.DoubleArgumentType.getDouble(ctx, "fromSec"))))
+				.then(ClientCommandManager.literal("stop")
+					.executes(ctx -> {
+						NbforgeClientPlayer.stop();
+						ctx.getSource().sendFeedback(Text.literal("[nbforge] 客户端播放已停止"));
+						return 1;
+					})))));
 	}
 
 	/** 每刻：把相机位置/朝向同步给音频线程，并把原版主音量接过来 */
@@ -100,6 +116,7 @@ public final class NbforgeClient implements ClientModInitializer {
 			"[nbforge] 引擎就绪=%s 乐器=%d 采样缓存=%d 个/%.0fMB 活跃声部=%d 峰值=%d 已播=%d 丢弃=%d 主增益=%.2f\n"
 				+ "  收到 %d 条 nbforge:play（带时值 %d 条）；上下文重建 %d 次；被抢声部 %d；八度折叠 %d\n"
 				+ "  放音：按谱面时值 %d 次 / 旧规则（低音单声部+同键重击）%d 次\n"
+				+ "  客户端高精度播放：%s 谱面 %d 颗 / 已调度 %d / 发声 %d / 跳过 %d / 抖动 均 %.2fms 最大 %.2fms；音频队列延迟 %.2fms\n"
 				+ "  OpenAL：%s\n"
 				+ "  资源包：%s%s",
 			NbforgeAudio.ready(), NbforgeInstruments.size(), NbforgeAudio.bufferCount(),
@@ -109,10 +126,41 @@ public final class NbforgeClient implements ClientModInitializer {
 			NbforgeAudio.restartCount(), NbforgeAudio.stolenCount(),
 			NbforgeAudio.foldedCount(),
 			NbforgeAudio.releasedByScore(), NbforgeAudio.dampedCount(),
+			NbforgeClientPlayer.isPlaying() ? String.format("进行中 %.1fs；", NbforgeClientPlayer.elapsed()) : "空闲；",
+			NbforgeClientPlayer.noteCount(), NbforgeClientPlayer.scheduledCount(),
+			NbforgeClientPlayer.playedCount(), NbforgeClientPlayer.skippedCount(),
+			NbforgeClientPlayer.meanJitterMs(), NbforgeClientPlayer.maxJitterMs(),
+			NbforgeAudio.lastTaskLatencyMs(),
 			NbforgeAudio.alInfo(),
 			packHint(),
 			NbforgeAudio.lastError() == null ? "" : "；最后错误：" + NbforgeAudio.lastError())));
 		return 1;
+	}
+
+	/**
+	 * M3-29：客户端高精度播放。自己读游戏目录的 `nbforge/score.csv`（与服务端部署的是同一份），
+	 * 用 nanoTime 逐颗发声——分辨率不受服务器刻率（20 tps=50ms / 100 tps=10ms）限制。
+	 */
+	private static int play(FabricClientCommandSource src, double fromSec) {
+		java.nio.file.Path file = net.fabricmc.loader.api.FabricLoader.getInstance().getGameDir()
+			.resolve("nbforge").resolve("score.csv");
+		try {
+			int n = NbforgeClientPlayer.load(file);
+			if (!NbforgeAudio.ready()) {
+				src.sendError(Text.literal("[nbforge] 音频引擎还没就绪（/nbfc status 看详情）"));
+				return 0;
+			}
+			if (!NbforgeClientPlayer.start(fromSec)) {
+				src.sendError(Text.literal("[nbforge] 没有可用谱面：" + file));
+				return 0;
+			}
+			src.sendFeedback(Text.literal(String.format(
+				"[nbforge] 客户端高精度播放：%d 颗音，从 %.1fs 开始（不受服务器刻率限制）", n, fromSec)));
+			return 1;
+		} catch (java.io.IOException e) {
+			src.sendError(Text.literal("[nbforge] 谱面读取失败：" + e.getMessage()));
+			return 0;
+		}
 	}
 
 	/**

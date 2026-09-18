@@ -47,7 +47,8 @@ const readMode = (mode, tps) => {
   const dispatches = [];
   for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.mcfunction'))) {
     for (const line of fs.readFileSync(path.join(dir, f), 'utf8').split(/\r?\n/)) {
-      const m = line.match(/^execute if score #t styx\.t matches (\d+) run nbforge playat (-?\d+) (-?\d+) (-?\d+)$/);
+      // 发声行可能带一层 "只做视觉" 守卫（M3-29，`#snd 0` 时静音），这里容忍两种写法
+      const m = line.match(/^execute if score #t styx\.t matches (\d+) run (?:execute unless score #snd styx\.flag matches 0 run )?nbforge playat (-?\d+) (-?\d+) (-?\d+)$/);
       if (m) dispatches.push({ tick: Number(m[1]), cell: `${m[2]},${m[3]},${m[4]}`, file: f });
     }
   }
