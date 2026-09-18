@@ -30,7 +30,7 @@ mod 侧不需要改代码——乐器库本来就是数据驱动的（`config/nb
 ```
 /nbfc instruments              ← 分组统计（70 件）
 /nbfc instruments violin       ← 按关键字看 id
-/nbfc instrument set melody <id>   ← 把某个声部换过去（声部名：harp / bass / basedrum / hat / all）
+/nbfc instrument set <声部> <id>   ← 声部名用谱面里的：harp（旋律/内声部）/ bass（左手）/ basedrum / hat；写 all = 全部
 /nbfc note <id> 60 100         ← 单独试听一件乐器
 ```
 
