@@ -324,6 +324,7 @@ const stat = (buf) => {
 };
 const L = new Float64Array(N);
 const R = new Float64Array(N);
+const layerGain = new Map();   // layer -> {gl, gr}：给分层 stems 用（与总线同一套增益/声像）
 for (const [layer, buf] of layerBuf) {
   const cfg = LAYER_GAIN[layer] ?? { rms: -20, pan: 0 };
   const s = stat(buf);
@@ -334,6 +335,7 @@ for (const [layer, buf] of layerBuf) {
       : (s.peak > 0 ? 10 ** (cfg.peak / 20) / s.peak : 0);
   const gl = target * Math.cos((cfg.pan + 1) * Math.PI / 4);
   const gr = target * Math.sin((cfg.pan + 1) * Math.PI / 4);
+  layerGain.set(layer, { gl, gr });
   for (let i = 0; i < N; i++) { L[i] += buf[i] * gl; R[i] += buf[i] * gr; }
   console.log(`  ${layer} 定标 ${cfg.gain !== undefined ? `固定 ×${cfg.gain}`
     : cfg.rms !== undefined ? `RMS ${cfg.rms}dB` : `峰值 ${cfg.peak}dB`}`
@@ -379,6 +381,73 @@ fs.writeFileSync(mixF32, encodeWav32fStereo(L, R, SR));
 const master = path.join(OUT, `${NAME}_48k24bit.wav`);
 execFileSync('ffmpeg', ['-y', '-i', mixF32, '-c:a', 'pcm_s24le', '-ar', String(SR), master], { stdio: 'ignore' });
 console.log(`整曲母版（48k/24bit 立体声）→ ${master.replace(/\\/g, '/')}`);
+
+/* ------------------------------------------------------------------ 成片工具包（M3-28）
+ * `--master-kit`：立体声母版 + **分层 stems**（每层一路立体声，与总线同一套增益/声像）+ manifest。
+ * 为什么要 stems：后期真正需要的是"能重新配比"的分轨，而不是一条糊死的立体声。
+ * **多声道（5.1）按用户 2026-09-18 指示暂缓**——先只做双声道无损，等他了解后再定。
+ */
+const KIT = argv.includes('--master-kit');
+const manifest = {
+  name: NAME,
+  sampleRate: SR,
+  bitDepth: 24,
+  durationSec: +(N / SR).toFixed(3),
+  sources: {
+    score: path.basename(SCORE),
+    preset: PRESET,
+    melody: MELODIES[MELODY].label,
+    dynamics: DYNAMICS,
+    busHpfHz: HPF,
+    // 采样库与游戏内一致（高通版）
+  },
+  files: [],
+};
+const probeWav = (file) => {
+  const out = execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=channels,channel_layout',
+    '-show_entries', 'format=duration', '-of', 'json', file], { encoding: 'utf8' });
+  const j = JSON.parse(out);
+  return { channels: j.streams?.[0]?.channels, layout: j.streams?.[0]?.channel_layout, duration: +j.format?.duration };
+};
+const statOf = (file) => {
+  const buf = execFileSync('ffmpeg', ['-v', 'error', '-i', file, '-f', 'f32le', '-ac', '1', '-ar', String(SR), '-'],
+    { maxBuffer: 1 << 30 });
+  const f = new Float32Array(buf.buffer, buf.byteOffset, Math.floor(buf.length / 4));
+  let peak = 0, acc = 0;
+  for (let i = 0; i < f.length; i++) { const a = Math.abs(f[i]); if (a > peak) peak = a; acc += f[i] * f[i]; }
+  // 注意：这里量的是**单声道下混**（-ac 1），所以立体声母版的 monoPeakDb 可能略高于 0——
+  // 真正的立体声峰值由总线软限幅保证 ≤0dBFS（渲染日志里的"峰值"）。字段名如实写清楚。
+  return {
+    monoPeak: +peak.toFixed(4),
+    monoPeakDb: +(20 * Math.log10(peak + 1e-12)).toFixed(2),
+    monoRmsDb: +(20 * Math.log10(Math.sqrt(acc / Math.max(1, f.length)) + 1e-12)).toFixed(2),
+  };
+};
+manifest.files.push({ file: path.basename(master), role: 'master', ...probeWav(master), ...statOf(master) });
+
+if (KIT) {
+  const STEM_GAIN = { melody: 1.0, inner: 1.0, bass: 1.0 };   // 每层的 stems 用同一套 gl/gr
+  for (const [layer, buf] of layerBuf) {
+    if (!(layer in STEM_GAIN)) continue;
+    const { gl, gr } = layerGain.get(layer) ?? { gl: 1, gr: 1 };
+    const SL = new Float32Array(N);
+    const SRr = new Float32Array(N);
+    const normStem = norm;   // 与总线同一个归一（不含软限幅）
+    for (let i = 0; i < N; i++) { SL[i] = buf[i] * gl * normStem; SRr[i] = buf[i] * gr * normStem; }
+    const f32 = path.join(OUT, `${NAME}_stem_${layer}_48k_f32.wav`);
+    fs.writeFileSync(f32, encodeWav32fStereo(SL, SRr, SR));
+    const stem = path.join(OUT, `${NAME}_stem_${layer}_48k24bit.wav`);
+    execFileSync('ffmpeg', ['-y', '-i', f32, '-c:a', 'pcm_s24le', '-ar', String(SR), stem], { stdio: 'ignore' });
+    manifest.files.push({ file: path.basename(stem), role: `stem:${layer}`, ...probeWav(stem), ...statOf(stem) });
+    console.log(`  分层 stem（${layer}）→ ${stem.replace(/\\/g, '/')}`);
+  }
+  // 5.1：按用户 2026-09-18 指示**暂缓**（"多声道可以暂时不做，先只做双声道无损"）。
+  // 需要时再启用：FL/FR = 立体声母版，FC = 旋律层 ×0.7，LFE = 低音层 120Hz 低通，BL/BR 留空。
+  manifest.surround51 = 'deferred（用户 2026-09-18：先只做双声道无损）';
+  const manPath = path.join(OUT, `${NAME}_manifest.json`);
+  fs.writeFileSync(manPath, JSON.stringify(manifest, null, 1), 'utf8');
+  console.log(`  交付清单 → ${manPath.replace(/\\/g, '/')}`);
+}
 for (const start of SEGS) {
   const a = Math.round(start * SR);
   const b = Math.min(N, a + Math.round(SEC * SR));
