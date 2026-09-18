@@ -5,7 +5,7 @@
   "type": "module",
   "description": "从一首歌到会演奏的音符盒机器：分析 → 编曲 → 布局 → 生成数据包 → 无头验收",
   "license": "MIT",
-  "author": "Jiajun Liang (Hi-Jiajun)",
+  "author": "Jiajun Liang",
   "scripts": {
     "analyze:tempo": "node src/analyze/audio-tempo.mjs",
     "analyze:midi": "node src/analyze/parse-midi-and-audio.mjs",

@@ -5,7 +5,7 @@
 	"name": "NBMachina (backend A)",
 	"description": "nbmachina 后端 A 骨架：自定义音色事件 + 独立力度/延音 + 服务端命令 /nbm",
 	"authors": [
-		"Jiajun Liang (Hi-Jiajun)"
+		"Jiajun Liang"
 	],
 	"contact": {
 		"homepage": "https://github.com/Hi-Jiajun/nbmachina",
