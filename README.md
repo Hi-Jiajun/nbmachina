@@ -4,7 +4,7 @@
 > 改名原因：`forge` 在 Minecraft 语境里容易被误认成 **Minecraft Forge** 加载器，而本项目是 **Fabric**：
 > 命令由 `/nbforge` → **`/nbm`**、客户端由 `/nbfc` → **`/nbmc`**，配置与数据目录由 `nbforge/` → `nbmachina/`。
 
-作者：**Jiajun Liang（梁嘉骏）** · GitHub [@Hi-Jiajun](https://github.com/Hi-Jiajun)
+作者：**Jiajun Liang** · GitHub [@Hi-Jiajun](https://github.com/Hi-Jiajun)
 
 把一首歌（音轨 + 转谱数据）自动变成一台 **真正由实体音符盒发声** 的 Minecraft 音乐机：
 生成数据包（结构 + 播放器 + 灯光），并自带无头服务器验收工具。
