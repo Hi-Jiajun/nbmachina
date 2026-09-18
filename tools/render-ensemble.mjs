@@ -58,6 +58,8 @@ const SECTIONS_JSON = opt('sections', path.join(P.build, 'dynamics-sections.json
 //   这两个量由 tools/calibrate-from-reference.mjs 从参考演奏里量出来，写进谱面的 `durMs` 列。
 //   `--no-lengths` 可退回旧行为（让采样自然衰减到底），用于 A/B。
 const LENGTHS = !argv.includes('--no-lengths');
+/** M3-31：是否启用 sta（断奏）采样（默认关，见下方说明） */
+const STA = argv.includes('--sta');
 // M3-22 第二轮（用户反馈"低音之间污染太严重、像一直踩着踏板"）：
 //   `--hpf <Hz>`       总线高通：参考演奏 60Hz 以下几乎没能量（0.01%），我们却有 0.14%+ 的隆隆声
 //   `--bass-hpf <Hz>`  只给左手层高通：把 80–150Hz 的堆积削掉（参考那一带只占 8%，我们 27%）
@@ -318,8 +320,10 @@ for (const layer of Object.keys(sources)) {
     const key = `${layer}:${midi}`;
     const seq = seqOf.get(key) ?? 0;
     seqOf.set(key, seq + 1);
-    // M3-31：短音优先 sta（断奏）采样——与 mod 端同一条规则；trig.durMs 来自谱面
-    const region = pickRegion(src.regions, midi, vel127, seq, trig.durMs);
+    // M3-31：sta（断奏）采样**默认关闭**（`--sta` 才开）。原因见 docs/M3-31：
+    // sta 采样衰减极快（~150ms 掉 30dB），而我们的 `durMs` 只有 142–245ms 的"短音"在参考演奏里
+    // 是**带踏板延续**的（原曲那几处包络 400ms 内只掉 ~10dB）→ 换 sta 后这些音明显变轻，听感"缺音"。
+    const region = pickRegion(src.regions, midi, vel127, seq, STA ? trig.durMs : 0);
     if (!region) { missed++; continue; }
     const shift = midi - region.root + region.tuneCents / 100;
     if (Math.abs(shift) > 1e-6) { shifted++; maxShift = Math.max(maxShift, Math.abs(shift)); }

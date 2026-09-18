@@ -189,7 +189,7 @@ public final class NbforgeInstruments {
 				if (r.staccato) { hasSta = true; break; }
 			}
 			if (hasSta) {
-				int mode = (durMs > 0 && durMs <= STACCATO_MS) ? MODE_STA : MODE_LEG;
+				int mode = (staccatoMs > 0 && durMs > 0 && durMs <= staccatoMs) ? MODE_STA : MODE_LEG;
 				Region r = pickFrom(regions, midi, velocity, mode);
 				if (r != null) return r;
 			}
@@ -214,8 +214,23 @@ public final class NbforgeInstruments {
 		}
 	}
 
-	/** 短于这个时长（ms）的音优先用 sta 断奏采样 */
-	public static final int STACCATO_MS = 300;
+	/**
+	 * sta（断奏）采样的启用阈值（ms）：**默认 0 = 关闭**。
+	 *
+	 * <p>2026-09-18 用户试听判定"改了之后似乎缺音了"，量化复核确认：OLPC 的 sta 采样衰减极快
+	 * （前 200ms 掉 20~30dB），而谱面里 142–245ms 的"短音"在参考演奏里是**带踏板延续**的
+	 * （原曲那几处包络 400ms 内只掉约 10dB）→ 换 sta 后这些音明显变轻，听感就是缺音。
+	 * 默认走 leg；想实验可用 `/nbfc sta &lt;ms&gt;`（例如 120）只让"极短"的音用 sta。
+	 */
+	private static volatile int staccatoMs = 0;
+
+	public static int staccatoMs() {
+		return staccatoMs;
+	}
+
+	public static void setStaccatoMs(int ms) {
+		staccatoMs = Math.max(0, Math.min(1000, ms));
+	}
 	/** 选池模式：任意 / 只用 sta / 只用 leg */
 	private static final int MODE_ANY = 0, MODE_STA = 1, MODE_LEG = 2;
 

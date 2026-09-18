@@ -102,6 +102,22 @@ public final class NbforgeClient implements ClientModInitializer {
 						ctx.getSource().sendFeedback(Text.literal("[nbforge] 客户端播放已停止"));
 						return 1;
 					}))
+				// M3-31：sta（断奏）采样阈值（默认 0 = 关闭；用户 2026-09-18 判定开启后"缺音"）
+				.then(ClientCommandManager.literal("sta")
+					.executes(ctx -> {
+						ctx.getSource().sendFeedback(Text.literal("[nbforge] sta 阈值 = "
+							+ NbforgeInstruments.staccatoMs() + "ms（0 = 关闭，走 leg 连奏采样）"));
+						return 1;
+					})
+					.then(ClientCommandManager.argument("ms", IntegerArgumentType.integer(0, 1000))
+						.executes(ctx -> {
+							int ms = IntegerArgumentType.getInteger(ctx, "ms");
+							NbforgeInstruments.setStaccatoMs(ms);
+							ctx.getSource().sendFeedback(Text.literal(ms == 0
+								? "[nbforge] sta 已关闭：全部用 leg 连奏采样（默认）"
+								: "[nbforge] sta 已开启：dur_ms ≤ " + ms + "ms 的音用断奏采样（实测容易听成缺音，谨慎）"));
+							return 1;
+						})))
 				// M3-30：运行时音色切换（不用改 machine_map.csv / score.csv）
 				.then(ClientCommandManager.literal("instrument")
 					.executes(ctx -> instrumentList(ctx.getSource()))
