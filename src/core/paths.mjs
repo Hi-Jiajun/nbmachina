@@ -4,8 +4,8 @@
 // → 换机器、换目录、换一首歌都要手改代码（见 docs/DISCUSSION-B-architecture.md §1.2）。
 //
 // 解析顺序（高优先级在前）：
-//   build 目录：`--build <dir>` → `NBFORGE_BUILD` → 默认 `<仓库上层>/build`
-//   工程名：    `--project <name>` → `NBFORGE_PROJECT` → `<build>/project.json` 的 `nbforge.project` → `styx`
+//   build 目录：`--build <dir>` → `nbmachina_BUILD` → 默认 `<仓库上层>/build`
+//   工程名：    `--project <name>` → `nbmachina_PROJECT` → `<build>/project.json` 的 `nbmachina.project` → `styx`
 //
 // 两条硬约束（M2-2 验收）：
 //   1) **默认取值与历史硬编码逐字符一致**：不传任何参数时解析出来的路径必须等于改造前写死的那串字符串，
@@ -36,9 +36,9 @@ export const PROJECT_NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 /* --------------------------------------------------- 机器外部路径（M2-3 收口） */
 // 这三个路径不属于"工程身份"，而是**这台机器/这个启动器**的位置，但过去同样被写死在脚本里，
 // 换启动器、换存档名、换 java 安装就得改代码。现在统一在这里给默认值 + 覆盖入口：
-//   存档目录   `--save <dir>`   / `NBFORGE_SAVE`   （无头验收、方块对账要读世界数据）
-//   测试服目录 `--server <dir>` / `NBFORGE_SERVER` （无头 e2e、undo 扫描）
-//   java 可执行 `--java <path>` / `NBFORGE_JAVA`   （启动器自带的运行时；系统没有 java）
+//   存档目录   `--save <dir>`   / `nbmachina_SAVE`   （无头验收、方块对账要读世界数据）
+//   测试服目录 `--server <dir>` / `nbmachina_SERVER` （无头 e2e、undo 扫描）
+//   java 可执行 `--java <path>` / `nbmachina_JAVA`   （启动器自带的运行时；系统没有 java）
 export const LEGACY_SAVE = 'C:/Program Files/PCL2/.minecraft/versions/1.21.10-Fabric 0.19.5/saves/Styx Helix';
 export const LEGACY_SERVER = 'C:/Users/hiliang/Documents/minecraft/testserver';
 export const LEGACY_JAVA = 'C:/Users/hiliang/AppData/Roaming/.minecraft/runtime/java-runtime-delta/bin/java.exe';
@@ -59,9 +59,9 @@ export function resolveExternal({ argv = process.argv.slice(2), env = process.en
     return kind === 'dir' ? abs.replace(/\/+$/, '') : abs;
   };
   return {
-    save: one('save', 'NBFORGE_SAVE', LEGACY_SAVE, 'dir'),
-    server: one('server', 'NBFORGE_SERVER', LEGACY_SERVER, 'dir'),
-    java: one('java', 'NBFORGE_JAVA', LEGACY_JAVA, 'file'),
+    save: one('save', 'nbmachina_SAVE', LEGACY_SAVE, 'dir'),
+    server: one('server', 'nbmachina_SERVER', LEGACY_SERVER, 'dir'),
+    java: one('java', 'nbmachina_JAVA', LEGACY_JAVA, 'file'),
   };
 }
 
@@ -94,12 +94,12 @@ export function defaultBuildDir() {
 
 const nonEmpty = (v) => typeof v === 'string' && v.trim() !== '' ? v.trim() : undefined;
 
-/** `<build>/project.json` 里的 `nbforge.project`（工程清单，可选）；读不到就当没有，绝不因为它的坏掉而炸掉调用方 */
+/** `<build>/project.json` 里的 `nbmachina.project`（工程清单，可选）；读不到就当没有，绝不因为它的坏掉而炸掉调用方 */
 function projectFromManifest(buildDir) {
   try {
     const p = `${buildDir}/project.json`;
     if (!fs.existsSync(p)) return undefined;
-    return nonEmpty(JSON.parse(fs.readFileSync(p, 'utf8'))?.nbforge?.project);
+    return nonEmpty(JSON.parse(fs.readFileSync(p, 'utf8'))?.nbmachina?.project);
   } catch {
     return undefined;
   }
@@ -129,11 +129,11 @@ export function resolvePaths({ argv = process.argv.slice(2), env = process.env, 
   if (flagBuild === true) throw new Error('--build 需要一个目录参数：--build <dir>');
   if (flagProject === true) throw new Error('--project 需要一个工程名：--project <name>');
 
-  const buildDir = normalizeDir(nonEmpty(flagBuild) ?? nonEmpty(env.NBFORGE_BUILD) ?? defaultBuildDir(), cwd);
+  const buildDir = normalizeDir(nonEmpty(flagBuild) ?? nonEmpty(env.nbmachina_BUILD) ?? defaultBuildDir(), cwd);
 
   // `--project ''` / `--project=` 视为"显式给了空名字"→ 报错，而不是静默退回默认工程
   const requested = typeof flagProject === 'string' ? flagProject.trim() : undefined;
-  const name = requested ?? nonEmpty(env.NBFORGE_PROJECT) ?? projectFromManifest(buildDir) ?? LEGACY_PROJECT;
+  const name = requested ?? nonEmpty(env.nbmachina_PROJECT) ?? projectFromManifest(buildDir) ?? LEGACY_PROJECT;
   if (!PROJECT_NAME_RE.test(name)) {
     throw new Error(`工程名不合法：${JSON.stringify(name)}（只允许字母/数字/._-，且以字母或数字开头）`);
   }

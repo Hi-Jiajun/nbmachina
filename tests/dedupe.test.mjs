@@ -13,7 +13,7 @@ import {
   dedupeCsvText,
 } from '../src/arrange/dedupe.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+const BUILD = process.env.nbmachina_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
 const V3 = path.join(BUILD, 'styx_helix_notes_v3.csv');
 const n = (o) => ({ instrument: 'harp', len: 1, ...o });
 

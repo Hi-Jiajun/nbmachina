@@ -29,7 +29,7 @@ import {
 import { encodeWav, midiToFreq } from '../src/analyze/chroma.mjs';
 import { bandEnvelope, bandFluxes } from '../src/analyze/onset-detect.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+const BUILD = process.env.nbmachina_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
 const WAV = path.join(BUILD, 'styx_helix_full.wav');
 const MACHINE = path.join(BUILD, 'styx_helix_machine.csv');
 const SR = 44100;

@@ -2,7 +2,7 @@
 // 钢琴音色试听渲染器（M3-9）：把**采样库里的真钢琴**按谱面渲成对照 wav，供人耳挑选音色。
 //
 // 与游戏内路径的区别（有意保留）：
-//   · 游戏内：数据包 `/playsound nbforge:<voice>_<note>`（每半音一采样 + 音量当力度）
+//   · 游戏内：数据包 `/playsound nbmachina:<voice>_<note>`（每半音一采样 + 音量当力度）
 //   · 这里：真钢琴库是"每小三度一采样 × 16 层力度"= 取**最近采样 + 小幅变调** + **按力度选层**
 //     （这正是采样库该有的用法；单层会有"机关枪感"）
 //
@@ -43,7 +43,7 @@ const midiOfName = (s) => {
 const SYNTH = VOICE === 'strings' || VOICE === 'bell' || VOICE === 'bass' || VOICE === 'piano';
 const index = new Map();                       // midi → [ {layer, file} ]
 if (SYNTH) {
-  const dir = path.join(B, 'audio_nbforge', 'wav', VOICE);
+  const dir = path.join(B, 'audio_nbmachina', 'wav', VOICE);
   for (const f of fs.readdirSync(dir)) {
     const m = /^([a-g]s?-?\d)\.wav$/i.exec(f);
     if (!m) continue;
@@ -126,7 +126,7 @@ for (const start of SEGS) {
       s = new Float64Array(raw.length);
       for (let i = 0; i < raw.length; i++) s[i] = raw[i] * melGain;
     } else {                                           // 其余层：自家合成音色（同一套混合代码）
-      const dir = path.join(B, 'audio_nbforge', 'wav', e.timbre);
+      const dir = path.join(B, 'audio_nbmachina', 'wav', e.timbre);
       const f = path.join(dir, `${e.note}.wav`);
       if (!fs.existsSync(f)) { continue; }
       s = pcmOf(f);

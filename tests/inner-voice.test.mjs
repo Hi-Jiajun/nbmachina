@@ -1,6 +1,6 @@
 // M3-1 · 内声部/和声层（`src/arrange/inner-voice.mjs`）单测
 //
-// 验收口径（任务书 `nbforge_inner_voice.md` §2.3）：合成 fixture 覆盖
+// 验收口径（任务书 `nbmachina_inner_voice.md` §2.3）：合成 fixture 覆盖
 //   「同刻多音 → 拆成旋律/内声部」「临界音区边界」「单音不产生内声部」「空输入」
 //   「幂等（跑两次同结果）」「CSV 契约：既有列逐字符保留，只追加新列」「instrument 取值合法性」
 // 之外再加 **真实数据断言**（读 `build/` 的真实 CSV）与 **emit/lint 链路断言**——
@@ -313,7 +313,7 @@ test('真实数据：keep 不改动任何音高/行号，且"续线"旋律线比
 test('真实数据 + emit 链路：开 --inner 的谱面能被 note-blocks 摆成方块、并被 lint-pack 静态自检通过', () => {
   const input = fs.readFileSync(`${BUILD}/pipeline_4_sustain.csv`, 'utf8');
   const { csv, report } = innerVoiceCsvText(input, { register: 'keep' });
-  const tmp = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'nbforge-m31-'));
+  const tmp = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'nbmachina-m31-'));
   // note-blocks 需要地形剖面；其余输入（音频）只有 percussion 才要，这里用不到
   fs.copyFileSync(`${BUILD}/single_row_profile.json`, path.join(tmp, 'single_row_profile.json'));
   fs.writeFileSync(path.join(tmp, 'chart.csv'), csv, 'utf8');

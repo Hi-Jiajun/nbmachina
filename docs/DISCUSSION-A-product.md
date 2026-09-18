@@ -1,7 +1,7 @@
 # 讨论 A · 产品与用户视角（角色：产品负责人）
 
 > 先说结论（只读这段也能决策）：
-> 1. **定位**：nbforge 是「把一首歌变成一台自己会演奏的实体音符盒机器」的一键工具链；
+> 1. **定位**：nbmachina 是「把一首歌变成一台自己会演奏的实体音符盒机器」的一键工具链；
 >    第一版只服务一个用户在**单人 Java 存档**里把整首歌**完整放完**。
 > 2. 当前最大的产品缺口**不是音色/美化**，而是「一条命令跑完」这句承诺还没兑现：
 >    无头服务器上 `styx:play/start`、`play/stop`、`play/reset` **根本没加载成功**
@@ -91,7 +91,7 @@
 | 用户动作 | 工具动作 |
 |---|---|
 | 现在：按 README 依次跑 `analyze → arrange → layout → emit → test` 五步 | 分析音频/转谱 → 音高折叠 → 生成机器剖面 → 生成数据包（结构 + 播放器 + 灯光 + 一键链）→ 无头验收 |
-| 目标：跑一条 `/nbforge build 我的歌.csv 我的歌.wav` | 同上，并在出错时说清"哪一步、哪个文件、怎么修" |
+| 目标：跑一条 `/nbm build 我的歌.csv 我的歌.wav` | 同上，并在出错时说清"哪一步、哪个文件、怎么修" |
 
 **这一步最重要**：它是**离线生成**，可以在没有游戏的情况下失败、重试、回退。
 所有能在这步发现的问题（音域超限、段剖面被山挡住、转谱缺音）都不应该拖到游戏里才暴露。
@@ -231,7 +231,7 @@
 | 机器 49 段 × 48 格 = 2352 格；前 39 段 y=84，后 10 段爬升到 y=110（末段有局部开槽） | `build\single_row_profile.json`（49 段，y=84 的段恰好 39 个） |
 | 音符 3099 个（bass 1360 / harp 1739）；最后一刻 27840（100 tps 下 4 分 38 秒） | `build\styx_helix_notes_v3.csv` |
 | 每 100 刻一个桶，共 279 个分桶函数，`play/tick` 每刻把它们全部调用一遍 | `build\styx_build\data\styx\function\play\b00..b278`、`tick.mcfunction` |
-| 一键链与播放器生成逻辑 | `nbforge\src\emit\redo-chain.mjs`、`src\emit\datapack-playback.mjs` |
+| 一键链与播放器生成逻辑 | `nbmachina\src\emit\redo-chain.mjs`、`src\emit\datapack-playback.mjs` |
 | 回退链（挡墙 → 底座 → 地形） | `build\styx_build\data\styx\function\undo.mcfunction` |
 | 函数加载失败 / 计数 216 vs 68 / 推进冻结 485 | `testserver\v3test.log`、`testserver\redotest.log` |
 | 安装脚本写死 PCL2 路径 | `build\install_styx_pack.ps1` |

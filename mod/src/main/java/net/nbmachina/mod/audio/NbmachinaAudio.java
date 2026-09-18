@@ -1,4 +1,4 @@
-package net.nbforge.mod.audio;
+package net.nbmachina.mod.audio;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -23,7 +23,7 @@ import org.lwjgl.openal.ALCCapabilities;
 import org.lwjgl.openal.ALCapabilities;
 import org.lwjgl.openal.EXTFloat32;
 
-import net.nbforge.mod.NbforgeMod;
+import net.nbmachina.mod.NbmachinaMod;
 
 /**
  * M3-16（P2）· 无损音频引擎：**绕开原版 SoundManager**，自己开 OpenAL 设备播 WAV。
@@ -39,7 +39,7 @@ import net.nbforge.mod.NbforgeMod;
  *
  * <p>接口是线程安全的：{@link #play} / {@link #setListener} 从游戏线程调用，入队即返回。
  */
-public final class NbforgeAudio {
+public final class NbmachinaAudio {
 	/**
 	 * 同时发声上限。钢琴密集段实测峰值 **124 路**（曲中段每 0.12s 一颗、采样截断 10s），
 	 * 所以 128 会贴着天花板——超了就要偷最早那路（听感=提前掐掉一颗音）。抬到 192 留余量；
@@ -63,7 +63,7 @@ public final class NbforgeAudio {
 	}
 	private static final java.util.concurrent.LinkedBlockingQueue<Task> TASKS =
 		new java.util.concurrent.LinkedBlockingQueue<>();
-	/** 最近一次"入队 → 执行"的延迟（ms），`/nbfc status` 里显示，用来验证高精度调度真的生效 */
+	/** 最近一次"入队 → 执行"的延迟（ms），`/nbmc status` 里显示，用来验证高精度调度真的生效 */
 	private static volatile double lastTaskLatencyMs = -1.0;
 	private static final Map<String, Integer> BUFFERS = new LinkedHashMap<>(64, 0.75f, true);
 	private static final Map<Integer, Long> BUFFER_BYTES = new HashMap<>();
@@ -146,7 +146,7 @@ public final class NbforgeAudio {
 	private static volatile int withDuration = 0;
 	private static volatile int peakActive = 0;
 
-	private NbforgeAudio() {
+	private NbmachinaAudio() {
 	}
 
 	public static boolean ready() {
@@ -157,7 +157,7 @@ public final class NbforgeAudio {
 		return lastError;
 	}
 
-	/** OpenAL 设备字符串 + float32 能力（`/nbfc status` 里回显，便于远程诊断） */
+	/** OpenAL 设备字符串 + float32 能力（`/nbmc status` 里回显，便于远程诊断） */
 	public static String alInfo() {
 		return alInfo;
 	}
@@ -170,7 +170,7 @@ public final class NbforgeAudio {
 		return droppedCount;
 	}
 
-	/** 客户端一共收到多少条 `nbforge:play`（与"已播/丢弃"配合判断链路断在哪一段） */
+	/** 客户端一共收到多少条 `nbmachina:play`（与"已播/丢弃"配合判断链路断在哪一段） */
 	public static int receivedCount() {
 		return receivedCount;
 	}
@@ -230,7 +230,7 @@ public final class NbforgeAudio {
 
 	public static void start() {
 		if (thread != null) return;
-		thread = new Thread(NbforgeAudio::run, "nbforge-audio");
+		thread = new Thread(NbmachinaAudio::run, "nbmachina-audio");
 		thread.setDaemon(true);
 		thread.start();
 	}
@@ -272,7 +272,7 @@ public final class NbforgeAudio {
 				} catch (Throwable t) {
 					lastError = t.getClass().getSimpleName() + ": " + t.getMessage();
 					broken = true;
-					NbforgeMod.LOGGER.warn("[nbforge] 音频任务异常（将重建上下文）：{}", lastError);
+					NbmachinaMod.LOGGER.warn("[nbmachina] 音频任务异常（将重建上下文）：{}", lastError);
 				}
 				task = TASKS.poll();
 			}
@@ -315,12 +315,12 @@ public final class NbforgeAudio {
 			CONTEXT = context;
 			broken = false;
 			ready = true;
-			NbforgeMod.LOGGER.info("[nbforge] 音频引擎就绪：OpenAL 自有设备；float32 支持={}；上限 {} 声部 / 采样缓存 {}MB / 采样截断 {}s",
+			NbmachinaMod.LOGGER.info("[nbmachina] 音频引擎就绪：OpenAL 自有设备；float32 支持={}；上限 {} 声部 / 采样缓存 {}MB / 采样截断 {}s",
 				FLOAT_OK, MAX_SOURCES, MAX_CACHE_BYTES / 1048576, (int) MAX_SECONDS);
 			return true;
 		} catch (Throwable t) {
 			lastError = t.getClass().getSimpleName() + ": " + t.getMessage();
-			NbforgeMod.LOGGER.warn("[nbforge] 音频引擎初始化失败", t);
+			NbmachinaMod.LOGGER.warn("[nbmachina] 音频引擎初始化失败", t);
 			return false;
 		}
 	}
@@ -346,7 +346,7 @@ public final class NbforgeAudio {
 		DEVICE = 0L;
 		if (why != null) {
 			restartCount++;
-			NbforgeMod.LOGGER.warn("[nbforge] 重建音频上下文（第 {} 次）：{} —— 旧缓存已清空，下一颗音会重新解码",
+			NbmachinaMod.LOGGER.warn("[nbmachina] 重建音频上下文（第 {} 次）：{} —— 旧缓存已清空，下一颗音会重新解码",
 				restartCount, why);
 		}
 	}
@@ -426,7 +426,7 @@ public final class NbforgeAudio {
 							double x, double y, double z) {
 		receivedCount++;
 		if (receivedCount % 25 == 0) {
-			NbforgeMod.LOGGER.info("[nbforge] 已收到 {} 条音符（引擎就绪={} 已播={} 丢弃={} 重建={}）",
+			NbmachinaMod.LOGGER.info("[nbmachina] 已收到 {} 条音符（引擎就绪={} 已播={} 丢弃={} 重建={}）",
 				receivedCount, ready, playedCount, droppedCount, restartCount);
 		}
 		if (!ready) {
@@ -434,8 +434,8 @@ public final class NbforgeAudio {
 			return;
 		}
 		// M3-30：运行时音色切换——声部覆盖表优先于谱面里写的乐器（换琴不用改数据）
-		final String instId = NbforgeInstruments.resolve(instrument, voice);
-		NbforgeInstruments.Instrument inst = NbforgeInstruments.get(instId);
+		final String instId = NbmachinaInstruments.resolve(instrument, voice);
+		NbmachinaInstruments.Instrument inst = NbmachinaInstruments.get(instId);
 		if (inst == null) {
 			droppedCount++;
 			lastError = "没有这个乐器：" + instId;
@@ -446,13 +446,13 @@ public final class NbforgeAudio {
 		int playMidi = inst.isPitched() ? inst.foldKey(midi) : midi;
 		if (playMidi != midi) foldedCount++;
 		// M3-31：短音（durMs ≤ 300ms）优先用 sta 断奏采样；没有 sta 区域时自动退回
-		NbforgeInstruments.Region region = inst.pick(playMidi, velocity, durMs);
+		NbmachinaInstruments.Region region = inst.pick(playMidi, velocity, durMs);
 		if (region == null || region.file == null) {
 			droppedCount++;
 			lastError = "乐器 " + instrument + " 里没有可用区域";
 			return;
 		}
-		float gain = NbforgeInstruments.velocityGain(velocity) * (float) Math.pow(10.0, region.gainDb / 20.0);
+		float gain = NbmachinaInstruments.velocityGain(velocity) * (float) Math.pow(10.0, region.gainDb / 20.0);
 		float pitch = (float) region.pitchRatio(playMidi);
 		TASKS.offer(new Task(() -> playNow(region.file, gain, pitch, x, y, z, instId, voice, playMidi, durMs)));
 	}
@@ -525,7 +525,7 @@ public final class NbforgeAudio {
 		Integer cached = BUFFERS.get(file);
 		if (cached != null) return cached;
 		try {
-			NbforgeWav.Pcm pcm = NbforgeWav.read(Path.of(file));
+			NbmachinaWav.Pcm pcm = NbmachinaWav.read(Path.of(file));
 			float[] samples = truncate(pcm.samples(), pcm.channels(), pcm.sampleRate());
 			int format;
 			ByteBuffer data;
@@ -563,7 +563,7 @@ public final class NbforgeAudio {
 			return buffer;
 		} catch (IOException | RuntimeException e) {
 			lastError = "解码失败 " + file + "：" + e.getMessage();
-			NbforgeMod.LOGGER.warn("[nbforge] {}", lastError);
+			NbmachinaMod.LOGGER.warn("[nbmachina] {}", lastError);
 			return 0;
 		}
 	}

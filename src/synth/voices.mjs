@@ -17,7 +17,7 @@ import {
   SAMPLE_RATE, applyEq, fmPad, karplusStrong, modalBell, pianoVoice,
 } from './synth.mjs';
 
-export const SOUND_NAMESPACE = 'nbforge';
+export const SOUND_NAMESPACE = 'nbmachina';
 export const TIMBRES = ['strings', 'pad', 'bell', 'bass', 'piano'];
 export const REGISTERS = {
   // M3-5：音域按**谱面真实音高**重定（后端 A 没有"2 个八度"的方块限制）。
@@ -161,7 +161,7 @@ export function noteFileName(midi) {
   return name.replace('#', 's');
 }
 
-/** 资源包事件 id：nbforge:strings_fs4 */
+/** 资源包事件 id：nbmachina:strings_fs4 */
 export const eventIdOf = (timbre, midi) => `${SOUND_NAMESPACE}:${timbre}_${noteFileName(midi)}`;
 
 /** sounds.json 里的采样名（相对 assets/<ns>/sounds/，不含扩展名） */

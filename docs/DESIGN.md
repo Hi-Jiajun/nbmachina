@@ -1,4 +1,4 @@
-# nbforge 设计（讨论纪要 v0.1）
+# nbmachina 设计（讨论纪要 v0.1）
 
 > 三组讨论产出：`DISCUSSION-A-product.md`（产品）、`DISCUSSION-B-architecture.md`（架构，进行中）、
 > `DISCUSSION-C-music.md`（音乐）。本文是汇总后的设计，**待用户批准后才开始实现**。

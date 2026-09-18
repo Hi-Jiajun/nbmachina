@@ -20,7 +20,7 @@ import {
 } from '../src/arrange/velocity.mjs';
 import { encodeWav, midiToFreq, readWav } from '../src/analyze/chroma.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+const BUILD = process.env.nbmachina_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
 const WAV = path.join(BUILD, 'styx_helix_full.wav');
 const V3 = path.join(BUILD, 'styx_helix_notes_v3.csv');
 const SR = 44100;

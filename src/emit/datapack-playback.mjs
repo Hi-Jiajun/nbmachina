@@ -111,12 +111,12 @@ for (const mode of MODES) {
         //      `if (!INSTRUMENT.isNotBaseBlock() && !world.getBlockState(pos.up()).isAir()) return;`
         //      直接把它拦掉（harp/bass 都是基座类乐器，上方必须空气）；
         //   ② 改成"红石块给甲板充能（y-1）"后实测**仍然不响**（这条间接充能路径在 1.21.10 不成立）。
-        // 所以发声交给**自研演奏器**：数据包逐音调用 mod 的 `/nbforge playat`，
+        // 所以发声交给**自研演奏器**：数据包逐音调用 mod 的 `/nbm playat`，
         // 由 mod 的无损引擎在同一刻发声（与机器同 tick，不会漂移）；机器这边只保留灯与粒子。
-        // M3-29：发声行加 `#snd` 守卫（默认开）。客户端高精度播放（/nbfc play）要接管声音时，
+        // M3-29：发声行加 `#snd` 守卫（默认开）。客户端高精度播放（/nbmc play）要接管声音时，
         // 用 `/function styx:play/sound_off` 把这条关掉，避免数据包与客户端双响；
         // 机器照样亮灯/出粒子（视觉仍由数据包驱动）。
-        out.push(`${guard} execute unless score #snd styx.flag matches 0 run nbforge playat ${x} ${y} ${z}`);
+        out.push(`${guard} execute unless score #snd styx.flag matches 0 run nbm playat ${x} ${y} ${z}`);
         // 音符粒子：本题材里音符盒本体发不出声（见上），粒子也就没有；这里按 vanilla 的
         // addParticle(NOTE, x+0.5, y+1.2, z+0.5, row/24, 0, 0) 口径补一发。
         out.push(`${guard} particle minecraft:note ${x + 0.5} ${y + 1.2} ${z + 0.5} `
@@ -221,11 +221,11 @@ fs.writeFileSync(`${DP}/function/play/monitor_off.mcfunction`,
   'scoreboard players set #mon styx.flag 0\n'
   + 'tellraw @a {"text":"[Styx] 监听模式：关（只靠实体音符盒发声，需要站在音轨附近）","color":"gray"}\n', 'utf8');
 
-// M3-29：机器"只做视觉"开关 —— 关掉数据包的发声行，把声音交给客户端高精度播放（/nbfc play），避免双响。
+// M3-29：机器"只做视觉"开关 —— 关掉数据包的发声行，把声音交给客户端高精度播放（/nbmc play），避免双响。
 fs.writeFileSync(`${DP}/function/play/sound_off.mcfunction`,
   'scoreboard objectives add styx.flag dummy\n'
   + 'scoreboard players set #snd styx.flag 0\n'
-  + 'tellraw @a {"text":"[Styx] 数据包发声：关（声音交给客户端 /nbfc play，机器照旧亮灯出粒子）","color":"gold"}\n', 'utf8');
+  + 'tellraw @a {"text":"[Styx] 数据包发声：关（声音交给客户端 /nbmc play，机器照旧亮灯出粒子）","color":"gold"}\n', 'utf8');
 fs.writeFileSync(`${DP}/function/play/sound_on.mcfunction`,
   'scoreboard players set #snd styx.flag 1\n'
   + 'tellraw @a {"text":"[Styx] 数据包发声：开（默认；每颗音由数据包派发给 mod 引擎）","color":"gray"}\n', 'utf8');
@@ -253,7 +253,7 @@ fs.writeFileSync(`${DP}/function/play/doctor.mcfunction`, [
   'execute if block 480 83 -160 minecraft:redstone_lamp run say [Styx/doctor] 指示灯在位 ✔',
   'execute unless block 480 83 -160 minecraft:redstone_lamp run say [Styx/doctor] 指示灯缺失 ✘（先跑 styx:redo）',
   'execute unless block 480 86 -160 minecraft:air run say [Styx/doctor] ⚠ 音符盒上方被占（不影响 mod 发声，但原版音符盒不会响）',
-  'tellraw @a {"text":"[Styx/doctor] 声音由 mod 无损引擎出（/nbforge playat 逐音驱动）；机器负责灯与粒子","color":"gray"}',
+  'tellraw @a {"text":"[Styx/doctor] 声音由 mod 无损引擎出（/nbm playat 逐音驱动）；机器负责灯与粒子","color":"gray"}',
 ].join('\n') + '\n', 'utf8');
 fs.writeFileSync(`${DP}/function/play/doctor/check.mcfunction`, [
   'scoreboard players operation #dt styx.t = #t styx.t',

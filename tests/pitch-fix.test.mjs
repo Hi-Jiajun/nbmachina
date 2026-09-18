@@ -23,7 +23,7 @@ import {
 import { midiToFreq, narrowbandEnergy, readNotesCsv, readWav } from '../src/analyze/dsp.mjs';
 import { voiceOfInstrument } from '../src/arrange/velocity.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+const BUILD = process.env.nbmachina_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
 const WAV = path.join(BUILD, 'styx_helix_full.wav');
 const V3FIXED = path.join(BUILD, 'notes_fixed_v3.csv');
 const SR = 44100;

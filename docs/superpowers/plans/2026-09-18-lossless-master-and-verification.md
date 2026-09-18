@@ -12,7 +12,7 @@
 
 ## Global Constraints
 
-- 采样与谱面必须与游戏内一致：`config/nbforge/instruments.json` 指向的 **高通版 Salamander**（`_toolchain/piano/salamander48_hp/`）与 `build/machine_from_reference.csv`（3044 颗音）。
+- 采样与谱面必须与游戏内一致：`config/nbm/instruments.json` 指向的 **高通版 Salamander**（`_toolchain/piano/salamander48_hp/`）与 `build/machine_from_reference.csv`（3044 颗音）。
 - 母版规格：**48kHz / 24bit PCM**；峰值 ≤ 0dBFS（现有总线归一 -18dBFS + 软限幅）。
 - 触发时刻口径：`tick = round(time_seconds × tps)`（20 tps 与 100 tps 两套），与 `src/emit/tick-map.mjs` 同源。
 - 所有产物落 `build/master/`，文件名带规格后缀；不改动游戏内数据（本轮纯离线）。
@@ -44,7 +44,7 @@
 - Consumes: `build/styx_build/data/styx/function/play/{lo,hi}/*.mcfunction`、`build/machine_from_reference.csv`、`src/emit/layout-pos.mjs` 的 `makePos(profile)`。
 - Produces: 报告 `{ modes: { lo: {notes, ticks, missing, extra, maxTickErrorMs, meanTickErrorMs}, hi: {...} } }`。
 
-- [x] **Step 1:** 解析 datapack 里的 `execute if score #t styx.t matches <tick> run nbforge playat <x> <y> <z>`，抽出 (tick, 坐标)
+- [x] **Step 1:** 解析 datapack 里的 `execute if score #t styx.t matches <tick> run nbm playat <x> <y> <z>`，抽出 (tick, 坐标)
 - [x] **Step 2:** 用同一份 profile 把谱面每颗音算成 (期望 tick, 坐标)，与 Step 1 的集合逐项比对（缺失/多余/坐标不符）
 - [x] **Step 3:** 统计"精确时刻 vs 0.12s 格位"的偏差，输出最大/均值
 - [x] **Step 4:** 断言 `missing = 0 && extra = 0 && tickMismatch = 0`；否则非零退出

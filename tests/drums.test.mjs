@@ -23,7 +23,7 @@ import {
 } from '../src/analyze/drums.mjs';
 import { readWav } from '../src/analyze/dsp.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+const BUILD = process.env.nbmachina_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
 const WAV = path.join(BUILD, 'styx_helix_full.wav');
 const ONSETS = path.join(BUILD, 'onsets_banded.json');
 const SR = 44100;

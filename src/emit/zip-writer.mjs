@@ -1,6 +1,6 @@
 // M2-1 · 最小 ZIP 写入器（零依赖：只借 node:zlib 的 deflateRaw）
 //
-// 为什么要自己写：资源包要交付一个 `build/nbforge_resources.zip`，而 Node 标准库没有 zip 写入器。
+// 为什么要自己写：资源包要交付一个 `build/nbm_resources.zip`，而 Node 标准库没有 zip 写入器。
 // 关键要求是**可复现**：不写时间戳（固定 2026-01-01 00:00）、不写额外字段、条目顺序 = 入参顺序，
 // 所以同一份采样两次打包字节完全相同（tests/synth.test.mjs 里有断言）。
 import zlib from 'node:zlib';

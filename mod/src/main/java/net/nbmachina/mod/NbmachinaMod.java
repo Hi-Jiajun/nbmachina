@@ -1,4 +1,4 @@
-package net.nbforge.mod;
+package net.nbmachina.mod;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
@@ -10,24 +10,24 @@ import net.minecraft.util.Identifier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import net.nbforge.mod.net.NbforgePlayPayload;
-import net.nbforge.mod.score.NbforgeScorePlayer;
+import net.nbmachina.mod.net.NbmachinaPlayPayload;
+import net.nbmachina.mod.score.NbmachinaScorePlayer;
 
 /**
- * nbforge 后端 A 的最小骨架。
+ * nbmachina 后端 A 的最小骨架。
  *
  * <p>与「资源包 + /playsound」方案的区别：
  * <ul>
  *   <li>音色绑定：音色事件由 mod 注册进 {@code minecraft:sound_event} 注册表，可按 id 直接引用；</li>
  *   <li>独立力度：{@code World#playSound(..., volume, pitch)} 的 volume/pitch 由调用方逐音指定；</li>
- *   <li>独立延音：{@link NbforgeSustainQueue} 用 tick 级重触发 + 包络衰减，超出单次播放长度。</li>
+ *   <li>独立延音：{@link NbmachinaSustainQueue} 用 tick 级重触发 + 包络衰减，超出单次播放长度。</li>
  * </ul>
  */
-public class NbforgeMod implements ModInitializer {
-	public static final String MOD_ID = "nbforge";
+public class NbmachinaMod implements ModInitializer {
+	public static final String MOD_ID = "nbmachina";
 	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
 
-	/** 四个示例音色事件；sounds.json 里指向的资源包音频位于 assets/nbforge/sounds/{bell,pad,strings,bass}。 */
+	/** 四个示例音色事件；sounds.json 里指向的资源包音频位于 assets/nbmachina/sounds/{bell,pad,strings,bass}。 */
 	public static final SoundEvent DEMO_BELL = registerSound("demo_bell");
 	public static final SoundEvent DEMO_PAD = registerSound("demo_pad");
 	public static final SoundEvent DEMO_STRINGS = registerSound("demo_strings");
@@ -65,29 +65,29 @@ public class NbforgeMod implements ModInitializer {
 
 	@Override
 	public void onInitialize() {
-		LOGGER.info("[nbforge] onInitialize：已注册自定义音色事件 demo_bell/demo_pad/demo_strings/demo_bass");
+		LOGGER.info("[nbmachina] onInitialize：已注册自定义音色事件 demo_bell/demo_pad/demo_strings/demo_bass");
 		// P2：音符协议（服务端 → 客户端）。必须在两边都注册，否则客户端拒收。
-		PayloadTypeRegistry.playS2C().register(NbforgePlayPayload.ID, NbforgePlayPayload.CODEC);
-		LOGGER.info("[nbforge] 已注册 S2C 音符协议 nbforge:play");
-		NbforgeCommands.register();
-		NbforgeSustainQueue.register();
-		NbforgeScorePlayer.register();
-		NbforgeSelfTest.register();
+		PayloadTypeRegistry.playS2C().register(NbmachinaPlayPayload.ID, NbmachinaPlayPayload.CODEC);
+		LOGGER.info("[nbmachina] 已注册 S2C 音符协议 nbmachina:play");
+		NbmachinaCommands.register();
+		NbmachinaSustainQueue.register();
+		NbmachinaScorePlayer.register();
+		NbmachinaSelfTest.register();
 		// 机器映射（位置 → 谱面音符）：起服时读一次，红石触发时就能查到"这颗音该多大力"。
-		// M3-23：`/reload`（数据包重载）与 `/nbforge reloadmap` 也会重读 —— 换谱面时不用重启游戏。
-		ServerLifecycleEvents.SERVER_STARTED.register(NbforgeMod::reloadMachineMap);
+		// M3-23：`/reload`（数据包重载）与 `/nbmachina reloadmap` 也会重读 —— 换谱面时不用重启游戏。
+		ServerLifecycleEvents.SERVER_STARTED.register(NbmachinaMod::reloadMachineMap);
 		ServerLifecycleEvents.END_DATA_PACK_RELOAD.register(
 			(server, resourceManager, success) -> reloadMachineMap(server));
 	}
 
-	/** 重新读入 `nbforge/machine_map.csv`（服务端启动、`/reload`、`/nbforge reloadmap` 都走这里） */
+	/** 重新读入 `nbmachina/machine_map.csv`（服务端启动、`/reload`、`/nbmachina reloadmap` 都走这里） */
 	public static void reloadMachineMap(net.minecraft.server.MinecraftServer server) {
-		java.nio.file.Path map = server.getRunDirectory().resolve("nbforge").resolve("machine_map.csv");
+		java.nio.file.Path map = server.getRunDirectory().resolve("nbmachina").resolve("machine_map.csv");
 		try {
-			int n = net.nbforge.mod.note.NbforgeNoteBlocks.loadMap(map);
-			LOGGER.info("[nbforge] 机器映射已加载：{} 个音符盒位置 ← {}", n, map);
+			int n = net.nbmachina.mod.note.NbmachinaNoteBlocks.loadMap(map);
+			LOGGER.info("[nbmachina] 机器映射已加载：{} 个音符盒位置 ← {}", n, map);
 		} catch (java.io.IOException e) {
-			LOGGER.warn("[nbforge] 机器映射未加载（{}）：{} —— 音符盒仍会发声，但力度用默认值",
+			LOGGER.warn("[nbmachina] 机器映射未加载（{}）：{} —— 音符盒仍会发声，但力度用默认值",
 				map, e.getMessage());
 		}
 	}

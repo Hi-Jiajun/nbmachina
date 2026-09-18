@@ -6,7 +6,7 @@
 
 ## 0. 先决条件（已就位）
 
-* 客户端：`replaymod-1.21.10-2.6.27`（画面录制/渲染）、`nbforge-0.1.0.jar`（机器与无损引擎）
+* 客户端：`replaymod-1.21.10-2.6.27`（画面录制/渲染）、`nbmachina-0.1.0.jar`（机器与无损引擎）
 * 母版：`build/master/styx_master_48k24bit.wav` + 三条 stems（要重配比时用）
 * 时间轴小抄：`build/video_cuesheet.md`（19 段 + 关键点，剪辑对着用）
 
@@ -15,7 +15,7 @@
 ```
 1) 重启游戏（换过 jar 必须重启）→ /reload
 2) /function styx:redo            ← 只有谱面/machine_map 更新过才需要；约 1 分钟
-3) /nbfc instrument set all <id>  ← 可选：选音色（salamander48 / disklavier / vsco_upright …）
+3) /nbmc instrument set all <id>  ← 可选：选音色（salamander48 / disklavier / vsco_upright …）
 4) /tick rate 100                 ← 让灯/粒子的视觉误差压到 ±5ms（声音已是 ~1ms 级）
 5) /function styx:play/sound_on   ← 让机器自己发声，录制时你能听到进度（成片会用母版替换）
 6) F1 隐藏 HUD、F5 切好视角（ReplayMod 录制后机位还能改，不必纠结）
@@ -46,7 +46,7 @@
 ## 4. 合成（一条命令）
 
 ```powershell
-cd nbforge
+cd nbmachina
 node tools/mux-video.mjs --video D:/render/styx.mp4 --offset 3.2 --out build/final/styx_final.mkv
 # 先体检不合成：加 --check
 # 兼容优先（MP4 + AAC 320k）：加 --aac
@@ -66,6 +66,6 @@ node tools/mux-video.mjs --video D:/render/styx.mp4 --offset 3.2 --out build/fin
 ## 6. 已知的取舍
 
 * **多声道**：用户 2026-09-18 决定暂缓（先做双声道无损）。
-* **视觉升级**（更绚丽的灯/粒子）：已记录为**另一个独立 mod**，不在 nbforge 里做。
+* **视觉升级**（更绚丽的灯/粒子）：已记录为**另一个独立 mod**，不在 nbmachina 里做。
 * **游戏内直录音频**：不做——离线母版就是机器该有的声音，且无损、可复现。
 * 20 tps 下灯/粒子的视觉误差是 ±25ms；`/tick rate 100` 后 ±5ms。想更准只能客户端画假灯（未做）。

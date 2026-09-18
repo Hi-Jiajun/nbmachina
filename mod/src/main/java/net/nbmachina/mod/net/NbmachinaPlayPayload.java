@@ -1,4 +1,4 @@
-package net.nbforge.mod.net;
+package net.nbmachina.mod.net;
 
 import net.minecraft.network.RegistryByteBuf;
 import net.minecraft.network.codec.PacketCodec;
@@ -22,23 +22,23 @@ import net.minecraft.util.Identifier;
  * （踏板踩着时松键不制音）。有了它，钢琴就不必靠"低音单声部"这类补丁去糊，
  * 而是照抄演奏者的放音时刻。
  */
-public record NbforgePlayPayload(String instrument, String voice, int midi, int velocity, int durMs,
+public record NbmachinaPlayPayload(String instrument, String voice, int midi, int velocity, int durMs,
 								double x, double y, double z)
 	implements CustomPayload {
 
-	public static final CustomPayload.Id<NbforgePlayPayload> ID =
-		new CustomPayload.Id<>(Identifier.of("nbforge", "play"));
+	public static final CustomPayload.Id<NbmachinaPlayPayload> ID =
+		new CustomPayload.Id<>(Identifier.of("nbmachina", "play"));
 
-	public static final PacketCodec<RegistryByteBuf, NbforgePlayPayload> CODEC = PacketCodec.tuple(
-		PacketCodecs.STRING, NbforgePlayPayload::instrument,
-		PacketCodecs.STRING, NbforgePlayPayload::voice,
-		PacketCodecs.VAR_INT, NbforgePlayPayload::midi,
-		PacketCodecs.VAR_INT, NbforgePlayPayload::velocity,
-		PacketCodecs.VAR_INT, NbforgePlayPayload::durMs,
-		PacketCodecs.DOUBLE, NbforgePlayPayload::x,
-		PacketCodecs.DOUBLE, NbforgePlayPayload::y,
-		PacketCodecs.DOUBLE, NbforgePlayPayload::z,
-		NbforgePlayPayload::new);
+	public static final PacketCodec<RegistryByteBuf, NbmachinaPlayPayload> CODEC = PacketCodec.tuple(
+		PacketCodecs.STRING, NbmachinaPlayPayload::instrument,
+		PacketCodecs.STRING, NbmachinaPlayPayload::voice,
+		PacketCodecs.VAR_INT, NbmachinaPlayPayload::midi,
+		PacketCodecs.VAR_INT, NbmachinaPlayPayload::velocity,
+		PacketCodecs.VAR_INT, NbmachinaPlayPayload::durMs,
+		PacketCodecs.DOUBLE, NbmachinaPlayPayload::x,
+		PacketCodecs.DOUBLE, NbmachinaPlayPayload::y,
+		PacketCodecs.DOUBLE, NbmachinaPlayPayload::z,
+		NbmachinaPlayPayload::new);
 
 	@Override
 	public CustomPayload.Id<? extends CustomPayload> getId() {

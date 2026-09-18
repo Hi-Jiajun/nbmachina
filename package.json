@@ -1,5 +1,5 @@
 {
-  "name": "nbforge",
+  "name": "nbm",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -32,7 +32,7 @@
     "arrange:all": "node src/arrange/arrange-all.mjs",
     "arrange:inner": "node src/arrange/inner-voice.mjs",
     "project:new": "node src/core/new-project.mjs",
-    "synth:render": "node src/synth/render-all.mjs --out build/audio_nbforge",
+    "synth:render": "node src/synth/render-all.mjs --out build/audio_nbmachina",
     "emit:pack": "node src/emit/resource-pack.mjs",
     "emit:hifi": "node src/emit/playsound-hifi.mjs"
   }

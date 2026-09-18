@@ -1,4 +1,4 @@
-# nbforge mod（后端 A 骨架）
+# nbmachina mod（后端 A 骨架）
 
 1.21.10 / Fabric 的最小可编译骨架：**自定义音色事件 + 每音独立力度/延音**，用来验证
 「资源包 + `/playsound`」之外的注入点。
@@ -12,48 +12,48 @@
 
 ```powershell
 $env:JAVA_HOME = "C:\Users\hiliang\AppData\Roaming\.minecraft\runtime\java-runtime-delta"
-cd C:\Users\hiliang\Documents\minecraft\nbforge\mod
+cd C:\Users\hiliang\Documents\minecraft\nbmachina\mod
 .\gradlew.bat build --no-daemon
 ```
 
-产物：`build/libs/nbforge-0.1.0.jar`（remap 后的可装载 jar）。
+产物：`build/libs/nbm-0.1.0.jar`（remap 后的可装载 jar）。
 
 ## 游戏内命令
 
 **服务端（原版通道，走客户端原版音频栈）**
 
 ```
-/nbforge info
-/nbforge note <音色id> [音量 0-8] [音高 0.25-4]
-/nbforge sustain <音色id> <音量> <音高> <总刻数> <间隔刻数>   # 重触发 + 包络衰减模拟延音
-/nbforge stopall
-/nbforge play <乐器> <midi 0-127> [力度 1-127]              # P2：让执行者客户端用**无损引擎**播
-/nbforge score load [路径]                                  # P2-2：谱面直读（默认 <游戏目录>/nbforge/score.csv）
-/nbforge score play | stop | status                         # 服务端按谱面派发 → 客户端无损播
+/nbm info
+/nbm note <音色id> [音量 0-8] [音高 0.25-4]
+/nbm sustain <音色id> <音量> <音高> <总刻数> <间隔刻数>   # 重触发 + 包络衰减模拟延音
+/nbm stopall
+/nbm play <乐器> <midi 0-127> [力度 1-127]              # P2：让执行者客户端用**无损引擎**播
+/nbm score load [路径]                                  # P2-2：谱面直读（默认 <游戏目录>/nbm/score.csv）
+/nbm score play | stop | status                         # 服务端按谱面派发 → 客户端无损播
 ```
 
-**客户端（无损引擎，命令字是 `/nbfc`，避免顶掉服务端的 `/nbforge`）**
+**客户端（无损引擎，命令字是 `/nbmc`，避免顶掉服务端的 `/nbm`）**
 
 ```
-/nbfc status                      引擎状态（就绪/采样缓存/活跃声部/播放计数/最后错误）
-/nbfc instruments                 列出已加载乐器
-/nbfc note <乐器> <midi> [力度]    试听一颗音（同一套"力度→采样层+增益"映射）
-/nbfc demo [乐器]                 试听 C4 G4 C5 E5 G5 × 力度 30/70/110
-/nbfc reload                      改完 instruments.json 后热加载
+/nbmc status                      引擎状态（就绪/采样缓存/活跃声部/播放计数/最后错误）
+/nbmc instruments                 列出已加载乐器
+/nbmc note <乐器> <midi> [力度]    试听一颗音（同一套"力度→采样层+增益"映射）
+/nbmc demo [乐器]                 试听 C4 G4 C5 E5 G5 × 力度 30/70/110
+/nbmc reload                      改完 instruments.json 后热加载
 ```
 
-乐器库来自 `config/nbforge/instruments.json`（由 `node tools/export-mod-instruments.mjs --deploy` 生成）：
+乐器库来自 `config/nbm/instruments.json`（由 `node tools/export-mod-instruments.mjs --deploy` 生成）：
 区域 = 录音根音 × 力度区间，与离线渲染 `render-ensemble` **同一套映射**（同一批母版文件）。
 
-音色 id 三种写法都认：`demo_bell`（mod 注册）、`nbforge:demo_bell`、`nbforge:strings_e4`
-（资源包 `nbforge_resources` 里已有的 148 个音色，mod 直接按 id 引用）。
+音色 id 三种写法都认：`demo_bell`（mod 注册）、`nbmachina:demo_bell`、`nbmachina:strings_e4`
+（资源包 `nbmachina_resources` 里已有的 148 个音色，mod 直接按 id 引用）。
 
 **不要给音色 id 加引号**——参数类型是 `IdentifierArgumentType`（与 vanilla `/playsound` 同款），
-直接 `/nbforge note nbforge:demo_bell 1 1` 即可。注意 `sustain` 是 5 个参数：
-`/nbforge sustain nbforge:demo_pad 0.8 1 60 10`（音色 音量 音高 总刻数 重触发间隔）。
+直接 `/nbm note nbmachina:demo_bell 1 1` 即可。注意 `sustain` 是 5 个参数：
+`/nbm sustain nbmachina:demo_pad 0.8 1 60 10`（音色 音量 音高 总刻数 重触发间隔）。
 
 ## 自检
 
-加 `-Dnbforge.selftest=true` 起服（或 `gradlew runServer -Dnbforge.selftest=true`），
+加 `-Dnbmachina.selftest=true` 起服（或 `gradlew runServer -Dnbmachina.selftest=true`），
 mod 会在服务器启动后自动跑一遍：注册表检查 → 命令节点检查 → 直接调用 `playSound`
 （不走命令）→ 执行命令 → 延音队列 → 120 刻后打印统计并停服。

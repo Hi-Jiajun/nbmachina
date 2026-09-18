@@ -3,7 +3,7 @@
 //
 // 为什么需要：SPEC 的成功标准里写着"触发计数差 0"。以前靠副本服自检跑一遍才知道，
 // 现在直接从**生成好的数据包**里把派发解出来，逐颗对谱面：
-//   ① 每颗谱面音在 datapack 里恰好有一条 `nbforge playat <x> <y> <z>`（坐标同一套 makePos）；
+//   ① 每颗谱面音在 datapack 里恰好有一条 `nbm playat <x> <y> <z>`（坐标同一套 makePos）；
 //   ② 触发的 tick = round(time_seconds × tps)（20 / 100 两套表都要对）；
 //   ③ 顺带量一下"精确时刻触发"比"格位触发"（step × 0.12s）好多少——这是 M3-24 之后的核心改动。
 //
@@ -48,7 +48,7 @@ const readMode = (mode, tps) => {
   for (const f of fs.readdirSync(dir).filter((n) => n.endsWith('.mcfunction'))) {
     for (const line of fs.readFileSync(path.join(dir, f), 'utf8').split(/\r?\n/)) {
       // 发声行可能带一层 "只做视觉" 守卫（M3-29，`#snd 0` 时静音），这里容忍两种写法
-      const m = line.match(/^execute if score #t styx\.t matches (\d+) run (?:execute unless score #snd styx\.flag matches 0 run )?nbforge playat (-?\d+) (-?\d+) (-?\d+)$/);
+      const m = line.match(/^execute if score #t styx\.t matches (\d+) run (?:execute unless score #snd styx\.flag matches 0 run )?nbm playat (-?\d+) (-?\d+) (-?\d+)$/);
       if (m) dispatches.push({ tick: Number(m[1]), cell: `${m[2]},${m[3]},${m[4]}`, file: f });
     }
   }

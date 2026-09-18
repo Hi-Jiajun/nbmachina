@@ -122,7 +122,7 @@ test('M2-3：换工程名后 midi 槽位跟着换（新工程不再吃参考曲�
 test('M2-3：--save/--server/--java 优先于环境变量与历史默认', () => {
   const ex = resolveExternal({
     argv: ['--save', 'D:/saves/Other', '--server', 'D:/srv', '--java', 'D:/jdk/bin/java.exe'],
-    env: { NBFORGE_SAVE: 'D:/saves/Env', NBFORGE_SERVER: 'D:/srv-env', NBFORGE_JAVA: 'D:/env/java.exe' },
+    env: { nbmachina_SAVE: 'D:/saves/Env', nbmachina_SERVER: 'D:/srv-env', nbmachina_JAVA: 'D:/env/java.exe' },
   });
   assert.equal(ex.save, 'D:/saves/Other');
   assert.equal(ex.server, 'D:/srv');
@@ -132,7 +132,7 @@ test('M2-3：--save/--server/--java 优先于环境变量与历史默认', () =>
 test('M2-3：环境变量在没给参数时生效，空字符串视为没给', () => {
   const ex = resolveExternal({
     argv: [],
-    env: { NBFORGE_SAVE: 'D:/saves/Env', NBFORGE_SERVER: '   ', NBFORGE_JAVA: '' },
+    env: { nbmachina_SAVE: 'D:/saves/Env', nbmachina_SERVER: '   ', nbmachina_JAVA: '' },
   });
   assert.equal(ex.save, 'D:/saves/Env');
   assert.equal(ex.server, LEGACY_SERVER);

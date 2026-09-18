@@ -121,7 +121,7 @@ function writeRegion(dir, cx, cz, compress = 1) {
 }
 
 function withTempRegion(fn) {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nbforge-region-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'nbmachina-region-'));
   try { return fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }
 

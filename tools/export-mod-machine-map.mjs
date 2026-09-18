@@ -27,7 +27,7 @@ const has = (n) => argv.includes(`--${n}`);
 
 const IN = opt('in', path.join(B, 'machine_pipeline_video_phrase.csv'));
 const PROFILE = opt('profile', P.profile);
-const OUT = opt('out', path.join(B, 'nbforge_machine_map.csv'));
+const OUT = opt('out', path.join(B, 'nbmachina_machine_map.csv'));
 const DEPLOY = has('deploy');
 const CLIENT_GAME_DIR = 'C:/Program Files/PCL2/.minecraft/versions/1.21.10-Fabric 0.19.5';
 const TEST_SERVER_DIR = 'C:/Users/hiliang/Documents/minecraft/_toolchain/spike-testserver';
@@ -82,7 +82,7 @@ console.log(`  坐标示例：${out[1]}`);
 
 if (DEPLOY) {
   for (const [label, dir] of [['客户端', CLIENT_GAME_DIR], ['测试服', TEST_SERVER_DIR]]) {
-    const dst = path.join(dir, 'nbforge', 'machine_map.csv');
+    const dst = path.join(dir, 'nbmachina', 'machine_map.csv');
     try {
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       fs.copyFileSync(OUT, dst);

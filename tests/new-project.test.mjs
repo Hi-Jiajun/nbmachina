@@ -3,7 +3,7 @@
 // 验收口径（任务书 M2-2 §交付 3 / §验收）：
 //   `node src/core/new-project.mjs --name demo --build <空目录>` 要在**空目录**里跑出
 //   "下一步该做什么"的提示、退出码 0、且生成的 `project.json` 必须过 SPEC §3 校验器。
-//   骨架要能被后续脚本认出来（paths.mjs 从 `project.json` 的 `nbforge.project` 取工程名）。
+//   骨架要能被后续脚本认出来（paths.mjs 从 `project.json` 的 `nbmachina.project` 取工程名）。
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -17,7 +17,7 @@ import { validateProject } from '../src/ingest/project-schema.mjs';
 const here = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.resolve(here, '..');
 const NEW_PROJECT = path.join(REPO, 'src', 'core', 'new-project.mjs');
-const tmp = (label) => fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), `nbforge-newproj-${label}-`));
+const tmp = (label) => fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), `nbmachina-newproj-${label}-`));
 const run = (args) => {
   const r = spawnSync(process.execPath, [NEW_PROJECT, ...args], { encoding: 'utf8', cwd: REPO });
   return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` };
@@ -40,7 +40,7 @@ test('空目录里建工程：退出码 0、打印"下一步"、骨架文件齐�
   }
 
   const project = JSON.parse(fs.readFileSync(path.join(d, 'project.json'), 'utf8'));
-  assert.equal(project.nbforge.project, 'demo');
+  assert.equal(project.nbmachina.project, 'demo');
   const res = validateProject(project);
   assert.equal(res.ok, true, `模板自己先要过校验器：${JSON.stringify(res.errors)}`);
   assert.ok(res.stats.notes >= 1);

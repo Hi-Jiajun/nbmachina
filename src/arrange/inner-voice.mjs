@@ -349,7 +349,7 @@ if (invokedDirectly) {
   const { csv, report } = innerVoiceCsvText(text, { register, melodyFrom });
   fs.writeFileSync(outPath, csv, 'utf8');
   const out = {
-    $schema: 'nbforge.inner-voice-report/v0',
+    $schema: 'nbmachina.inner-voice-report/v0',
     meta: {
       at: new Date().toISOString(),
       build: P.build,

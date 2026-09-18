@@ -162,7 +162,7 @@ test('buildUndoArtifacts：--where 才生成逐格坐标诊断函数（默认不
 
 test('buildUndoArtifacts：全 air 前像也照写（宁可显式清空，不许"跳过等于没改"）', () => {
   const log = [
-    '# nbforge undo-preimage v1',
+    '# nbmachina undo-preimage v1',
     '# notes build/x.csv',
     '[cell] 1 2 3 lamp minecraft:air region-nbt',
     '[cell] 1 3 3 deck minecraft:air region-nbt',

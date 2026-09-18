@@ -9,7 +9,7 @@ import { validateProject, assertProject, ProjectValidationError, VOICES, SOURCE_
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const FIX = path.join(here, 'fixtures');
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+const BUILD = process.env.nbmachina_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
 
 const readJson = (p) => JSON.parse(fs.readFileSync(p, 'utf8'));
 const pathsOf = (errors) => errors.map((e) => e.path);

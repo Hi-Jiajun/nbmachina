@@ -1,4 +1,4 @@
-# nbforge 规格（SPEC v0.3）
+# nbmachina 规格（SPEC v0.3）
 
 上游设计讨论：`DESIGN.md`（v0.1 三组讨论 + v0.2 用户反馈）。
 

@@ -1,4 +1,4 @@
-// M2-1 · 高保真监听后端：把机器谱面用**自研音色**（资源包 nbforge:*）播给玩家，而不是原版音符盒音色
+// M2-1 · 高保真监听后端：把机器谱面用**自研音色**（资源包 nbmachina:*）播给玩家，而不是原版音符盒音色
 //
 // 与 src/emit/datapack-playback.mjs 的关系：**一行都不改它**（任务书硬要求）。
 // 本文件生成一套独立函数，接线由根代理做（两种都行）：
@@ -287,7 +287,7 @@ export function buildHifiFunctions(notes, opts = {}) {
   const pos = makePos(profile);
 
   fn.set('play/monitor_hifi_on', [
-    '# 由 src/emit/playsound-hifi.mjs 生成：高保真监听开（自研音色，需要 nbforge 资源包）',
+    '# 由 src/emit/playsound-hifi.mjs 生成：高保真监听开（自研音色，需要 nbmachina 资源包）',
     'scoreboard objectives add styx.flag dummy',
     'scoreboard objectives add styx.t dummy',
     'scoreboard objectives add styx.hifi dummy',
@@ -301,7 +301,7 @@ export function buildHifiFunctions(notes, opts = {}) {
     '# 机器正在播放 → 立刻对齐机器刻号；没在播 → 从第 0 刻开始（下一刻 +1 后正好播 step 0）',
     'execute if score #on styx.flag matches 1 run scoreboard players operation #ht styx.t = #t styx.t',
     'execute unless score #on styx.flag matches 1 run scoreboard players set #ht styx.t -1',
-    tell(`[Styx] 高保真监听：开（${Object.keys(stats.byTimbre).join('/') || 'strings'} 等自研音色，需装 nbforge 资源包；贝斯升八度 +1）`, 'gold'),
+    tell(`[Styx] 高保真监听：开（${Object.keys(stats.byTimbre).join('/') || 'strings'} 等自研音色，需装 nbmachina 资源包；贝斯升八度 +1）`, 'gold'),
   ].join('\n') + '\n');
 
   fn.set('play/monitor_hifi_off', [
@@ -481,7 +481,7 @@ function main() {
   } else {
     console.warn(`[警告] 未接线：styx:play/hifi/tick 还没有被每刻调用。${wiring.hint}`);
   }
-  console.log('用法：装 nbforge 资源包 → /function styx:play/monitor_hifi_on → /function styx:play/start（或单独试听由 tick 驱动）');
+  console.log('用法：装 nbmachina 资源包 → /function styx:play/monitor_hifi_on → /function styx:play/start（或单独试听由 tick 驱动）');
 }
 
 const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;

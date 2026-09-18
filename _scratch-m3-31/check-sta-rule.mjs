@@ -1,7 +1,7 @@
 // 直接验"短音选 sta、长音选 leg"这条规则：对同一颗音分别给 durMs=200 / 3000，看选中的采样文件
 import fs from 'node:fs';
 import path from 'node:path';
-import { loadSfz, pickRegion } from '../../nbforge/src/sample/sfz.mjs';
+import { loadSfz, pickRegion } from '../../nbm/src/sample/sfz.mjs';
 
 const DIR = 'C:/Users/hiliang/Documents/minecraft/_toolchain/olpc/x/yamahaGrandPiano44';
 const leg = loadSfz(path.join(DIR, 'yamaha_disklavier_olpc.sfz'));

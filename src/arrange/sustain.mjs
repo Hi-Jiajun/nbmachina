@@ -418,7 +418,7 @@ export function sustainCsvText({ csvText: text, samples, sampleRate, config = {}
   }).length;
 
   const report = {
-    $schema: 'nbforge.sustain-report/v0',
+    $schema: 'nbmachina.sustain-report/v0',
     config: {
       windowSec: cfg.windowSec,
       hopSec: cfg.hopSec,

@@ -2,7 +2,7 @@
 //
 // 为什么旧的 undo 不可信：`undo.mcfunction` 只有 3 行（undo_wall/deck/terrain 的硬编码 fill），
 // 它假设"世界一定被改成了某个样子"，既不记录前像、也无法对账。按
-// docs/superpowers/plans/2026-09-14-nbforge-m1.md Task 4：
+// docs/superpowers/plans/2026-09-14-nbmachina-m1.md Task 4：
 //   ① 扫描将被改动的每一格 → 记下**方块 id + 状态**（前像）
 //   ② 生成逐格 `setblock` 还原的 `styx:undo`
 //   ③ 生成逐格 `execute unless block` 对账函数 `styx:undo/verify` → "#bad == 0" 就是 diff 0
@@ -13,7 +13,7 @@
 // 读不出非方块实体的 id/状态，见 docs/M1-6-report.md 的原始回包）。
 //
 // MINI-FORMAT（v1）
-//   # nbforge undo-preimage v1          ← 版本行
+//   # nbmachina undo-preimage v1          ← 版本行
 //   # at <iso> / # notes <csv> / # cells <n>
 //   [console] <x> <y> <z> :: <原样回包>
 //   [cell] <x> <y> <z> <role> <state|-> <source> [issue...]
@@ -103,7 +103,7 @@ export function parseScanLog(text) {
     if (line.startsWith('#')) {
       const m = /^#\s*([a-z_]+)\s+(.*)$/.exec(line);
       if (!m) return; // 纯注释
-      if (m[1] === 'nbforge' && /^undo-preimage v(\d+)$/.test(m[2])) { version = +m[2].replace('undo-preimage v', ''); return; }
+      if (m[1] === 'nbmachina' && /^undo-preimage v(\d+)$/.test(m[2])) { version = +m[2].replace('undo-preimage v', ''); return; }
       header[m[1]] = m[2];
       return;
     }

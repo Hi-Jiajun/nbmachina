@@ -108,7 +108,7 @@ test('音高：有 `midi` 列时按**真实音高**播（后端 A 不受 2 个�
   assert.equal(foldedOnly.midi, 53, '没有 midi 列时退回 row→midi（老口径）');
   const withTrue = planHifi([{ step: 0, instr: 'harp', row: 11, midi: 75, vol: 0.8 }]).events[0];
   assert.equal(withTrue.midi, 75, '有 midi 列时必须按真实音高播');
-  assert.equal(withTrue.event, 'nbforge:strings_ds5');
+  assert.equal(withTrue.event, 'nbmachina:strings_ds5');
   assert.equal(withTrue.pitch, '1', '用的是一音一采样，不该再叠 pitch');
 });
 

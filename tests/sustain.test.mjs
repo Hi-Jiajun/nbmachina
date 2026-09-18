@@ -1,6 +1,6 @@
 // M1-2 · 长音/延音：从音频估每颗音的持续长度 → 同音高重复触发
 //
-// 任务书 `nbforge-m1-2.md` 要求先用合成音验对（0.6s 长音 / 0.12s 短音），再上真实音频。
+// 任务书 `nbmachina-m1-2.md` 要求先用合成音验对（0.6s 长音 / 0.12s 短音），再上真实音频。
 // 所以这个文件的结构是：① 合成音判据（长/短/上限/静音/音高隔离）② 追加触发的纯函数契约
 // ③ CSV 契约（原行逐字符不变、不制造撞格）④ 真实数据（相关性、撞格、空隙占比）。
 import assert from 'node:assert/strict';
@@ -19,7 +19,7 @@ import {
   sustainCsvText,
 } from '../src/arrange/sustain.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+const BUILD = process.env.nbmachina_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
 const WAV = path.join(BUILD, 'styx_helix_full.wav');
 const MACHINE = path.join(BUILD, 'styx_helix_machine.csv');
 const SR = 44100;

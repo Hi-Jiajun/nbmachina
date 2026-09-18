@@ -17,7 +17,7 @@ import {
 import { detectOnsets, onsetAlignmentF1 } from '../src/verify/score.mjs';
 import { midiToFreq, readWav } from '../src/analyze/dsp.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+const BUILD = process.env.nbmachina_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
 const WAV = path.join(BUILD, 'styx_helix_full.wav');
 const MACHINE = path.join(BUILD, 'machine_p1.csv');
 const SR = 44100;

@@ -2,7 +2,7 @@
 //
 // 红→绿顺序（TDD）：本文件先写（全部红）→ 实现 src/synth/{synth,spectrum,voices,ogg,render-all}.mjs
 // → 实现 src/emit/{zip-writer,resource-pack,playsound-hifi}.mjs。
-// 验收口径（任务书 nbforge-m2-1.md）：
+// 验收口径（任务书 nbmachina-m2-1.md）：
 //   ① 基频误差 ≤1%（FFT 自查）—— 用**全局最强谱峰**与标称频率比，不做"只在目标附近找峰"的自证
 //   ② ≥3 个音色 × ≥12 个半音（本实现 4 个音色 × 3 个八度 = 37 个半音，每半音一个采样）
 //   ③ zip 体积 <15 MB（真实产物在"资源包构建"一条里量）
@@ -24,10 +24,10 @@ import { buildZip, crc32, listZipEntries } from '../src/emit/zip-writer.mjs';
 import { DEMO_ALIASES, PACK_FORMAT, buildResourcePack, buildSoundsJson } from '../src/emit/resource-pack.mjs';
 import { HIFI_SYNC_STEPS, buildHifiFunctions, parseScoreCsv, planHifi } from '../src/emit/playsound-hifi.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
-const AUDIO = path.join(BUILD, 'audio_nbforge');
+const BUILD = process.env.nbmachina_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+const AUDIO = path.join(BUILD, 'audio_nbmachina');
 const NOTES_CSV = path.join(BUILD, 'machine_pipeline.csv');
-const tmpDir = (name) => fs.mkdtempSync(path.join(process.env.TEMP ?? '/tmp', `nbforge-${name}-`));
+const tmpDir = (name) => fs.mkdtempSync(path.join(process.env.TEMP ?? '/tmp', `nbmachina-${name}-`));
 const freqOf = (midi) => 440 * 2 ** ((midi - 69) / 12);
 const errPct = (measured, target) => Math.abs(measured - target) / target * 100;
 
@@ -56,12 +56,12 @@ test('契约：5 个音色（含 M3-6 钢琴类）、每个 ≥3 个八度（37 
 });
 
 test('契约：资源包事件名只含 [a-z0-9_/]，且事件 id / 文件路径可互推', () => {
-  assert.equal(SOUND_NAMESPACE, 'nbforge');
-  assert.equal(eventIdOf('strings', 66), 'nbforge:strings_fs4');
+  assert.equal(SOUND_NAMESPACE, 'nbmachina');
+  assert.equal(eventIdOf('strings', 66), 'nbmachina:strings_fs4');
   assert.equal(soundPathOf('strings', 66), 'strings/fs4');
   assert.equal(noteFileName(61), 'cs4');
   assert.equal(noteFileName(27), 'ds1');
-  assert.equal(eventIdOf('bell', 61), 'nbforge:bell_cs4');
+  assert.equal(eventIdOf('bell', 61), 'nbmachina:bell_cs4');
   const legal = /^[a-z0-9_/]+$/;
   for (const t of TIMBRES) {
     for (let m = REGISTERS[t][0]; m <= REGISTERS[t][1]; m++) {
@@ -179,9 +179,9 @@ test('sounds.json：每个采样一条事件，名字与文件一一对应', () 
   assert.deepEqual(Object.keys(json).sort(),
     ['bass_g0', 'bell_cs4', 'demo_bass', 'demo_bell', 'demo_pad', 'demo_strings', 'silent', 'strings_fs4']);
   assert.deepEqual(json.strings_fs4.sounds, [
-    { name: 'nbforge:strings/fs4', stream: false, attenuation_distance: 16 },
+    { name: 'nbmachina:strings/fs4', stream: false, attenuation_distance: 16 },
   ]);
-  assert.equal(json.bell_cs4.sounds[0].name, 'nbforge:bell/cs4');
+  assert.equal(json.bell_cs4.sounds[0].name, 'nbmachina:bell/cs4');
   // 采样名必须**带命名空间**：不带就会被客户端当 minecraft: 解析 → 找不到文件 → 事件零采样
   // （2026-09-14 客户端日志实测：File minecraft:sounds/strings/g3.ogg does not exist）
   for (const key of Object.keys(json)) {
@@ -193,7 +193,7 @@ test('sounds.json：每个采样一条事件，名字与文件一一对应', () 
   // 至于"文件真的存在"，由下面"zip 里每个 name 都指向真实条目"那条测试在真实产物上兜住。
   for (const [key, a] of Object.entries(DEMO_ALIASES)) {
     assert.ok(json[key], `缺 demo 别名 ${key}`);
-    assert.equal(json[key].sounds[0].name, `nbforge:${a.path}`);
+    assert.equal(json[key].sounds[0].name, `nbmachina:${a.path}`);
     const timbre = key.slice('demo_'.length);
     assert.ok(a.path.startsWith(`${timbre}/`), `${key} 应指向 ${timbre}/…，实际 ${a.path}`);
   }
@@ -217,8 +217,8 @@ test('zip：条目可回读、两次构建字节相同（可复现）、crc32 �
   assert.equal(crc32(Buffer.from('The quick brown fox jumps over the lazy dog')), 0x414fa339);
   const entries = [
     { path: 'pack.mcmeta', data: Buffer.from('{"pack":{"pack_format":69}}') },
-    { path: 'assets/nbforge/sounds.json', data: Buffer.from('{}') },
-    { path: 'assets/nbforge/sounds/strings/fs4.ogg', data: Buffer.from([1, 2, 3, 4, 5]) },
+    { path: 'assets/nbm/sounds.json', data: Buffer.from('{}') },
+    { path: 'assets/nbm/sounds/strings/fs4.ogg', data: Buffer.from([1, 2, 3, 4, 5]) },
   ];
   const a = buildZip(entries);
   const b = buildZip(entries);
@@ -231,33 +231,33 @@ test('资源包构建：目录结构 + zip 体积 <15MB（用真实采样目录�
   const out = tmpDir('pack');
   const res = buildResourcePack({
     audioDir: AUDIO,
-    outDir: path.join(out, 'nbforge_resources'),
-    zipPath: path.join(out, 'nbforge_resources.zip'),
+    outDir: path.join(out, 'nbmachina_resources'),
+    zipPath: path.join(out, 'nbmachina_resources.zip'),
     copyTo: null,
   });
   assert.equal(res.sounds, TIMBRES.reduce((n, tt) => n + registerSize(tt), 0), '事件数应等于采样数');
-  const mcmeta = JSON.parse(fs.readFileSync(path.join(out, 'nbforge_resources', 'pack.mcmeta'), 'utf8'));
+  const mcmeta = JSON.parse(fs.readFileSync(path.join(out, 'nbmachina_resources', 'pack.mcmeta'), 'utf8'));
   assert.equal(mcmeta.pack.pack_format, PACK_FORMAT);
   // 1.21.9+ 的硬要求：声明 >64 的格式号必须同时给 min_format/max_format，否则客户端直接判"已损坏或不兼容"。
   // 2026-09-14 客户端日志原文：Pack declares support for version newer than 64, but is missing mandatory
   // fields min_format and max_format（vanilla 内置包也是 min/max 成对出现，见 docs/M3-3-report.md）。
   assert.equal(mcmeta.pack.min_format, PACK_FORMAT, '缺 min_format 会被客户端判为不兼容');
   assert.equal(mcmeta.pack.max_format, PACK_FORMAT, '缺 max_format 会被客户端判为不兼容');
-  const zip = fs.readFileSync(path.join(out, 'nbforge_resources.zip'));
+  const zip = fs.readFileSync(path.join(out, 'nbmachina_resources.zip'));
   assert.ok(zip.length < 15 * 1024 * 1024, `zip ${(zip.length / 1048576).toFixed(2)}MB ≥ 15MB`);
   const names = listZipEntries(zip);
   // 采样数 = 148 个合成采样 + 1 个静音采样（后端 A 替换原版音符盒声音用）
   assert.equal(names.length, res.sounds + res.extraSamples + 2,
     `zip 条目 ${names.length} ≠ 采样 ${res.sounds}+${res.extraSamples} + pack.mcmeta + sounds.json`);
-  assert.ok(names.includes('pack.mcmeta') && names.includes('assets/nbforge/sounds.json'));
-  assert.ok(names.includes('assets/nbforge/sounds/silent.ogg'), '静音采样必须在包里（mod 替换原版音符盒声音要用）');
-  assert.ok(names.every((n) => n === 'pack.mcmeta' || n.startsWith('assets/nbforge/')));
+  assert.ok(names.includes('pack.mcmeta') && names.includes('assets/nbm/sounds.json'));
+  assert.ok(names.includes('assets/nbm/sounds/silent.ogg'), '静音采样必须在包里（mod 替换原版音符盒声音要用）');
+  assert.ok(names.every((n) => n === 'pack.mcmeta' || n.startsWith('assets/nbm/')));
   // sounds.json 里每个 name 都必须指向 zip 里真实存在的文件
-  const sounds = JSON.parse(fs.readFileSync(path.join(out, 'nbforge_resources', 'assets/nbforge/sounds.json'), 'utf8'));
+  const sounds = JSON.parse(fs.readFileSync(path.join(out, 'nbmachina_resources', 'assets/nbm/sounds.json'), 'utf8'));
   for (const key of Object.keys(sounds)) {
     for (const s of sounds[key].sounds) {
       const rel = s.name.replace(/^[a-z0-9_]+:/, '');   // 去掉命名空间前缀再对 zip 路径
-      assert.ok(names.includes(`assets/nbforge/sounds/${rel}.ogg`), `${key} → ${rel}.ogg 不在 zip 里`);
+      assert.ok(names.includes(`assets/nbm/sounds/${rel}.ogg`), `${key} → ${rel}.ogg 不在 zip 里`);
     }
   }
 });
@@ -291,20 +291,20 @@ test('映射：旋律层（默认 strings）／次高音→bell／bass→bass（
   ];
   const { events, stats } = planHifi(notes);
   const at = (row) => events.find((e) => e.step === 0 && e.row === row);
-  assert.equal(at(15).event, 'nbforge:strings_a3', 'harp row 15 = A3 是旋律');
-  assert.equal(at(12).event, 'nbforge:bell_fs3', '同刻次高音 = 内声部');
-  assert.equal(at(9).event, 'nbforge:bass_ds1', 'bass row 9 → midi 27（默认不升八度，原曲音高）');
+  assert.equal(at(15).event, 'nbmachina:strings_a3', 'harp row 15 = A3 是旋律');
+  assert.equal(at(12).event, 'nbmachina:bell_fs3', '同刻次高音 = 内声部');
+  assert.equal(at(9).event, 'nbmachina:bass_ds1', 'bass row 9 → midi 27（默认不升八度，原曲音高）');
   assert.equal(at(9).midi, 27);
   assert.equal(at(0).event, 'minecraft:block.note_block.basedrum');
   assert.equal(at(24).event, 'minecraft:block.note_block.hat');
-  assert.equal(events.find((e) => e.step === 1).event, 'nbforge:strings_d4');
+  assert.equal(events.find((e) => e.step === 1).event, 'nbmachina:strings_d4');
   assert.equal(stats.synth, 4);
   assert.equal(stats.vanilla, 2);
   assert.equal(stats.bell, 1);
   assert.equal(stats.bassOctaveUp, 0);
   // 旋律层可切换音色（M3-6 新增钢琴类；流水线 CLI 默认 piano）
   const piano = planHifi(notes, { melody: 'piano' });
-  assert.equal(piano.events.find((e) => e.step === 0 && e.row === 15).event, 'nbforge:piano_a3');
+  assert.equal(piano.events.find((e) => e.step === 0 && e.row === 15).event, 'nbmachina:piano_a3');
   assert.equal(piano.stats.piano, 2, '旋律两颗音都换成 piano');
   // 打击乐保留原版音高语义（与 datapack-playback 的 pitchMul(row) 一致）
   assert.equal(at(0).pitch, '0.5000');
@@ -321,28 +321,28 @@ test('映射：内声部可用 pad 替换 bell（--inner），未知乐器退回
     { step: 3, instr: 'chime', row: 8, vol: 0.4 },
   ];
   const withPad = planHifi(notes, { inner: 'pad' }).events.find((e) => e.step === 3 && e.row === 10);
-  assert.equal(withPad.event, 'nbforge:pad_e3');
+  assert.equal(withPad.event, 'nbmachina:pad_e3');
   assert.equal(withPad.timbre, 'pad');
   const withBell = planHifi(notes, { inner: 'bell' }).events.find((e) => e.step === 3 && e.row === 10);
-  assert.equal(withBell.event, 'nbforge:bell_e3');
+  assert.equal(withBell.event, 'nbmachina:bell_e3');
   const chime = planHifi([{ step: 1, instr: 'chime', row: 8, vol: 0.5 }]).events[0];
-  assert.equal(chime.event, 'nbforge:bell_d3', '已知别名 chime→bell');
+  assert.equal(chime.event, 'nbmachina:bell_d3', '已知别名 chime→bell');
   const unknown = planHifi([{ step: 1, instr: 'theremin', row: 8, vol: 0.5 }]);
   assert.equal(unknown.stats.unknownInstrument, 1);
   assert.equal(unknown.stats.fallback, 1);
-  assert.equal(unknown.events[0].event, 'nbforge:strings_d3');
+  assert.equal(unknown.events[0].event, 'nbmachina:strings_d3');
 });
 
 test('贝斯音高：默认按原曲（不升八度），--bass-octave 1 可开旧行为', () => {
   // 2026-09-14 用户要求"音高全部按原曲，不要单独去升降八度" → 默认 0
   const flat = planHifi([{ step: 0, instr: 'bass', row: 9, vol: 0.5 }]).events[0];
   assert.equal(flat.midi, 27);
-  assert.equal(flat.event, 'nbforge:bass_ds1');
+  assert.equal(flat.event, 'nbmachina:bass_ds1');
   assert.equal(flat.pitch, '1');
   assert.equal(planHifi([{ step: 0, instr: 'bass', row: 9, vol: 0.5 }]).stats.bassOctaveUp, 0);
   const up = planHifi([{ step: 0, instr: 'bass', row: 9, vol: 0.5 }], { bassOctave: 1 }).events[0];
   assert.equal(up.midi, 39);
-  assert.equal(up.event, 'nbforge:bass_ds2');
+  assert.equal(up.event, 'nbmachina:bass_ds2');
   assert.equal(planHifi([{ step: 0, instr: 'bass', row: 9, vol: 0.5 }], { bassOctave: 1 }).stats.bassOctaveUp, 1);
 });
 
@@ -397,13 +397,13 @@ test('真实谱面：整条机器谱面全部映射成功，事件都在渲染�
   const { events, stats: hifi } = planHifi(notes);
   assert.equal(events.length, notes.length, '每颗音都要有一条事件');
   assert.equal(hifi.unknownInstrument, 0, '机器谱面里出现了未知乐器');
-  const soundsFile = path.join(BUILD, 'nbforge_resources', 'assets', 'nbforge', 'sounds.json');
+  const soundsFile = path.join(BUILD, 'nbmachina_resources', 'assets', 'nbmachina', 'sounds.json');
   const sounds = fs.existsSync(soundsFile) ? JSON.parse(fs.readFileSync(soundsFile, 'utf8')) : null;
   for (const e of events) {
-    if (!e.event.startsWith('nbforge:')) continue;
+    if (!e.event.startsWith('nbmachina:')) continue;
     const [lo, hi] = REGISTERS[e.timbre];
     assert.ok(e.midi >= lo && e.midi <= hi, `${e.timbre} midi ${e.midi} 超出渲染音域 ${lo}..${hi}`);
-    if (sounds) assert.ok(sounds[e.event.slice('nbforge:'.length)], `${e.event} 不在 sounds.json 里`);
+    if (sounds) assert.ok(sounds[e.event.slice('nbmachina:'.length)], `${e.event} 不在 sounds.json 里`);
   }
   const fn = buildHifiFunctions(notes, {});
   const bucketText = [...fn].filter(([n]) => /^play\/hifi\/(lo|hi)\/b\d{3}$/.test(n)).map(([, tt]) => tt).join('\n');

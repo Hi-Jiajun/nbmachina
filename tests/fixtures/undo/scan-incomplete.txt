@@ -1,4 +1,4 @@
-# nbforge undo-preimage v1
+# nbmachina undo-preimage v1
 # at 2026-09-14T03:41:00.000Z
 # notes build/styx_helix_machine.csv
 # cells 3

@@ -1,11 +1,11 @@
 // M2-1 · 渲染全部自研采样（零第三方采样）：WAV 无损中间件 → OGG 交付件 + FFT 自查报告
 //
-// 用法：node src/synth/render-all.mjs --out build/audio_nbforge
+// 用法：node src/synth/render-all.mjs --out build/audio_nbmachina
 //   [--only strings,bell]  只渲染部分音色（默认全部 4 个）
 //   [--vel 0.8]            采样烘死的力度层（默认 0.8 = 中强）
 //   [--quality 4]          libvorbis -q:a（默认 4）
 //   [--no-wav]             转完 ogg 后删掉 WAV 中间件（默认保留，方便人工核对）
-// 相对路径（`--out build/audio_nbforge`）按 **minecraft 工程根** 解析（= 本仓库的上一级），
+// 相对路径（`--out build/audio_nbmachina`）按 **minecraft 工程根** 解析（= 本仓库的上一级），
 // 与其他模块（datapack-playback 等）的 <BUILD> 约定一致。
 //
 // 产物：
@@ -35,10 +35,10 @@ const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const flag = (n) => argv.includes(`--${n}`);
 
-/** 相对路径按 minecraft 工程根解析（`--out build/audio_nbforge` → <minecraft>/build/audio_nbforge） */
+/** 相对路径按 minecraft 工程根解析（`--out build/audio_nbmachina` → <minecraft>/build/audio_nbmachina） */
 const MC_ROOT = path.resolve(BUILD, '..');
 const resolvePath = (p) => (path.isAbsolute(p) ? p : path.resolve(MC_ROOT, p));
-const OUT = resolvePath(opt('out', path.join(BUILD, 'audio_nbforge')));
+const OUT = resolvePath(opt('out', path.join(BUILD, 'audio_nbmachina')));
 const ONLY = (opt('only', '') || TIMBRES.join(',')).split(',').map((s) => s.trim()).filter(Boolean);
 const VEL = Number(opt('vel', REFERENCE_VEL));
 const QUALITY = Number(opt('quality', 4));

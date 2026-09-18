@@ -114,7 +114,7 @@ tick 15060。探针实测（`probe.mjs`，取一个真实音符格 `(1600, 85, -
 ### 0.5 与同任务另一版 B 文档的口径差异（可复查）
 
 同一任务下另有一版 B 文档先提交了（commit `cecd26c`，00:32:31）。本文件取代了工作区里的那一版，
-**原版没丢**：`git -C nbforge show cecd26c:docs/DISCUSSION-B-architecture.md > B-alt.md` 即可取回。
+**原版没丢**：`git -C nbmachina show cecd26c:docs/DISCUSSION-B-architecture.md > B-alt.md` 即可取回。
 两处口径差异，以本轮实测为准：
 
 1. **瓶颈是"每刻被求值的命令条数"，不是"函数调用次数"。** 另一版认为"单刻真正被求值的只有当前桶
@@ -171,7 +171,7 @@ tick 15060。探针实测（`probe.mjs`，取一个真实音符格 `(1600, 85, -
 | 没有 `ingest` / `verify` / `deploy` | `src/` 只有 analyze / arrange / layout / emit / scan / test / research | 输入来源与验收报告都不是模块，是"脚本 + 人工看输出" |
 | 没有文件契约 | 中间数据是 `build/` 下 `styx_helix_notes.csv`、`_v3.csv`、`notes.json`、`notes_raw.json`、`song.json`、`song_midi.json`、`single_row_profile.json` **7 种格式**，字段口径各不相同 | 无法判断"哪份是真相"，改一步要人工确认 |
 | 全部硬编码绝对路径 | `C:/Users/hiliang/Documents/minecraft/build`、PCL2 存档路径、`java.exe` 路径写死在每个脚本里 | 换机器/换存档必炸；模块无法单独跑 |
-| **产物不在版本库里** | `build/styx_build/` 在仓库外（git 只跟踪 `nbforge/`，`.gitignore` 也没管它） | "可复现"无法证明，回退只能靠人肉备份目录 |
+| **产物不在版本库里** | `build/styx_build/` 在仓库外（git 只跟踪 `nbmachina/`，`.gitignore` 也没管它） | "可复现"无法证明，回退只能靠人肉备份目录 |
 | 时间常量多处复制 | `SEC_PER_STEP=0.12`（arrange）、`PLAY_TPS=100`（arrange）、`SWITCH_TICK=1248*0.12*20`（emit）、`schedule … 120t/200t`（redo-chain）、`tick rate 100`（start） | **已经炸了一次**（§0.4 的 1326 个音）；`redo` 的等待在 100 tps 下从 6 s 变成 1.2 s |
 | `emit` 不清空输出目录 | `data/styx/structure/` 里 196 个 NBT（`flat_a/flat_b/flat_c/styx` × 49）：当前链路（`flat_build_v2a/b/c`）只引用 `flat_b_*`，`styx_*` 由遗留的 `build.mcfunction` 引用，`flat_a/flat_c` 只有 2 条引用——**147 个是死重量**；函数目录里还有 `flat_build`、`flat_lights`、`lamps`、`light_v1..v3`、`melody_line`、`reset1/2`、`undo_*`、`bass_guitar_*` 等 60+ 个历史产物 | 数据包体积与解析/加载成本翻倍，且"哪个函数是当前版本"要靠猜 |
 | 没有 report | 没有 `arrange-report.json` / `degradations[]` | 违背 v0.2 的"保真契约"（不允许静默近似） |
@@ -180,8 +180,8 @@ tick 15060。探针实测（`probe.mjs`，取一个真实音符格 `(1600, 85, -
 ### 1.3 重构建议（不推翻现有代码，加壳）
 
 ```
-nbforge/
-  nbforge.config.json      # { worldPath, javaExe, outDir, server.jar, proxy? }
+nbmachina/
+  nbmachina.config.json      # { worldPath, javaExe, outDir, server.jar, proxy? }
   work/                    # 可删可重建；不进 git（但每次运行的 sha256 进 report）
     01-project.json  02-analysis.json  03-score.json  04-layout.json  05-plan.json
     reports/{analyze,arrange,layout,plan,emit}.report.json

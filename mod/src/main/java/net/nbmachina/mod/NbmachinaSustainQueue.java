@@ -1,4 +1,4 @@
-package net.nbforge.mod;
+package net.nbmachina.mod;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -19,17 +19,17 @@ import net.minecraft.util.math.Vec3d;
  * <p>已知限制（如实记录）：现有采样是 ~0.3s 的一次性 ogg，没有 loop 点，
  * 长延音靠重触发堆叠，不是真正的循环采样。
  */
-public final class NbforgeSustainQueue {
+public final class NbmachinaSustainQueue {
 	private static final List<Job> JOBS = new ArrayList<>();
 
 	private static int totalPlays;
 	private static int peakActiveJobs;
 
-	private NbforgeSustainQueue() {
+	private NbmachinaSustainQueue() {
 	}
 
 	public static void register() {
-		ServerTickEvents.END_SERVER_TICK.register(NbforgeSustainQueue::onEndTick);
+		ServerTickEvents.END_SERVER_TICK.register(NbmachinaSustainQueue::onEndTick);
 	}
 
 	public static void enqueue(ServerWorld world, Vec3d pos, SoundEvent sound,

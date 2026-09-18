@@ -4,7 +4,7 @@
 //   node src/core/new-project.mjs --name mySong [--build <dir>]   # 建骨架（空目录可跑、幂等、不覆盖已有文件）
 //   node src/core/new-project.mjs [--build <dir>]                 # 看状态：已有什么、下一步该跑哪条命令
 //
-// 骨架与 paths.mjs 是同一套约定：`project.json` 里的 `nbforge.project` 决定文件名前缀
+// 骨架与 paths.mjs 是同一套约定：`project.json` 里的 `nbmachina.project` 决定文件名前缀
 // （音频 `<前缀>_full.wav`、谱面 `<前缀>_notes_v3.csv`、机器谱面 `<前缀>_machine.csv`、数据包 `<前缀>_build/`），
 // 所以建完之后所有已改造的脚本只要 `--build <dir>` 就能找到正确的名字，不用再改代码。
 //
@@ -19,7 +19,7 @@ const nameFlag = findFlag(argv, 'name') ?? findFlag(argv, 'project');
 if (nameFlag === true) throw new Error('--name 需要一个工程名：--name <name>');
 const name = typeof nameFlag === 'string' ? nameFlag.trim() : undefined;
 
-const explicitBuild = findFlag(argv, 'build') !== undefined || Boolean(process.env.NBFORGE_BUILD);
+const explicitBuild = findFlag(argv, 'build') !== undefined || Boolean(process.env.nbmachina_BUILD);
 const P = resolvePaths({
   argv,
   env: process.env,
@@ -52,8 +52,8 @@ function projectTemplate(P) {
     ],
     tempoMap: [{ sec: 0, bpm: 120 }],
     annotations: [],
-    // nbforge 自己的字段（SPEC 校验器对未知字段放行）：工程名 → 文件名前缀
-    nbforge: { project: P.project, audio: `${P.prefix}_full.wav` },
+    // nbmachina 自己的字段（SPEC 校验器对未知字段放行）：工程名 → 文件名前缀
+    nbmachina: { project: P.project, audio: `${P.prefix}_full.wav` },
   };
 }
 
@@ -69,9 +69,9 @@ function readmeText(P) {
     pack: path.basename(P.packDir),
   };
   return [
-    `# ${P.project} · nbforge 工程骨架`,
+    `# ${P.project} · nbmachina 工程骨架`,
     '',
-    `这是 nbforge 的**工作目录**（\`--build ${P.build}\`）：**一个目录 = 一首歌**。`,
+    `这是 nbmachina 的**工作目录**（\`--build ${P.build}\`）：**一个目录 = 一首歌**。`,
     `本骨架由 \`src/core/new-project.mjs\` 生成，随便改；用 \`node src/core/new-project.mjs --build ${P.build}\` 随时看还缺什么。`,
     '',
     '## 放什么',
@@ -111,13 +111,13 @@ function readmeText(P) {
     '',
     '## 已知边界（M2-2 未覆盖的部分）',
     '',
-    `- 还没接到 \`paths.mjs\` 的脚本（\`octave-fix\` / \`onset-detect\` / \`drums\` / \`layout\` / \`scan\` / \`ingest\` / \`test\`）仍然只认 \`NBFORGE_BUILD\` 环境变量，`,
-    `  且默认文件名带历史前缀 \`styx_helix_\`——用它们时请显式给 \`--notes/--out/--report\`，或先 \`set NBFORGE_BUILD=${P.build}\`。清单见 \`docs/M2-2-report.md\` §6。`,
+    `- 还没接到 \`paths.mjs\` 的脚本（\`octave-fix\` / \`onset-detect\` / \`drums\` / \`layout\` / \`scan\` / \`ingest\` / \`test\`）仍然只认 \`nbmachina_BUILD\` 环境变量，`,
+    `  且默认文件名带历史前缀 \`styx_helix_\`——用它们时请显式给 \`--notes/--out/--report\`，或先 \`set nbmachina_BUILD=${P.build}\`。清单见 \`docs/M2-2-report.md\` §6。`,
     '- 数据包命名空间（函数名 `styx:play/tick`、计分板 `styx.t`）与文件路径无关，本阶段不动；换歌只换文件名与目录。',
     '',
     '## 契约',
     '',
-    `- 工程名（\`project.json\` 的 \`nbforge.project\`）= 文件名前缀：**${P.prefix}**。改名要连文件名一起改。`,
+    `- 工程名（\`project.json\` 的 \`nbmachina.project\`）= 文件名前缀：**${P.prefix}**。改名要连文件名一起改。`,
     `- 带前缀的是"工程身份"文件：\`${names.audio}\` / \`${names.notes}\` / \`${names.notesV3}\` / \`${names.machine}\` / \`${names.pack}/\`。`,
     '- 中间产物（`pipeline_*.csv`、`notes_*.csv`、`*-report.json`、`manifest.json`…）不带前缀——一个目录一首歌，同目录内唯一。',
   ].join('\n') + '\n';
@@ -207,7 +207,7 @@ function createSkeleton(P) {
   ensureDir(path.join(P.build, 'midi'), { created, skipped });
   ensureDir(P.packDir, { created, skipped });
   writeIfMissing(path.join(P.packDir, 'pack.mcmeta'), JSON.stringify({
-    pack: { pack_format: 88, min_format: 88, max_format: 88, description: `nbforge ${P.project}（new-project.mjs 生成，可改）` },
+    pack: { pack_format: 88, min_format: 88, max_format: 88, description: `nbmachina ${P.project}（new-project.mjs 生成，可改）` },
   }, null, 2) + '\n', { created, skipped });
 
   console.log(`新建工程骨架：${P.build}（工程名 ${P.project}，文件名前缀 ${P.prefix}）`);

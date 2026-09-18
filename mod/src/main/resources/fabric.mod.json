@@ -1,23 +1,23 @@
 {
 	"schemaVersion": 1,
-	"id": "nbforge",
+	"id": "nbmachina",
 	"version": "${version}",
-	"name": "nbforge backend A",
-	"description": "nbforge 后端 A 骨架：自定义音色事件 + 独立力度/延音 + 服务端命令 /nbforge",
+	"name": "NBMachina (backend A)",
+	"description": "nbmachina 后端 A 骨架：自定义音色事件 + 独立力度/延音 + 服务端命令 /nbm",
 	"authors": [
-		"nbforge"
+		"nbm"
 	],
 	"license": "MIT",
 	"environment": "*",
 	"mixins": [
-		"nbforge.mixins.json"
+		"nbmachina.mixins.json"
 	],
 	"entrypoints": {
 		"main": [
-			"net.nbforge.mod.NbforgeMod"
+			"net.nbmachina.mod.NbmachinaMod"
 		],
 		"client": [
-			"net.nbforge.mod.NbforgeClient"
+			"net.nbmachina.mod.NbmachinaClient"
 		]
 	},
 	"depends": {

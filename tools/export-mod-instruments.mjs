@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // M3-16（P2）· 把我们的真乐器库导出成 mod 用的 `instruments.json`
 //
-// mod 侧（Java 的 NbforgeInstruments）读这个 JSON，把（乐器, midi, 力度）解析成
+// mod 侧（Java 的 nbmachinaInstruments）读这个 JSON，把（乐器, midi, 力度）解析成
 // "哪个采样文件 + 变调比 + 增益"，再用自己的 OpenAL 引擎无损播放。
 //
 // 关键约束：**离线渲染与游戏内必须是同一套映射**——所以这里直接复用 `src/sample/sfz.mjs`
@@ -9,8 +9,8 @@
 // 只是把区域表原样导出成 JSON。
 //
 // 用法：
-//   node tools/export-mod-instruments.mjs                     # 写 build/nbforge_instruments.json
-//   node tools/export-mod-instruments.mjs --deploy            # 顺带部署到客户端 config/nbforge/
+//   node tools/export-mod-instruments.mjs                     # 写 build/nbm_instruments.json
+//   node tools/export-mod-instruments.mjs --deploy            # 顺带部署到客户端 config/nbm/
 //   node tools/export-mod-instruments.mjs --only salamander48 # 只导一个乐器
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,10 +26,10 @@ const TC = 'C:/Users/hiliang/Documents/minecraft/_toolchain';
 /** PCL2 开了版本隔离：客户端 gameDir 就是版本目录 */
 const CLIENT_GAME_DIR = 'C:/Program Files/PCL2/.minecraft/versions/1.21.10-Fabric 0.19.5';
 
-const OUT = opt('out', path.join(P.build, 'nbforge_instruments.json'));
+const OUT = opt('out', path.join(P.build, 'nbmachina_instruments.json'));
 const DEPLOY = has('deploy');
 
-/** 乐器清单：id → SFZ 与署名（顺序即 `/nbfc instruments` 的显示顺序） */
+/** 乐器清单：id → SFZ 与署名（顺序即 `/nbmc instruments` 的显示顺序） */
 const INSTRUMENTS = [
   {
     id: 'salamander48',
@@ -225,7 +225,7 @@ console.log(`写出 ${OUT}（${out.instruments.length} 个乐器，${sizeMb}MB�
 for (const s of summary) console.log('  ' + s);
 
 if (DEPLOY) {
-  const dst = path.join(CLIENT_GAME_DIR, 'config', 'nbforge', 'instruments.json');
+  const dst = path.join(CLIENT_GAME_DIR, 'config', 'nbmachina', 'instruments.json');
   fs.mkdirSync(path.dirname(dst), { recursive: true });
   fs.copyFileSync(OUT, dst);
   console.log(`已部署 → ${dst}`);

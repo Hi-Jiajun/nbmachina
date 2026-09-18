@@ -2,7 +2,7 @@
 // M2-2 · 改造前后 A/B 验证（docs/M2-2-report.md 的证据来源）
 //
 // 口径：同一首歌 + **同一个绝对路径的 build 目录**，用两条"路径来源通道"各跑一遍全部脚本：
-//   基线 = 改造前的代码（`--baseline <git ref | dir>`），它只会认 `NBFORGE_BUILD` 环境变量
+//   基线 = 改造前的代码（`--baseline <git ref | dir>`），它只会认 `nbmachina_BUILD` 环境变量
 //   新版 = 当前工作树，走 `--build <dir>`
 // 两侧都从同一份输入开始、写到同一批绝对路径；每个脚本跑完把产出拷成快照，逐文件比 sha256。
 //
@@ -37,7 +37,7 @@ if (!baselineRef || !inputDir) {
   console.error('用法：node tools/ab-verify.mjs --baseline <git ref | dir> --input <真实 build 目录> [--work <dir>] [--keep]');
   process.exit(2);
 }
-const work = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'nbforge-ab-'));
+const work = fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), 'nbmachina-ab-'));
 if (opt('work')) fs.mkdirSync(opt('work'), { recursive: true });
 const workDir = opt('work') ? path.resolve(opt('work')) : work;
 const BUILD = posix(path.join(workDir, 'build'));
@@ -238,7 +238,7 @@ function runStep(step, side) {
     out = execFileSync(process.execPath, [posix(path.join(repo, step.script)), ...extra], {
       cwd: repo,
       encoding: 'utf8',
-      env: { ...process.env, NBFORGE_BUILD: side === 'base' ? BUILD : '' },
+      env: { ...process.env, nbmachina_BUILD: side === 'base' ? BUILD : '' },
       stdio: ['ignore', 'pipe', 'pipe'],
       maxBuffer: 64 * 1024 * 1024,
     });
@@ -309,7 +309,7 @@ for (const step of STEPS) {
 
 const bad = results.filter((r) => r.status === '✘');
 const report = {
-  $schema: 'nbforge.ab-verify/v0',
+  $schema: 'nbmachina.ab-verify/v0',
   baseline: baselineRef,
   input: posix(path.resolve(inputDir)),
   buildDir: BUILD,

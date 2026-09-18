@@ -1,6 +1,6 @@
-# 讨论 C · 音乐 / 编曲视角（nbforge）
+# 讨论 C · 音乐 / 编曲视角（nbmachina）
 
-> 产出方：子代理 `agent_c_music`（对应任务书 `nbforge-C-music.md`），背景见 `nbforge-brief.md`。
+> 产出方：子代理 `agent_c_music`（对应任务书 `nbmachina-C-music.md`），背景见 `nbmachina-brief.md`。
 > 本文只给结论与取舍，不含代码。文中所有数字都是本次在 `build/` 里的真实数据上实测的（口径见第 7 节）。
 
 ## 0. 结论先行

@@ -702,7 +702,7 @@ if (invokedDirectly) {
     octaveEvidence,
   });
   const report = {
-    $schema: 'nbforge.score-report/v0',
+    $schema: 'nbmachina.score-report/v0',
     meta: {
       notesPath,
       wavPath,

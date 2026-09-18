@@ -183,7 +183,7 @@ export function percussionFromAudio({ samples, sampleRate, config = {}, detector
 
 /* ------------------------------------------------------------------- CLI */
 
-/** `build/` 在上层目录（仓库只跟踪 nbforge/）：给定的路径不存在时自动退到 `../<路径>` */
+/** `build/` 在上层目录（仓库只跟踪 nbmachina/）：给定的路径不存在时自动退到 `../<路径>` */
 function resolveExisting(p, label) {
   if (fs.existsSync(p)) return p;
   const alt = path.join('..', p);

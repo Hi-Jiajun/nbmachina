@@ -16,7 +16,7 @@ const REPO = path.resolve(here, '..');
 /** 历史默认 build 目录（改造前写死在每个脚本里的那个字符串） */
 const LEGACY_BUILD = path.resolve(REPO, '..', 'build').replace(/\\/g, '/');
 
-const tmp = (label) => fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), `nbforge-paths-${label}-`));
+const tmp = (label) => fs.mkdtempSync(path.join(fs.realpathSync(os.tmpdir()), `nbmachina-paths-${label}-`));
 const posix = (p) => p.replace(/\\/g, '/');
 
 test('默认（无参数、无环境变量）：build = 仓库上层的 build，工程名 = 历史参考曲 styx', () => {
@@ -54,12 +54,12 @@ test('--build=<dir> 等号写法与 --build <dir> 等价；末尾斜杠被归一
   assert.equal(resolvePaths({ argv: [`--build=${d}/`], env: {} }).build, posix(path.resolve(d)));
 });
 
-test('NBFORGE_BUILD 环境变量生效；--build 覆盖环境变量', () => {
+test('nbmachina_BUILD 环境变量生效；--build 覆盖环境变量', () => {
   const envDir = tmp('env');
   const flagDir = tmp('flag');
-  assert.equal(resolvePaths({ argv: [], env: { NBFORGE_BUILD: envDir } }).build, posix(path.resolve(envDir)));
+  assert.equal(resolvePaths({ argv: [], env: { nbmachina_BUILD: envDir } }).build, posix(path.resolve(envDir)));
   assert.equal(
-    resolvePaths({ argv: ['--build', flagDir], env: { NBFORGE_BUILD: envDir } }).build,
+    resolvePaths({ argv: ['--build', flagDir], env: { nbmachina_BUILD: envDir } }).build,
     posix(path.resolve(flagDir)),
   );
 });
@@ -92,11 +92,11 @@ test('--project styx 是历史别名：仍解析成 styx_helix_*，与不传 --p
   );
 });
 
-test('NBFORGE_PROJECT 生效；--project 覆盖环境变量', () => {
+test('nbmachina_PROJECT 生效；--project 覆盖环境变量', () => {
   const d = tmp('envproj');
-  assert.equal(resolvePaths({ argv: [], env: { NBFORGE_BUILD: d, NBFORGE_PROJECT: 'songA' } }).packDir, `${posix(path.resolve(d))}/songA_build`);
+  assert.equal(resolvePaths({ argv: [], env: { nbmachina_BUILD: d, nbmachina_PROJECT: 'songA' } }).packDir, `${posix(path.resolve(d))}/songA_build`);
   assert.equal(
-    resolvePaths({ argv: ['--project', 'songB'], env: { NBFORGE_BUILD: d, NBFORGE_PROJECT: 'songA' } }).packDir,
+    resolvePaths({ argv: ['--project', 'songB'], env: { nbmachina_BUILD: d, nbmachina_PROJECT: 'songA' } }).packDir,
     `${posix(path.resolve(d))}/songB_build`,
   );
 });
@@ -107,23 +107,23 @@ test('工程名非法（空 / 含路径分隔符 / 空格 / 非 ASCII）时明�
   }
 });
 
-test('build 目录里的 project.json 可声明 nbforge.project，作为兜底（--project/环境变量优先）', () => {
+test('build 目录里的 project.json 可声明 nbmachina.project，作为兜底（--project/环境变量优先）', () => {
   const d = tmp('manifest');
   fs.writeFileSync(path.join(d, 'project.json'), JSON.stringify({
     meta: { title: 'Demo' },
-    nbforge: { project: 'demo' },
+    nbmachina: { project: 'demo' },
   }), 'utf8');
   assert.equal(resolvePaths({ argv: ['--build', d], env: {} }).project, 'demo');
   assert.equal(resolvePaths({ argv: ['--build', d], env: {} }).machine, `${posix(path.resolve(d))}/demo_machine.csv`);
   assert.equal(resolvePaths({ argv: ['--build', d, '--project', 'override'], env: {} }).project, 'override');
-  assert.equal(resolvePaths({ argv: ['--build', d], env: { NBFORGE_PROJECT: 'override2' } }).project, 'override2');
+  assert.equal(resolvePaths({ argv: ['--build', d], env: { nbmachina_PROJECT: 'override2' } }).project, 'override2');
 });
 
-test('project.json 坏掉（非法 JSON / nbforge.project 不是字符串）不抛异常，退回历史默认', () => {
+test('project.json 坏掉（非法 JSON / nbmachina.project 不是字符串）不抛异常，退回历史默认', () => {
   const d = tmp('broken');
   fs.writeFileSync(path.join(d, 'project.json'), '{ not json', 'utf8');
   assert.equal(resolvePaths({ argv: ['--build', d], env: {} }).project, 'styx');
-  fs.writeFileSync(path.join(d, 'project.json'), JSON.stringify({ nbforge: { project: 42 } }), 'utf8');
+  fs.writeFileSync(path.join(d, 'project.json'), JSON.stringify({ nbmachina: { project: 42 } }), 'utf8');
   assert.equal(resolvePaths({ argv: ['--build', d], env: {} }).project, 'styx');
 });
 

@@ -70,4 +70,4 @@ run(`④ 力度归一（${MODE}）`, process.execPath, [path.join('src', 'arrang
 run('⑤ 导出 mod 谱面', process.execPath, [path.join('tools', 'export-mod-score.mjs'),
   '--in', DYNAMICS, '--preset', 'piano', ...(DEPLOY ? ['--deploy'] : [])]);
 
-console.log(`完成：${DYNAMICS.replace(/\\/g, '/')}${DEPLOY ? '（已部署，游戏内 /nbforge score load 即可听）' : ''}`);
+console.log(`完成：${DYNAMICS.replace(/\\/g, '/')}${DEPLOY ? '（已部署，游戏内 /nbm score load 即可听）' : ''}`);

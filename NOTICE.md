@@ -1,6 +1,6 @@
 # 参考与致谢（只借鉴思路，未使用其代码）
 
-本项目（nbforge）的全部代码为自研。以下社区项目的**公开思路**影响了本项目的设计，
+本项目（nbmachina）的全部代码为自研。以下社区项目的**公开思路**影响了本项目的设计，
 这里明确致谢；我们**没有**复制、移植或改写它们的任何代码/资源。
 
 | 项目 | 借鉴的思路 |
@@ -17,12 +17,12 @@
 
 ## 音频资源（M2-1：自研音色资源包）
 
-**`build/nbforge_resources.zip`（`assets/nbforge/**`，148 个 ogg）里没有任何第三方采样/音源/素材**：
+**`build/nbm_resources.zip`（`assets/nbm/**`，148 个 ogg）里没有任何第三方采样/音源/素材**：
 全部音频由本仓库的 `src/synth/*.mjs` 现场合成（Karplus–Strong 拨弦、加法/FM 铺底、模态钟琴），
 拨片噪声来自确定性伪随机数（`mulberry32`）—— 每个采样都能用同一条命令复算出来：
 
 ```bash
-node src/synth/render-all.mjs --out build/audio_nbforge   # WAV → OGG（libvorbis），参数全在源码注释里
+node src/synth/render-all.mjs --out build/audio_nbmachina   # WAV → OGG（libvorbis），参数全在源码注释里
 ```
 
 因此资源包的发声内容不涉及第三方版权（不采样原曲、不采样商业音源、不下载网络素材）。

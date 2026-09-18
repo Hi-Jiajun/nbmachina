@@ -221,7 +221,7 @@ try {
     if (sampleOk === sampleCells.length) {
       /* ---------- 写原始扫描日志（build/undo-scan-raw.log） ---------- */
       const logLines = [
-        `# nbforge undo-preimage v${VERSION}`,
+        `# nbmachina undo-preimage v${VERSION}`,
         `# at ${summary.at}`,
         `# notes ${NOTES}`,
         `# cells ${cells.length}`,

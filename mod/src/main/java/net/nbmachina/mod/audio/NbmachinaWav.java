@@ -1,4 +1,4 @@
-package net.nbforge.mod.audio;
+package net.nbmachina.mod.audio;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -17,7 +17,7 @@ import javax.sound.sampled.AudioSystem;
  * <p>用 JDK 自带的 {@link AudioSystem} 解析 RIFF（能跨过 OLPC 那种带 BWF `bext` 块的头），
  * 但**转换自己做**：8/16/24/32bit → float，避免 JDK 混音器做多余的重采样。
  */
-public final class NbforgeWav {
+public final class NbmachinaWav {
 	/** 解码结果：交错 float PCM（[-1,1]）+ 声道数 + 采样率 */
 	public record Pcm(float[] samples, int channels, int sampleRate) {
 		public int frames() {
@@ -29,7 +29,7 @@ public final class NbforgeWav {
 		}
 	}
 
-	private NbforgeWav() {
+	private NbmachinaWav() {
 	}
 
 	public static Pcm read(Path file) throws IOException {

@@ -24,7 +24,7 @@ import {
 } from '../src/arrange/percussion.mjs';
 import { readWav } from '../src/analyze/dsp.mjs';
 
-const BUILD = process.env.NBFORGE_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
+const BUILD = process.env.nbmachina_BUILD ?? 'C:/Users/hiliang/Documents/minecraft/build';
 const WAV = path.join(BUILD, 'styx_helix_full.wav');
 
 const ev = (time, kind, strength = 0.8) => ({ time, kind, strength });

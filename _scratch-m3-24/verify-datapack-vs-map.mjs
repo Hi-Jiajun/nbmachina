@@ -1,6 +1,6 @@
 // M3-24 校验：**数据包真正会触发的坐标** ↔ **mod 读的 machine_map.csv** 是否一一对上。
 // 这是"游戏内会不会响、响得对不对"的最后一道静态检查：
-//   数据包 play/lo（20tps）与 play/hi（100tps）里所有 `nbforge playat x y z` 的坐标，
+//   数据包 play/lo（20tps）与 play/hi（100tps）里所有 `nbm playat x y z` 的坐标，
 //   必须都能在 machine_map.csv 里查到，且查到的音符与谱面完全一致。
 import fs from 'node:fs';
 
@@ -8,7 +8,7 @@ const B = 'C:/Users/hiliang/Documents/minecraft/build';
 const DP = `${B}/styx_build/data/styx/function/play`;
 
 const map = new Map();
-for (const line of fs.readFileSync(`${B}/nbforge_machine_map.csv`, 'utf8').trim().split(/\r?\n/).slice(1)) {
+for (const line of fs.readFileSync(`${B}/nbm_machine_map.csv`, 'utf8').trim().split(/\r?\n/).slice(1)) {
   const c = line.split(',');
   map.set(`${c[0]},${c[1]},${c[2]}`, { instr: c[3], voice: c[4], midi: +c[5], vel: +c[6], dur: +c[7] });
 }
@@ -39,7 +39,7 @@ for (const mode of ['lo', 'hi']) {
   for (const f of fs.readdirSync(dir)) {
     if (!f.startsWith('b')) continue;
     for (const line of fs.readFileSync(`${dir}/${f}`, 'utf8').split('\n')) {
-      const m = line.match(/nbforge playat (-?\d+) (-?\d+) (-?\d+)/);
+      const m = line.match(/nbm playat (-?\d+) (-?\d+) (-?\d+)/);
       if (!m) continue;
       const key = `${m[1]},${m[2]},${m[3]}`;
       total++; modeTotal++;

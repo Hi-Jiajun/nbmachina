@@ -1,4 +1,4 @@
-package net.nbforge.mod.note;
+package net.nbmachina.mod.note;
 
 import java.util.Map;
 import java.io.IOException;
@@ -19,8 +19,8 @@ import net.minecraft.server.world.ServerWorld;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
-import net.nbforge.mod.NbforgeMod;
-import net.nbforge.mod.net.NbforgePlayPayload;
+import net.nbmachina.mod.NbmachinaMod;
+import net.nbmachina.mod.net.NbmachinaPlayPayload;
 
 /**
  * M3-21 · 机器与引擎合一：**音符盒被红石触发的那一刻，声音由我们的无损引擎发出**。
@@ -30,11 +30,11 @@ import net.nbforge.mod.net.NbforgePlayPayload;
  * <ol>
  *   <li>统计/日志（先证明注入真的生效，再看要不要接管）；</li>
  *   <li>把方块状态（乐器 + note）翻译成我们的（乐器 id + midi + 力度）；</li>
- *   <li>给附近玩家发 {@code nbforge:play}，并**让原版音符盒声音不发声**
+ *   <li>给附近玩家发 {@code nbmachina:play}，并**让原版音符盒声音不发声**
  *       ——粒子仍由方块本体生成（我们只掐声音）。</li>
  * </ol>
  */
-public final class NbforgeNoteBlocks {
+public final class NbmachinaNoteBlocks {
 	/** 接管开关（命令可切）；默认开 */
 	private static volatile boolean enabled = true;
 	private static final AtomicInteger eventCount = new AtomicInteger();
@@ -56,11 +56,11 @@ public final class NbforgeNoteBlocks {
 	 *
 	 * <p>M3-23 默认改成 **on**：机器横跨 480..2880 格，按物理位置只有 64 格内的音发得出去——
 	 * 2026-09-18 用户实测就是被这一点坑了（起服后默认 off，听起来只剩零星碎片）。
-	 * 拍视频要"方位感"时可以手动 `/nbforge listen off`。
+	 * 拍视频要"方位感"时可以手动 `/nbmachina listen off`。
 	 */
 	private static volatile boolean listenMode = true;
 
-	private NbforgeNoteBlocks() {
+	private NbmachinaNoteBlocks() {
 	}
 
 	public static boolean enabled() {
@@ -95,7 +95,7 @@ public final class NbforgeNoteBlocks {
 		listenMode = value;
 	}
 
-	/** 按位置查谱面音符（数据包 `/nbforge playat` 与 mixin 共用） */
+	/** 按位置查谱面音符（数据包 `/nbmachina playat` 与 mixin 共用） */
 	public static Mapped mappedAt(BlockPos pos) {
 		return BY_POS.get(pos.asLong());
 	}
@@ -112,20 +112,20 @@ public final class NbforgeNoteBlocks {
 			double py = listenMode ? player.getY() : y;
 			double pz = listenMode ? player.getZ() : z;
 			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
-				new NbforgePlayPayload(mapped.instrument(), mapped.voice(), mapped.midi(), mapped.velocity(),
+				new NbmachinaPlayPayload(mapped.instrument(), mapped.voice(), mapped.midi(), mapped.velocity(),
 					mapped.durMs(), px, py, pz));
 			sent++;
 		}
 		dispatched.incrementAndGet();
 		if (dispatched.get() <= 5 || dispatched.get() % 200 == 0) {
-			NbforgeMod.LOGGER.info("[nbforge] playat {} → {} midi={} vel={}（第 {} 次，发给 {} 人）",
+			NbmachinaMod.LOGGER.info("[nbmachina] playat {} → {} midi={} vel={}（第 {} 次，发给 {} 人）",
 				pos.toShortString(), mapped.instrument(), mapped.midi(), mapped.velocity(), dispatched.get(), sent);
 		}
 		return sent;
 	}
 
 	/**
-	 * 读入 `机器位置 → 谱面音符` 映射（`<游戏目录>/nbforge/machine_map.csv`）。
+	 * 读入 `机器位置 → 谱面音符` 映射（`<游戏目录>/nbmachina/machine_map.csv`）。
 	 * 表头：`x,y,z,instrument,voice,midi,velocity[,dur_ms]`（第 8 列 M3-22 新增，缺了也能跑）。
 	 */
 	public static int loadMap(Path file) throws IOException {
@@ -167,7 +167,7 @@ public final class NbforgeNoteBlocks {
 		// ① 优先用"机器位置 → 谱面音符"映射：这样力度就是谱面里的真实力度
 		Mapped mapped = BY_POS.get(pos.asLong());
 		String voice = mapped != null ? mapped.voice() : voiceOf(instrument);
-		String target = mapped != null ? mapped.instrument() : (voice == null ? null : NbforgeMod.instrumentForVoice(voice));
+		String target = mapped != null ? mapped.instrument() : (voice == null ? null : NbmachinaMod.instrumentForVoice(voice));
 		if (voice == null || target == null) {
 			skipped.incrementAndGet();
 			return false;   // 不认识的乐器 / 该声部当前没有映射：交回原版
@@ -186,13 +186,13 @@ public final class NbforgeNoteBlocks {
 			if (player.getEntityWorld() != serverWorld) continue;
 			if (player.squaredDistanceTo(x, y, z) > 48 * 48) continue;   // 只发给听得到的玩家
 			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
-				new NbforgePlayPayload(target, voice, midi, velocity,
+				new NbmachinaPlayPayload(target, voice, midi, velocity,
 					mapped != null ? mapped.durMs() : 0, x, y, z));
 			sent++;
 		}
 		dispatched.incrementAndGet();
 		if (eventCount.get() <= 8 || eventCount.get() % 50 == 0) {
-			NbforgeMod.LOGGER.info("[nbforge] 音符盒触发 #{} pos={} 乐器={} note={} → {} midi={} vel={} 发给 {} 人",
+			NbmachinaMod.LOGGER.info("[nbmachina] 音符盒触发 #{} pos={} 乐器={} note={} → {} midi={} vel={} 发给 {} 人",
 				eventCount.get(), pos.toShortString(), instrument, note, target, midi, velocity, sent);
 		}
 		return true;

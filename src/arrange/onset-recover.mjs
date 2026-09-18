@@ -395,7 +395,7 @@ if (invokedDirectly) {
   const { csv, report } = onsetRecover({ csvText: fs.readFileSync(inPath, 'utf8'), samples, sampleRate, config });
   fs.writeFileSync(outPath, csv, 'utf8');
   fs.writeFileSync(reportPath, JSON.stringify({
-    $schema: 'nbforge.onset-recover-report/v0',
+    $schema: 'nbmachina.onset-recover-report/v0',
     inPath,
     audioPath: wavPath,
     outPath,

@@ -1,4 +1,4 @@
-package net.nbforge.mod.mixin;
+package net.nbmachina.mod.mixin;
 
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
@@ -10,7 +10,7 @@ import net.minecraft.block.NoteBlock;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.world.World;
 
-import net.nbforge.mod.note.NbforgeNoteBlocks;
+import net.nbmachina.mod.note.NbmachinaNoteBlocks;
 
 /**
  * M3-21 · 机器与引擎合一：音符盒被红石触发时，用我们的无损引擎发声。
@@ -26,9 +26,9 @@ import net.nbforge.mod.note.NbforgeNoteBlocks;
 @Mixin(NoteBlock.class)
 public abstract class NoteBlockMixin {
 	@Inject(method = "onSyncedBlockEvent", at = @At("HEAD"), cancellable = true)
-	private void nbforge$onSyncedBlockEvent(BlockState state, World world, BlockPos pos, int type, int data,
+	private void nbmachina$onSyncedBlockEvent(BlockState state, World world, BlockPos pos, int type, int data,
 											CallbackInfoReturnable<Boolean> cir) {
-		if (NbforgeNoteBlocks.onNoteBlockEvent(world, pos, state)) {
+		if (NbmachinaNoteBlocks.onNoteBlockEvent(world, pos, state)) {
 			// 已经在客户端用无损引擎发声：跳过原版 playNote（服务端这一支只有 playSound）
 			cir.setReturnValue(true);
 		}

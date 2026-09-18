@@ -1,4 +1,4 @@
-package net.nbforge.mod.audio;
+package net.nbmachina.mod.audio;
 
 import java.io.IOException;
 import java.io.Reader;
@@ -16,10 +16,10 @@ import com.google.gson.GsonBuilder;
 import com.google.gson.annotations.SerializedName;
 
 import net.fabricmc.loader.api.FabricLoader;
-import net.nbforge.mod.NbforgeMod;
+import net.nbmachina.mod.NbmachinaMod;
 
 /**
- * M3-16（P2）· 乐器库：`config/nbforge/instruments.json` →（乐器, midi, 力度）解析到采样文件。
+ * M3-16（P2）· 乐器库：`config/nbmachina/instruments.json` →（乐器, midi, 力度）解析到采样文件。
  *
  * <p>JSON 由 `tools/export-mod-instruments.mjs` 从我们的 SFZ 索引生成（区域 = 录音根音 × 力度区间，
  * 与离线渲染同一套映射），所以**离线听到什么、游戏里就播什么**：同一批母版文件、同一套选层规则。
@@ -28,7 +28,7 @@ import net.nbforge.mod.NbforgeMod;
  * 先按 (midi 落在 [loKey,hiKey]) + (力度落在 [loVel,hiVel]) 精确命中；命中不了就退化成
  * "键位距离最近 + 力度距离最近"，绝不静音——静音会被误当成漏音。
  */
-public final class NbforgeInstruments {
+public final class NbmachinaInstruments {
 	private static final Gson GSON = new GsonBuilder().create();
 	private static final Map<String, Instrument> BY_ID = new LinkedHashMap<>();
 	private static String lastError = null;
@@ -36,7 +36,7 @@ public final class NbforgeInstruments {
 	/* ------------------------------------------------------------------ M3-30 运行时音色切换
 	 * 谱面里每颗音自带"用哪个乐器"（`machine_map.csv` 的 instrument 列），但**不用改数据**也能换琴：
 	 * 这里维护一张 声部 → 乐器 的覆盖表（客户端本地），解析顺序 = 声部覆盖 → `*` 全局覆盖 → 谱面原值。
-	 * 落盘在 `config/nbforge/voices.json`，重启仍在；换到的乐器**必须已在本机乐器库里**，否则忽略覆盖
+	 * 落盘在 `config/nbmachina/voices.json`，重启仍在；换到的乐器**必须已在本机乐器库里**，否则忽略覆盖
 	 * （宁可照谱面播，也不要静音）。
 	 */
 	private static final Map<String, String> VOICE_OVERRIDE = new java.util.concurrent.ConcurrentHashMap<>();
@@ -72,10 +72,10 @@ public final class NbforgeInstruments {
 	}
 
 	private static Path voicesFile() {
-		return FabricLoader.getInstance().getGameDir().resolve("config").resolve("nbforge").resolve("voices.json");
+		return FabricLoader.getInstance().getGameDir().resolve("config").resolve("nbmachina").resolve("voices.json");
 	}
 
-	/** 读覆盖表（客户端启动、`/nbfc reload`、`/nbfc instrument` 都会走） */
+	/** 读覆盖表（客户端启动、`/nbmc reload`、`/nbmc instrument` 都会走） */
 	public static void loadVoices() {
 		Path f = voicesFile();
 		VOICE_OVERRIDE.clear();
@@ -88,10 +88,10 @@ public final class NbforgeInstruments {
 				String val = String.valueOf(e.getValue()).trim();
 				if (!k.isEmpty() && !val.isEmpty()) VOICE_OVERRIDE.put(k, val);
 			}
-			NbforgeMod.LOGGER.info("[nbforge] 音色覆盖表已载入：{}", VOICE_OVERRIDE);
+			NbmachinaMod.LOGGER.info("[nbmachina] 音色覆盖表已载入：{}", VOICE_OVERRIDE);
 		} catch (Exception e) {
 			lastError = "voices.json 读取失败：" + e.getMessage();
-			NbforgeMod.LOGGER.warn("[nbforge] {}", lastError);
+			NbmachinaMod.LOGGER.warn("[nbmachina] {}", lastError);
 		}
 	}
 
@@ -102,11 +102,11 @@ public final class NbforgeInstruments {
 			Files.writeString(f, new GsonBuilder().setPrettyPrinting().create().toJson(overrides()), StandardCharsets.UTF_8);
 		} catch (IOException e) {
 			lastError = "voices.json 写入失败：" + e.getMessage();
-			NbforgeMod.LOGGER.warn("[nbforge] {}", lastError);
+			NbmachinaMod.LOGGER.warn("[nbmachina] {}", lastError);
 		}
 	}
 
-	private NbforgeInstruments() {
+	private NbmachinaInstruments() {
 	}
 
 	/** 一个 SFZ region 的镜像 */
@@ -220,7 +220,7 @@ public final class NbforgeInstruments {
 	 * <p>2026-09-18 用户试听判定"改了之后似乎缺音了"，量化复核确认：OLPC 的 sta 采样衰减极快
 	 * （前 200ms 掉 20~30dB），而谱面里 142–245ms 的"短音"在参考演奏里是**带踏板延续**的
 	 * （原曲那几处包络 400ms 内只掉约 10dB）→ 换 sta 后这些音明显变轻，听感就是缺音。
-	 * 默认走 leg；想实验可用 `/nbfc sta &lt;ms&gt;`（例如 120）只让"极短"的音用 sta。
+	 * 默认走 leg；想实验可用 `/nbmc sta &lt;ms&gt;`（例如 120）只让"极短"的音用 sta。
 	 */
 	private static volatile int staccatoMs = 0;
 
@@ -238,15 +238,15 @@ public final class NbforgeInstruments {
 		public List<Instrument> instruments = new ArrayList<>();
 	}
 
-	/** 配置文件位置：`<游戏目录>/config/nbforge/instruments.json` */
+	/** 配置文件位置：`<游戏目录>/config/nbmachina/instruments.json` */
 	public static Path configFile() {
-		return FabricLoader.getInstance().getConfigDir().resolve("nbforge").resolve("instruments.json");
+		return FabricLoader.getInstance().getConfigDir().resolve("nbmachina").resolve("instruments.json");
 	}
 
-	/** 候选路径：config 目录优先，其次游戏目录下的 `nbforge/instruments.json`（便于直接拷贝） */
+	/** 候选路径：config 目录优先，其次游戏目录下的 `nbmachina/instruments.json`（便于直接拷贝） */
 	public static List<Path> candidates() {
 		Path gameDir = FabricLoader.getInstance().getGameDir();
-		return List.of(configFile(), gameDir.resolve("nbforge").resolve("instruments.json"));
+		return List.of(configFile(), gameDir.resolve("nbmachina").resolve("instruments.json"));
 	}
 
 	/** 重新加载（懒加载入口；返回加载到的乐器数，失败返回 -1 并记录原因） */
@@ -262,11 +262,11 @@ public final class NbforgeInstruments {
 					BY_ID.put(inst.id, inst);
 				}
 				lastError = null;
-				NbforgeMod.LOGGER.info("[nbforge] 乐器库已加载：{} 个乐器（{}）", BY_ID.size(), p);
+				NbmachinaMod.LOGGER.info("[nbmachina] 乐器库已加载：{} 个乐器（{}）", BY_ID.size(), p);
 				return BY_ID.size();
 			} catch (IOException | RuntimeException e) {
 				lastError = e.getClass().getSimpleName() + ": " + e.getMessage();
-				NbforgeMod.LOGGER.warn("[nbforge] 乐器库解析失败 {}：{}", p, lastError);
+				NbmachinaMod.LOGGER.warn("[nbmachina] 乐器库解析失败 {}：{}", p, lastError);
 			}
 		}
 		lastError = "没有找到 instruments.json（试过 " + candidates() + "）";

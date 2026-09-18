@@ -2,7 +2,7 @@
 import fs from 'node:fs';
 import { resolveExternal } from '../core/paths.mjs';
 
-// M2-3：默认录音路径 = 测试服目录下的 capture.wav（--server / NBFORGE_SERVER 可覆盖）
+// M2-3：默认录音路径 = 测试服目录下的 capture.wav（--server / nbmachina_SERVER 可覆盖）
 const file = process.argv[2] ?? `${resolveExternal().server}/capture.wav`;
 if (!fs.existsSync(file)) { console.log('WAV 不存在:', file); process.exit(0); }
 const buf = fs.readFileSync(file);

@@ -23,7 +23,7 @@ loom {
 			// 落到仓库外的 _toolchain/，不污染 git
 			runDir = '../../_toolchain/spike-run'
 			programArgs '--nogui'
-			property 'nbforge.selftest', System.getProperty('nbforge.selftest', 'false')
+			property 'nbmachina.selftest', System.getProperty('nbmachina.selftest', 'false')
 		}
 	}
 }

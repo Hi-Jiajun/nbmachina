@@ -22,7 +22,7 @@ import { midiFromRow } from '../src/synth/voices.mjs';
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const P = resolvePaths();
-const AUDIO = path.join(P.build, 'audio_nbforge', 'wav');
+const AUDIO = path.join(P.build, 'audio_nbmachina', 'wav');
 
 const MODE = opt('mode', 'true');          // true = 原曲音高；folded = 折叠 row 口径
 const MELODY = opt('melody', 'piano');     // 旋律层音色：piano（M3-6 新）| strings（M2-1 旧）

@@ -1,11 +1,11 @@
 // M2-1 · 把自研采样打成 Minecraft 资源包（1.21.10）
 //
 // 产物：
-//   build/nbforge_resources/pack.mcmeta                      ← pack_format 69 + min_format/max_format 69
-//   build/nbforge_resources/assets/nbforge/sounds.json       ← 148 条事件 nbforge:strings_fs4 …
-//   build/nbforge_resources/assets/nbforge/sounds/<音色>/<音名>.ogg
-//   build/nbforge_resources.zip                              ← 同一个包的可分发 zip（可复现）
-//   若 testserver/ 存在：再复制一份到 testserver/resourcepacks/nbforge_resources/
+//   build/nbm_resources/pack.mcmeta                      ← pack_format 69 + min_format/max_format 69
+//   build/nbm_resources/assets/nbm/sounds.json       ← 148 条事件 nbmachina:strings_fs4 …
+//   build/nbm_resources/assets/nbm/sounds/<音色>/<音名>.ogg
+//   build/nbm_resources.zip                              ← 同一个包的可分发 zip（可复现）
+//   若 testserver/ 存在：再复制一份到 testserver/resourcepacks/nbm_resources/
 //   若存在客户端实例的 resourcepacks/（PCL2 实例）：把 **zip** 复制进去 —— 这是"真的能听到"的唯一途径
 //   （专用服不会给玩家放音；音色永远由客户端资源包决定）
 //
@@ -13,7 +13,7 @@
 // tests/synth.test.mjs 有一条断言拿 jar 复核这个常量。
 //
 // 为什么还要 min_format/max_format（2026-09-14 实测，客户端日志原文）：
-//   Couldn't load file/nbforge_resources.zip pack metadata:
+//   Couldn't load file/nbm_resources.zip pack metadata:
 //   Pack declares support for version newer than 64, but is missing mandatory fields min_format and max_format
 // → 1.21.9+ 的格式号进到"主/次"两段版本后，声明 >64 的包**必须**同时给 min_format/max_format。
 //   vanilla 自己的内置数据包就是这么写的（客户端 jar 里 data/minecraft/datapacks/redstone_experiments/pack.mcmeta：
@@ -21,7 +21,7 @@
 //   这里三件套都给：pack_format 照顾老读取器，min/max 满足新校验，三者取值一致不会自相矛盾。
 //
 // 用法：node src/emit/resource-pack.mjs [--audio <dir>] [--out <dir>] [--zip <file>] [--no-copy]
-// 相对路径按 minecraft 工程根解析（`--audio build/audio_nbforge`、`testserver/resourcepacks/...`）。
+// 相对路径按 minecraft 工程根解析（`--audio build/audio_nbmachina`、`testserver/resourcepacks/...`）。
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -33,17 +33,17 @@ import {
 import { resolvePaths } from '../core/paths.mjs';
 
 export const PACK_FORMAT = 69;
-export const PACK_DESCRIPTION = 'nbforge 自研音色（零第三方采样：Karplus–Strong 拨弦 / 加法铺底 / 模态钟琴）';
+export const PACK_DESCRIPTION = 'nbmachina 自研音色（零第三方采样：Karplus–Strong 拨弦 / 加法铺底 / 模态钟琴）';
 
 // M2-3：build 目录走 paths.mjs
 const P = resolvePaths();
 const BUILD = P.build;
-// minecraft 工程根 = build 目录的上一级（过去写死成 C:/Users/hiliang/Documents/minecraft，可用 NBFORGE_MC 覆盖）
-const MINECRAFT = process.env.NBFORGE_MC ?? path.dirname(BUILD);
+// minecraft 工程根 = build 目录的上一级（过去写死成 C:/Users/hiliang/Documents/minecraft，可用 nbmachina_MC 覆盖）
+const MINECRAFT = process.env.nbmachina_MC ?? path.dirname(BUILD);
 
-/** 客户端资源包目录候选（PCL2 实例；可用 NBFORGE_CLIENT_RESOURCEPACKS 覆盖） */
+/** 客户端资源包目录候选（PCL2 实例；可用 nbmachina_CLIENT_RESOURCEPACKS 覆盖） */
 export const CLIENT_PACK_DIRS = [
-  process.env.NBFORGE_CLIENT_RESOURCEPACKS,
+  process.env.nbmachina_CLIENT_RESOURCEPACKS,
   'C:/Program Files/PCL2/.minecraft/resourcepacks',
   'C:/Program Files/PCL2/.minecraft/versions/1.21.10-Fabric 0.19.5/resourcepacks',
 ].filter(Boolean);
@@ -82,7 +82,7 @@ export function collectSamples(audioDir, { ext = 'ogg' } = {}) {
 
 /**
  * 后端 A（Fabric mod）自带的 `sounds.json` 里定义了 `demo_bell/demo_pad/demo_strings/demo_bass`
- * 四个演示音色，它们与资源包**同属 `nbforge` 命名空间**。Minecraft 的 SoundManager 会按键合并
+ * 四个演示音色，它们与资源包**同属 `nbmachina` 命名空间**。Minecraft 的 SoundManager 会按键合并
  * 各资源包的 sounds.json（同键高优先级覆盖），所以正常情况下两者共存；但"万一某版本/某加载器
  * 按整文件覆盖"，mod 的四个 demo_* 就会解析不到 → 装好 mod 却听不见声。
  * 这里在资源包里补四个**别名**（指向同一批采样，不新增文件），把这种不确定性消掉。
@@ -98,12 +98,12 @@ export const DEMO_ALIASES = {
  * 静音采样（后端 A 用）：`minecraft:sounds.json` 里没有 `intentionally_empty` 这种现成静音事件
  * （实测 1.21.10 的 1770 个键里没有它，用它只会刷 "Unable to play empty soundEvent" 警告），
  * 所以这里随包发一个 0.05 秒的静音 ogg。mod 在 `#hifi=1`（自研音色模式）时把音符盒的声音
- * 替换成 `nbforge:silent` —— 粒子/动画照旧，但不再有原版 harp/bass 声音跟自研音色叠在一起。
+ * 替换成 `nbmachina:silent` —— 粒子/动画照旧，但不再有原版 harp/bass 声音跟自研音色叠在一起。
  */
 export const SILENT_EVENT = 'silent';
 const SILENT_OGG = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'synth', 'assets', 'silent.ogg');
 
-/** sounds.json：一个采样一条事件；name 用相对路径（命名空间 = sounds.json 所在目录的命名空间 nbforge） */
+/** sounds.json：一个采样一条事件；name 用相对路径（命名空间 = sounds.json 所在目录的命名空间 nbmachina） */
 export function buildSoundsJson(entries) {
   const out = {};
   for (const e of entries) {
@@ -128,10 +128,10 @@ export function buildSoundsJson(entries) {
  *            copiedTo:string|null, missing:Array, packFormat:number}}
  */
 export function buildResourcePack({
-  audioDir = path.join(BUILD, 'audio_nbforge'),
-  outDir = path.join(BUILD, 'nbforge_resources'),
-  zipPath = path.join(BUILD, 'nbforge_resources.zip'),
-  copyTo = path.join(MINECRAFT, 'testserver', 'resourcepacks', 'nbforge_resources'),
+  audioDir = path.join(BUILD, 'audio_nbmachina'),
+  outDir = path.join(BUILD, 'nbmachina_resources'),
+  zipPath = path.join(BUILD, 'nbmachina_resources.zip'),
+  copyTo = path.join(MINECRAFT, 'testserver', 'resourcepacks', 'nbmachina_resources'),
   ext = 'ogg',
   description = PACK_DESCRIPTION,
 } = {}) {
@@ -141,7 +141,7 @@ export function buildResourcePack({
       + missing.slice(0, 5).map((m) => m.file).join('\n  '));
   }
   fs.rmSync(outDir, { recursive: true, force: true });
-  const soundsDir = path.join(outDir, 'assets', 'nbforge', 'sounds');
+  const soundsDir = path.join(outDir, 'assets', 'nbmachina', 'sounds');
   fs.mkdirSync(soundsDir, { recursive: true });
 
   const mcmeta = {
@@ -151,19 +151,19 @@ export function buildResourcePack({
   const sounds = buildSoundsJson(entries);
   const soundsBuf = Buffer.from(JSON.stringify(sounds, null, 2) + '\n', 'utf8');
   fs.writeFileSync(path.join(outDir, 'pack.mcmeta'), mcmetaBuf);
-  fs.writeFileSync(path.join(outDir, 'assets', 'nbforge', 'sounds.json'), soundsBuf);
+  fs.writeFileSync(path.join(outDir, 'assets', 'nbmachina', 'sounds.json'), soundsBuf);
 
   const zipEntries = [
     { path: 'pack.mcmeta', data: mcmetaBuf },
-    { path: 'assets/nbforge/sounds.json', data: soundsBuf },
+    { path: 'assets/nbm/sounds.json', data: soundsBuf },
   ];
   let bytes = 0;
   // 静音采样：与 148 个合成采样一起进包（mod 的 #hifi=1 模式用它替换原版音符盒声音）
   const silentData = fs.readFileSync(SILENT_OGG);
   fs.writeFileSync(path.join(soundsDir, `${SILENT_EVENT}.ogg`), silentData);
-  zipEntries.push({ path: `assets/nbforge/sounds/${SILENT_EVENT}.ogg`, data: silentData });
+  zipEntries.push({ path: `assets/nbm/sounds/${SILENT_EVENT}.ogg`, data: silentData });
   for (const e of entries) {
-    const rel = `assets/nbforge/sounds/${e.timbre}/${noteFileName(e.midi)}.${ext}`;
+    const rel = `assets/nbm/sounds/${e.timbre}/${noteFileName(e.midi)}.${ext}`;
     const dir = path.join(soundsDir, e.timbre);
     fs.mkdirSync(dir, { recursive: true });
     const data = fs.readFileSync(e.file);
@@ -195,10 +195,10 @@ function main() {
   const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
   const noCopy = argv.includes('--no-copy');
   const resolvePath = (p) => (path.isAbsolute(p) ? p : path.resolve(MINECRAFT, p));
-  const audioDir = resolvePath(opt('audio', path.join(BUILD, 'audio_nbforge')));
-  const outDir = resolvePath(opt('out', path.join(BUILD, 'nbforge_resources')));
-  const zipPath = resolvePath(opt('zip', path.join(BUILD, 'nbforge_resources.zip')));
-  const copyTo = noCopy ? null : resolvePath(opt('copy-to', path.join(MINECRAFT, 'testserver', 'resourcepacks', 'nbforge_resources')));
+  const audioDir = resolvePath(opt('audio', path.join(BUILD, 'audio_nbmachina')));
+  const outDir = resolvePath(opt('out', path.join(BUILD, 'nbmachina_resources')));
+  const zipPath = resolvePath(opt('zip', path.join(BUILD, 'nbmachina_resources.zip')));
+  const copyTo = noCopy ? null : resolvePath(opt('copy-to', path.join(MINECRAFT, 'testserver', 'resourcepacks', 'nbmachina_resources')));
   const ext = opt('ext', fs.existsSync(path.join(audioDir, 'ogg')) ? 'ogg' : 'wav');
   if (ext !== 'ogg') {
     console.warn('[警告] 没有找到 ogg（本机可能缺 ffmpeg）：Minecraft 只支持 ogg/vorbis，这个包装上不会出声，'
@@ -212,7 +212,7 @@ function main() {
   console.log(`  zip ：${res.zipPath}（${(res.zipBytes / 1048576).toFixed(2)}MB）`);
   console.log(res.copiedTo ? `  已复制到：${res.copiedTo}` : `  未复制到 testserver（目录不存在或 --no-copy）`);
   if (client.dest) {
-    console.log(`  已复制到客户端资源包目录：${client.dest}（进游戏后在「选项→资源包」启用 nbforge）`);
+    console.log(`  已复制到客户端资源包目录：${client.dest}（进游戏后在「选项→资源包」启用 nbmachina）`);
   } else {
     console.log(`  未复制到客户端 resourcepacks（候选目录都不存在或不可写）：`
       + `${client.tried.join('；') || '已用 --no-copy-client 关闭'}；可手动把 zip 拖进 resourcepacks/`);

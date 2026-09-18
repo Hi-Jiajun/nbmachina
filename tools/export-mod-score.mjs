@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // M3-17（P2-2）· 把机器谱面导出成 mod 直接读的 `score.csv`
 //
-// mod 侧（NbforgeScorePlayer）按时间把每颗音派发给客户端，客户端用无损引擎播。
+// mod 侧（nbmachinaScorePlayer）按时间把每颗音派发给客户端，客户端用无损引擎播。
 // 表头固定五列：`time_seconds,instrument,midi,velocity,voice`
-//   · instrument = `config/nbforge/instruments.json` 里的乐器 id（声部→乐器由这里的映射决定）
+//   · instrument = `config/nbm/instruments.json` 里的乐器 id（声部→乐器由这里的映射决定）
 //   · velocity   = 1..127（优先用谱面的 `velMidi`；没有就用 `volume × 127` = 现行的恒定口径）
 //   · voice      = 原声部名（只用于诊断）
 //
@@ -29,7 +29,7 @@ const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i
 const has = (n) => argv.includes(`--${n}`);
 
 const SRC = opt('in', P.machineScore);
-const OUT = opt('out', path.join(P.build, 'nbforge_score.csv'));
+const OUT = opt('out', path.join(P.build, 'nbmachina_score.csv'));
 const PRESET = opt('preset', 'piano');
 if (!['piano', 'ensemble'].includes(PRESET)) throw new Error('--preset 只支持 piano/ensemble');
 const MELODY = opt('melody', 'salamander48');
@@ -105,7 +105,7 @@ console.log(`  时长：${(Number(lines.at(-1).split(',')[idx.time_seconds])).to
 
 if (DEPLOY) {
   for (const [label, dir] of [['客户端', CLIENT_GAME_DIR], ['测试服', TEST_SERVER_DIR]]) {
-    const dst = path.join(dir, 'nbforge', 'score.csv');
+    const dst = path.join(dir, 'nbmachina', 'score.csv');
     try {
       fs.mkdirSync(path.dirname(dst), { recursive: true });
       fs.copyFileSync(OUT, dst);

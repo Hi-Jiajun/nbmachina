@@ -1,4 +1,4 @@
-# nbforge 基线分（M0 结束时的客观分）
+# nbmachina 基线分（M0 结束时的客观分）
 
 > 这份文件是**给后续对比用的**：M1 每次改完数据或口径，重跑 `npm run verify` 并与这里比。
 > 口径细节见 `docs/M0-3-report.md`；评分实现见 `src/verify/score.mjs`。
