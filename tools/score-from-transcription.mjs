@@ -28,13 +28,17 @@ const B = P.build;
 const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 
-const TR = opt('transcription', path.join(B, 'ref_transcription.json'));
+const TR = opt('transcription', path.join(B, 'ref_video_transcription.json'));
 const OUT = opt('out', path.join(B, 'score_from_reference.csv'));
 const MAX_SOUND = Number(opt('max', '9.0'));
+// M3-24：转谱现在直接用**原视频**（不切头、不做 atempo），所以时间是"视频时间"。
+// `--offset` 把时间平移到"机器时间"（默认 auto = 第一颗音 = 机器的 0 时刻）。
+const OFFSET_ARG = String(opt('offset', 'auto'));
 
 const tr = JSON.parse(fs.readFileSync(TR, 'utf8'));
 const notes = tr.note_events.slice().sort((a, b) => a.onset - b.onset);
 const pedals = tr.pedal_events.slice().sort((a, b) => a.on - b.on);
+const OFFSET = OFFSET_ARG === 'auto' ? notes[0].onset : Number(OFFSET_ARG);
 
 function pedalOffAt(t) {
   for (const p of pedals) {
@@ -49,11 +53,12 @@ let quantized = 0;
 let collisions = 0;
 const used = new Set();
 for (const n of notes) {
+  const t = n.onset - OFFSET;
   const key = Math.max(0.05, n.offset - n.onset);
   const end = Math.max(n.offset, pedalOffAt(n.offset));
   const dur = Math.min(MAX_SOUND, Math.max(0.08, end - n.onset));
-  const step = Math.round(n.onset / STEP_SECONDS);
-  if (Math.abs(step * STEP_SECONDS - n.onset) > 0.03) quantized++;
+  const step = Math.round(t / STEP_SECONDS);
+  if (Math.abs(step * STEP_SECONDS - t) > 0.03) quantized++;
   // 撞格处理：同一 step 上同 row（= 同一个音高类，相差整八度）极少见，顺延到最近的空行
   let row = n.midi % 24;
   if (used.has(`${step},${row}`)) {
@@ -66,7 +71,7 @@ for (const n of notes) {
   }
   used.add(`${step},${row}`);
   rows.push([
-    step, Math.round(n.onset * 20), n.onset.toFixed(3), n.midi < 60 ? 'bass' : 'harp',
+    step, Math.round(t * 20), t.toFixed(3), n.midi < 60 ? 'bass' : 'harp',
     n.midi, row, '0.35', (n.velocity / 127).toFixed(4),
     Math.max(1, Math.min(127, Math.round(n.velocity))),
     Math.round(key * 1000), Math.round(dur * 1000), 1, 'ref',
@@ -75,7 +80,10 @@ for (const n of notes) {
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, rows.join('\n') + '\n', 'utf8');
 console.log(`写出 ${OUT}：${notes.length} 颗音（参考转谱，量化到 ${STEP_SECONDS}s 网格，`
-  + `偏移 >30ms 的 ${quantized} 颗 = ${(quantized / notes.length * 100).toFixed(1)}%）`);
+  + `格位偏移 >30ms 的 ${quantized} 颗 = ${(quantized / notes.length * 100).toFixed(1)}%`
+  + `；触发时刻按 time_seconds 精确到刻）`);
+console.log(`  时间原点 offset=${OFFSET.toFixed(3)}s（视频里的演奏起点）；`
+  + `机器时长 ${(notes.at(-1).onset - OFFSET).toFixed(1)}s`);
 console.log(`  撞格顺延 ${collisions} 颗；实际占用格位 ${used.size}；`
   + `x 范围 ${Math.min(...rows.slice(1).map((r) => +r.split(',')[0]))}..${Math.max(...rows.slice(1).map((r) => +r.split(',')[0]))} step`);
 console.log(`  踏板 ${pedals.length} 段；力度中位 ${notes.map((n) => n.velocity).sort((a, b) => a - b)[notes.length >> 1].toFixed(0)}`);

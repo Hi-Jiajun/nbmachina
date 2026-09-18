@@ -37,9 +37,15 @@ const header = rows[0].split(',');
 const col = (n) => header.indexOf(n);
 const iStep = col('step'), iInstr = col('instrument'), iMidi = col('midi'), iRow = col('row'), iVol = col('volume');
 if ([iStep, iInstr, iRow, iVol].some((i) => i < 0)) throw new Error(`CSV 缺列: ${header.join(',')}`);
+// M3-24：可选列 `time_seconds` —— 参考演奏的真实时间。有它就用它触发（精确到刻），
+// 没有就退回 `step × 0.12`（机器格位）。
+const iTime = col('time_seconds');
 const notes = rows.slice(1).map((l) => {
   const c = l.split(',');
-  return { step: +c[iStep], instr: c[iInstr], midi: +c[iMidi], pitch: +c[iRow], vol: +c[iVol] };
+  return {
+    step: +c[iStep], instr: c[iInstr], midi: +c[iMidi], pitch: +c[iRow], vol: +c[iVol],
+    timeSec: iTime >= 0 && `${c[iTime] ?? ''}`.trim() !== '' ? +c[iTime] : undefined,
+  };
 });
 
 /* ---------- step/pitch -> 世界坐标（与 note-blocks.mjs 共用同一个规则） ---------- */

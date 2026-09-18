@@ -90,6 +90,9 @@ export function parseScoreCsv(text) {
   const iDur = idx('durMs');
   // M3-22 可选列：只按"手指松开"算的时长（不含踏板延长），用于对比"干/湿"两档
   const iKey = idx('keyMs');
+  // M3-24 可选列：参考演奏的真实时刻（秒）。有它就用它当触发时间（精确到刻），
+  // 没有就退回 `step × 0.12`（机器格位）。
+  const iTime = idx('time_seconds');
   if ([iStep, iInstr, iRow, iVol].some((i) => i < 0)) throw new Error(`谱面 CSV 缺列：${header.join(',')}`);
   const notes = lines.slice(1).filter((l) => l.trim()).map((l) => {
     const c = l.split(',');
@@ -101,6 +104,7 @@ export function parseScoreCsv(text) {
       velMidi: iVelMidi >= 0 && `${c[iVelMidi] ?? ''}`.trim() !== '' ? +c[iVelMidi] : null,
       durMs: iDur >= 0 && `${c[iDur] ?? ''}`.trim() !== '' ? +c[iDur] : null,
       keyMs: iKey >= 0 && `${c[iKey] ?? ''}`.trim() !== '' ? +c[iKey] : null,
+      timeSec: iTime >= 0 && `${c[iTime] ?? ''}`.trim() !== '' ? +c[iTime] : null,
     };
   });
   const byInstrument = {};
@@ -172,6 +176,7 @@ export function planHifi(notes, { bassOctave = 0, inner = 'bell', melody = 'stri
       step: n.step, instr: n.instr, row: n.row, vol: n.vol,
       velocity: n.velocity ?? null, velMidi: n.velMidi ?? null,
       durMs: n.durMs ?? null, keyMs: n.keyMs ?? null,
+      timeSec: n.timeSec ?? null,
     };
     if (VANILLA_SOUND[family]) {
       stats.vanilla++;

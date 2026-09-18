@@ -15,6 +15,17 @@ export function tickOfStep(step, tps) {
   return Math.round(step * STEP_SECONDS * tps);
 }
 
+/**
+ * M3-24：**精确时刻 → 刻**。谱面若带 `time_seconds`（参考演奏的真实时间），就用它触发，
+ * 而不是用 `step × 0.12`（那是布局格位的近似值）。
+ *
+ * 为什么要分开：机器布局是按 0.12s 一排格子摆的（格位 = 地址），但**触发时刻可以精确到刻**——
+ * 20 tps 下 50ms、100 tps 下 10ms。这样人手演奏的节奏不会被量化成 0.12s 的"跳步"（听感上的卡顿）。
+ */
+export function tickOfTime(t, tps) {
+  return Math.round(t * tps);
+}
+
 /** 强加载窗口切换点（第 1248 步，x≈1728）落在哪一刻。 */
 export function switchTick(tps) {
   return tickOfStep(1248, tps);
@@ -27,7 +38,8 @@ export function switchTick(tps) {
 export function buildTickGroups(notes, tps) {
   const groups = new Map();
   for (const n of notes) {
-    const tick = tickOfStep(n.step, tps);
+    // M3-24：有精确时刻就用精确时刻（参考演奏的真实时间），否则退回"格位 × 0.12s"
+    const tick = Number.isFinite(n.timeSec) ? tickOfTime(n.timeSec, tps) : tickOfStep(n.step, tps);
     const list = groups.get(tick);
     const copy = { ...n, tick };
     if (list) list.push(copy);

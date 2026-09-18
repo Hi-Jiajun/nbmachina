@@ -55,8 +55,11 @@ w('redo/s4.mcfunction', [
   'function styx:apply_notes_v3',
   'forceload remove all',
   'scoreboard objectives add styx.flag dummy',
-  'scoreboard players set #mon styx.flag 1',
-  'tellraw @a {"text":"[Styx] 重做完成：地形已修、音符已换、监听已开 —— 3 秒后开始播放","color":"gold"}',
+  // M3-23：声音由 mod 的无损引擎出（`nbforge listen on` = 声音锚在玩家身上，整条机器都听得到）。
+  // 旧的 `/playsound` 监听层（#mon=1）会和它双响 —— 2026-09-18 用户实测"音乐完全不对"就是这两层叠在一起。
+  'scoreboard players set #mon styx.flag 0',
+  'nbforge listen on',
+  'tellraw @a {"text":"[Styx] 重做完成：地形已修、音符已换、无损引擎已接管（listen on）—— 3 秒后开始播放","color":"gold"}',
   'execute if score #hiwant styx.flag matches 1 run schedule function styx:play/start_hi 60t',
   'execute unless score #hiwant styx.flag matches 1 run schedule function styx:play/start 60t',
 ]);

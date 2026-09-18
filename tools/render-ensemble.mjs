@@ -58,8 +58,36 @@ const SECTIONS_JSON = opt('sections', path.join(P.build, 'dynamics-sections.json
 //   这两个量由 tools/calibrate-from-reference.mjs 从参考演奏里量出来，写进谱面的 `durMs` 列。
 //   `--no-lengths` 可退回旧行为（让采样自然衰减到底），用于 A/B。
 const LENGTHS = !argv.includes('--no-lengths');
+// M3-22 第二轮（用户反馈"低音之间污染太严重、像一直踩着踏板"）：
+//   `--hpf <Hz>`       总线高通：参考演奏 60Hz 以下几乎没能量（0.01%），我们却有 0.14%+ 的隆隆声
+//   `--bass-hpf <Hz>`  只给左手层高通：把 80–150Hz 的堆积削掉（参考那一带只占 8%，我们 27%）
+//   `--bass-cap <sec>` 左手发声时长上限：不给低音无限延长，避免十几颗音叠在一起
+const HPF = Number(opt('hpf', '0'));
+const BASS_HPF = Number(opt('bass-hpf', '0'));
+const BASS_CAP = Number(opt('bass-cap', '0'));
+// `--bass-key`：左手只按"手指松开"收（不继承踏板延长）——用于判断低音糊是不是踏板拖出来的
+const BASS_KEY = argv.includes('--bass-key');
 /** 制音器放音时长：低音弦重、放音慢；高音弦轻、放音快（听感上等价于真实制音器） */
 const releaseMsOf = (midi) => (midi >= 60 ? 140 : midi >= 45 ? 200 : 300);
+
+/** 二阶 Butterworth 高通（bilinear 变换），用于削掉多余的极低频 rumble */
+function highpass(buf, sr, fc) {
+  if (!(fc > 0)) return buf;
+  const w0 = 2 * Math.PI * fc / sr;
+  const cos0 = Math.cos(w0), sin0 = Math.sin(w0);
+  const alpha = sin0 / (2 * Math.SQRT1_2);
+  const b0 = (1 + cos0) / 2, b1 = -(1 + cos0), b2 = (1 + cos0) / 2;
+  const a0 = 1 + alpha, a1 = -2 * cos0, a2 = 1 - alpha;
+  const out = new Float32Array(buf.length);
+  let x1 = 0, x2 = 0, y1 = 0, y2 = 0;
+  for (let i = 0; i < buf.length; i++) {
+    const x0 = buf[i];
+    const y0 = (b0 / a0) * x0 + (b1 / a0) * x1 + (b2 / a0) * x2 - (a1 / a0) * y1 - (a2 / a0) * y2;
+    out[i] = y0;
+    x2 = x1; x1 = x0; y2 = y1; y1 = y0;
+  }
+  return out;
+}
 
 const MELODIES = {
   // 默认 = 48kHz/24bit 完整母版（30 个录音点 / 16 层力度，最大 1 半音微调）。
@@ -201,14 +229,15 @@ const dynOf = (e) => {
   return { vel127: Math.max(1, Math.min(127, Math.round(vol * 127))), gain: 0.55 + 0.45 * vol };
 };
 for (const e of events) {
-  const t = e.step * STEP_SECONDS;
+    // M3-24：优先用谱面里的精确时刻（参考演奏的真实时间），否则退回格位时间
+    const t = Number.isFinite(e.timeSec) ? e.timeSec : e.step * STEP_SECONDS;
   const { vel127, gain } = dynOf(e);
     if (e.kind === 'vanilla') {
       const layer = e.instr === 'basedrum' ? 'kick' : 'hat';
-      if (keep(layer)) triggers.push({ layer, midi: GM[e.instr] ?? 36, vel127, gain, t, durMs: e.durMs });
-    } else if (e.timbre === 'strings' && keep('melody')) triggers.push({ layer: 'melody', midi: e.midi, vel127, gain, t, durMs: e.durMs });
-    else if (e.timbre === 'bell' && keep('inner')) triggers.push({ layer: 'inner', midi: e.midi, vel127, gain, t, durMs: e.durMs });
-    else if (e.timbre === 'bass' && keep('bass')) triggers.push({ layer: 'bass', midi: e.midi, vel127, gain, t, durMs: e.durMs });
+      if (keep(layer)) triggers.push({ layer, midi: GM[e.instr] ?? 36, vel127, gain, t, durMs: e.durMs, keyMs: e.keyMs });
+    } else if (e.timbre === 'strings' && keep('melody')) triggers.push({ layer: 'melody', midi: e.midi, vel127, gain, t, durMs: e.durMs, keyMs: e.keyMs });
+    else if (e.timbre === 'bell' && keep('inner')) triggers.push({ layer: 'inner', midi: e.midi, vel127, gain, t, durMs: e.durMs, keyMs: e.keyMs });
+    else if (e.timbre === 'bass' && keep('bass')) triggers.push({ layer: 'bass', midi: e.midi, vel127, gain, t, durMs: e.durMs, keyMs: e.keyMs });
 }
 const dur = Math.max(...triggers.map((x) => x.t), 0) + 8;   // 尾巴留 8 秒（钢琴/竖琴自然衰减）
 {
@@ -254,7 +283,9 @@ for (const layer of Object.keys(sources)) {
     let stop = s.length;
     let rel = 0;
     if (LENGTHS && Number.isFinite(trig.durMs) && trig.durMs > 0) {
-      const d = Math.round((trig.durMs / 1000) * SR);
+      let durMs = layer === 'bass' && BASS_KEY && Number.isFinite(trig.keyMs) ? trig.keyMs : trig.durMs;
+      if (layer === 'bass' && BASS_CAP > 0 && durMs > BASS_CAP * 1000) durMs = BASS_CAP * 1000;
+      const d = Math.round((durMs / 1000) * SR);
       rel = Math.round((releaseMsOf(midi) / 1000) * SR);
       stop = Math.min(s.length, d + rel);
       lenApplied++;
@@ -272,7 +303,7 @@ for (const layer of Object.keys(sources)) {
       buf[j] += s[i] * gain * g;
     }
   }
-  layerBuf.set(layer, buf);
+  layerBuf.set(layer, layer === 'bass' && BASS_HPF > 0 ? highpass(buf, SR, BASS_HPF) : buf);
   console.log(`  ${layer}: 触发 ${triggers.filter((x) => x.layer === layer).length} 条；`
     + `整八度折叠 ${folded} 条（音域 ${lo}..${hi}）；变调 ${shifted} 条（最大 ${maxShift.toFixed(2)} 半音）；缺区域 ${missed}`
     + `；按谱面时值放音 ${lenApplied} 条${lenMissing ? `（${lenMissing} 条没有时值，自然衰减）` : ''}`);
@@ -303,6 +334,15 @@ for (const [layer, buf] of layerBuf) {
 }
 
 /* ------------------------------------------------------------------ 总线：归一 + 软限幅 */
+if (HPF > 0) {
+  const Lh = highpass(L, SR, HPF);
+  const Rh = highpass(R, SR, HPF);
+  L.set(Lh); R.set(Rh);
+}
+if (HPF > 0 || BASS_HPF > 0 || BASS_CAP > 0) {
+  console.log(`低音处理：总线高通 ${HPF || '关'}Hz（参考演奏 60Hz 以下几乎没能量）；`
+    + `左手层高通 ${BASS_HPF || '关'}Hz；左手时值上限 ${BASS_CAP > 0 ? `${BASS_CAP}s` : '不限'}`);
+}
 let peak = 0, acc = 0;
 for (let i = 0; i < N; i++) {
   const a = Math.max(Math.abs(L[i]), Math.abs(R[i]));
