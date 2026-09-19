@@ -46,6 +46,8 @@ public final class NbmachinaMachine {
 	private static double startSec = 0.0;
 	/** 全局时间偏移（毫秒，正数 = 整曲提前触发）：用来把游戏内与母版对齐（由 compare-ingame-vs-master 量出来） */
 	private static double offsetMs = 0.0;
+	/** 速率系数（1.0 = 原速）：把整曲时间轴按这个系数缩放，用来压平"游戏内 vs 母版"的微小漂移 */
+	private static double rate = 1.0;
 	private static int cursor = 0;
 	private static int firedCount = 0;
 	private static int tickCount = 0;
@@ -113,7 +115,17 @@ public final class NbmachinaMachine {
 	}
 
 	public static double elapsedSec() {
-		return running ? startSec + (System.nanoTime() - anchorNanos) / 1e9 : 0.0;
+		return running ? songTimeSec() : 0.0;
+	}
+
+	/** 自启动以来的真实秒数（不含速率/偏移） */
+	private static double realElapsedSec() {
+		return (System.nanoTime() - anchorNanos) / 1e9;
+	}
+
+	/** 当前"谱面时间"秒 = 起始秒 + 真实经过 × 速率 + 偏移 */
+	private static double songTimeSec() {
+		return startSec + realElapsedSec() * rate + offsetMs / 1000.0;
 	}
 
 	public static synchronized String start(ServerWorld world, double fromSec) {
@@ -121,8 +133,13 @@ public final class NbmachinaMachine {
 	}
 
 	public static synchronized String start(ServerWorld world, double fromSec, double leadMs) {
+		return start(world, fromSec, leadMs, 1.0);
+	}
+
+	public static synchronized String start(ServerWorld world, double fromSec, double leadMs, double rateScale) {
 		if (NOTES.isEmpty()) return "没有谱面：先 /nbm reloadmap（或确认 nbmachina/machine_map.csv 存在）";
 		offsetMs = leadMs;
+		rate = rateScale > 0.5 && rateScale < 2.0 ? rateScale : 1.0;
 		cursor = 0;
 		firedCount = 0;
 		tickCount = 0;
@@ -135,8 +152,8 @@ public final class NbmachinaMachine {
 		running = true;
 		maintainForceload(world);
 		silenceDataPack(world);
-		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动开始：从 {}s 起，全局偏移 {}ms（谱面 {} 颗音，第 {} 颗）",
-			fromSec, leadMs, NOTES.size(), cursor);
+		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动开始：从 {}s 起，全局偏移 {}ms，速率 {}（谱面 {} 颗音，第 {} 颗）",
+			fromSec, leadMs, rate, NOTES.size(), cursor);
 		return null;
 	}
 
@@ -168,12 +185,13 @@ public final class NbmachinaMachine {
 		PENDING_LAMPS.clear();
 
 		// ② 真实时间到了哪些音就触发哪些（提前一刻，方块事件下一 tick 才执行）
-		final double now = elapsedSec();
+		final double now = songTimeSec();
 		final double tickSec = server.getTickManager().getNanosPerTick() / 1e9;
 		int firedThisTick = 0;
 		while (cursor < NOTES.size()) {
 			Note n = NOTES.get(cursor);
-			if (n.timeSec() - offsetMs / 1000.0 > now + tickSec) break;
+			// now 已经是"谱面时间"（含速率与偏移），直接比较即可
+			if (n.timeSec() > now + tickSec) break;
 			final BlockPos notePos = new BlockPos(n.x(), n.y() + 1, n.z());
 			if (n.strict()) {
 				BlockPos trig = new BlockPos(n.tx(), n.ty(), n.tz());

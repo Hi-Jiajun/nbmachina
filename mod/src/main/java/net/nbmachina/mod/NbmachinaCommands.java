@@ -69,7 +69,12 @@ public final class NbmachinaCommands {
 						.then(CommandManager.argument("offsetMs", FloatArgumentType.floatArg(-500.0F, 500.0F))
 							.executes(ctx -> machineStart(ctx.getSource(),
 								FloatArgumentType.getFloat(ctx, "fromSec"),
-								FloatArgumentType.getFloat(ctx, "offsetMs"))))))
+								FloatArgumentType.getFloat(ctx, "offsetMs"), 1.0F))
+							.then(CommandManager.argument("rate", FloatArgumentType.floatArg(0.99F, 1.01F))
+								.executes(ctx -> machineStart(ctx.getSource(),
+									FloatArgumentType.getFloat(ctx, "fromSec"),
+									FloatArgumentType.getFloat(ctx, "offsetMs"),
+									FloatArgumentType.getFloat(ctx, "rate")))))))
 				.then(CommandManager.literal("stop").executes(ctx -> machineStop(ctx.getSource()))))
 			.then(CommandManager.literal("note")
 				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
@@ -159,15 +164,19 @@ public final class NbmachinaCommands {
 	 * 粒子也按谱面的**真实音高**上色（原版音符盒只有 25 档）。
 	 */
 	private static int machineStart(ServerCommandSource source, float fromSec, float offsetMs) {
+		return machineStart(source, fromSec, offsetMs, 1.0F);
+	}
+
+	private static int machineStart(ServerCommandSource source, float fromSec, float offsetMs, float rate) {
 		ServerWorld world = source.getWorld();
-		String err = net.nbmachina.mod.machine.NbmachinaMachine.start(world, fromSec, offsetMs);
+		String err = net.nbmachina.mod.machine.NbmachinaMachine.start(world, fromSec, offsetMs, rate);
 		if (err != null) {
 			source.sendError(Text.literal("[nbmachina] " + err));
 			return 0;
 		}
 		source.sendFeedback(() -> Text.literal(String.format(
-			"[nbmachina] 机器驱动：开始（从 %.1fs 起，全局偏移 %+.0fms，共 %d 颗音；真实时间调度，刻率只影响精度不影响速度）",
-			fromSec, offsetMs, net.nbmachina.mod.machine.NbmachinaMachine.size())), true);
+			"[nbmachina] 机器驱动：开始（从 %.1fs 起，全局偏移 %+.0fms，速率 %.5f，共 %d 颗音；真实时间调度，刻率只影响精度不影响速度）",
+			fromSec, offsetMs, rate, net.nbmachina.mod.machine.NbmachinaMachine.size())), true);
 		return 1;
 	}
 
