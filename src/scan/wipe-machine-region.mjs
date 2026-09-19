@@ -236,11 +236,24 @@ steps.forEach((st, i) => {
   if (i + 1 < steps.length) {
     tail.push('forceload remove all');
     tail.push(`forceload add ${steps[i + 1].xa} ${ZA} ${steps[i + 1].xb} ${ZB}`);
-    tail.push(`schedule function styx:wipe/${steps[i + 1].name} 40t`);
+    tail.push(`schedule function styx:wipe/${steps[i + 1].name} 60t`);   // 60t=3s，给区块加载留足时间
     tail.push(`tellraw @a {"text":"[Styx] 清理中…窗口 ${i + 2}/${steps.length}","color":"gray"}`);
   } else {
+    // M3-46：**自检抽查** —— 拿几个"扫描到的遗留位置"当样本，清完立刻验一遍，
+    // 免得再出现"提示说清理完成、实际末尾没清掉"（2026-09-19 连续踩了两次）。
+    const probes = [];
+    if (leftover.length) {
+      const stride = Math.max(1, Math.floor(leftover.length / 8));
+      for (let k = 0; k < leftover.length && probes.length < 8; k += stride) probes.push(leftover[k]);
+    }
     tail.push('forceload remove all');
-    tail.push('tellraw @a {"text":"[Styx] 机器区域清理完成（清除音符盒方块）—— 现在跑 /function styx:redo 重建","color":"green"}');
+    tail.push('scoreboard objectives add styx.flag dummy');
+    tail.push('scoreboard players set #left styx.flag 0');
+    for (const [x, y, z] of probes) {
+      tail.push(`execute if block ${x} ${y} ${z} minecraft:note_block run scoreboard players add #left styx.flag 1`);
+    }
+    tail.push('execute if score #left styx.flag matches 1.. run tellraw @a {"text":"[Styx] ⚠ 抽查发现仍有残留音符盒（清理没完全生效）——把这条截图发给 Codex","color":"red"}');
+    tail.push('execute if score #left styx.flag matches 0 run tellraw @a {"text":"[Styx] 机器区域清理完成 + 抽查通过 ✔ —— 现在跑 /function styx:redo 重建","color":"green"}');
   }
   const head = i === 0 ? [] : [];
   fs.writeFileSync(path.join(dir, 'wipe', `${st.name}.mcfunction`),

@@ -281,6 +281,21 @@ public final class NbmachinaSelfTest {
 		} catch (Exception e) {
 			NbmachinaMod.LOGGER.warn("[nbmachina][selftest] fill 实验失败：{}", e.toString());
 		}
+		// M3-45b 实验二：**按 wipe 的真实几何**复现（窗口 5：forceload x2030..2430 / z-200..-110，
+		// fill 3×111×91 的过滤式填充），看是不是大盒子/区块加载导致静默失败。
+		try {
+			net.minecraft.util.math.BlockPos tp = new net.minecraft.util.math.BlockPos(2417, 91, -148);
+			overworld.setBlockState(tp, Blocks.NOTE_BLOCK.getDefaultState(), 3);
+			boolean before = overworld.getBlockState(tp).isOf(Blocks.NOTE_BLOCK);
+			execute(server, "forceload add 2030 -200 2430 -110");
+			execute(server, "fill 2417 55 -200 2419 165 -110 minecraft:air replace minecraft:note_block");
+			boolean after = overworld.getBlockState(tp).isOf(Blocks.NOTE_BLOCK);
+			execute(server, "forceload remove all");
+			NbmachinaMod.LOGGER.info("[nbmachina][selftest] 真实几何 fill 实验：放置后={} / fill 后仍在={} → {}",
+				before, after, !after ? "这种写法有效 ✔" : "这种写法无效 ✘（要找别的原因）");
+		} catch (Exception e) {
+			NbmachinaMod.LOGGER.warn("[nbmachina][selftest] 真实几何 fill 实验失败：{}", e.toString());
+		}
 
 		// 1) 直接调 mod API 发声（完全不经过命令层）
 		NbmachinaCommands.playDirect(overworld, NbmachinaMod.DEMO_BELL, 1.0F, 1.0F);
