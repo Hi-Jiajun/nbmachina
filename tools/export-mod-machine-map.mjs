@@ -18,6 +18,8 @@ import path from 'node:path';
 
 import { resolvePaths } from '../src/core/paths.mjs';
 import { makePos } from '../src/emit/layout-pos.mjs';
+import { buildTriggerMap } from '../src/emit/trigger-map.mjs';
+import { STEP_SECONDS } from '../src/emit/tick-map.mjs';
 
 const P = resolvePaths();
 const B = P.build;
@@ -44,18 +46,28 @@ for (const need of ['step', 'row', 'instrument', 'midi']) {
 const profile = JSON.parse(fs.readFileSync(PROFILE, 'utf8'));
 const pos = makePos(profile);
 
-const out = ['x,y,z,instrument,voice,midi,velocity,dur_ms'];
+// M3-39：新增三组列，供 **mod 自己驱动机器**（不依赖数据包、不受服务器刻率影响）：
+//   time_sec  该音的**真实时间**（来自参考演奏，缺列时用 step×0.12）
+//   tx,ty,tz  该音符盒的**水平触发位**（放红石块 → 音符盒响 → mixin 接管音色）
+const out = ['x,y,z,instrument,voice,midi,velocity,dur_ms,time_sec,tx,ty,tz'];
 let written = 0, skipped = 0;
 let withDur = 0;
 const byVoice = {};
-for (const line of lines.slice(1)) {
-  if (!line.trim()) continue;
-  const c = line.split(',');
+
+// 逐行解析（保留行序，触发位索引与数据包同一套规则）
+const allRows = lines.slice(1).filter((l) => l.trim()).map((l) => {
+  const c = l.split(',');
+  return { step: Number(c[idx.step]), pitch: Number(c[idx.row]), c };
+});
+// 触发位：与数据包共用 src/emit/trigger-map.mjs，保证"mod 驱动"与"数据包驱动"落在同一格
+const trig = buildTriggerMap(allRows, pos);
+let trigMissing = 0;
+
+allRows.forEach((row, i) => {
+  const c = row.c;
   const voice = c[idx.instrument];
   const target = VOICE_MAP[voice] ?? 'salamander48';
-  if (target === 'skip') { skipped++; continue; }
-  const step = Number(c[idx.step]);
-  const row = Number(c[idx.row]);
+  if (target === 'skip') { skipped++; return; }
   const midi = Number(c[idx.midi]);
   // 力度：优先用谱面的 velMidi（有力度档时），否则 volume × 127
   const velMidi = idx.velMidi !== undefined && c[idx.velMidi] !== undefined && c[idx.velMidi] !== ''
@@ -67,11 +79,21 @@ for (const line of lines.slice(1)) {
     ? Math.max(0, Math.round(Number(c[idx.durMs])))
     : 0;
   if (durMs > 0) withDur++;
-  const p = pos(step, row);
-  out.push(`${p.x},${p.y},${p.z},${target},${voice},${midi},${velocity},${durMs}`);
+  const p = pos(row.step, row.pitch);
+  // 真实时间（M3-24 的视频时间轴）；没有 time_seconds 列就退回格位时间
+  const timeSec = idx.time_seconds !== undefined && c[idx.time_seconds] !== undefined && c[idx.time_seconds] !== ''
+    ? Number(c[idx.time_seconds])
+    : row.step * STEP_SECONDS;
+  const cell = trig.cells[i];
+  if (!cell || !cell.strict) trigMissing++;
+  // 没有严格触发位的那几颗音，触发位写成"音符盒上方"（mod 驱动时会改用引擎兜底，见 NbmachinaMachine）
+  const t = cell && cell.strict ? cell : { x: p.x, y: p.y + 2, z: p.z };
+  out.push(`${p.x},${p.y},${p.z},${target},${voice},${midi},${velocity},${durMs},`
+    + `${timeSec.toFixed(3)},${t.x},${t.y},${t.z}`);
   written++;
   byVoice[voice] = (byVoice[voice] ?? 0) + 1;
-}
+});
+console.log(`  触发位：${written - trigMissing}/${written} 颗有严格水平触发位（其余 ${trigMissing} 颗走 mod 引擎兜底）`);
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
 fs.writeFileSync(OUT, out.join('\n') + '\n', 'utf8');

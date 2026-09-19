@@ -59,7 +59,10 @@ for (const k of oldCells) {
   lines.push(`setblock ${x} ${+y - 1} ${z} minecraft:air`);
 }
 for (const { x, y, z, instr, row } of newCells.values()) {
-  lines.push(`setblock ${x} ${y} ${z} ${DECK_BLOCK[instr]}`);                        // 甲板（决定音色）
+  // M3-39（用户："既然目前底座音色不变，就把音符盒的底座都不要了"）：
+  // 底座只在**原版音符盒发声**时决定乐器，而 mod 模式下声音一律由引擎出（乐器取自谱面映射）。
+  // 所以底座直接清成空气：机器更干净，也少 3044 个方块的摆放/拆除开销。
+  lines.push(`setblock ${x} ${y} ${z} minecraft:air`);                               // 底座（不再需要）
   lines.push(`setblock ${x} ${y + 1} ${z} ${noteBlockOf(instr, row)}`);             // 音符盒
   lines.push(`setblock ${x} ${y - 1} ${z} minecraft:redstone_lamp[lit=false]`);      // 灯
 }

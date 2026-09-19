@@ -2,6 +2,7 @@ package net.nbmachina.mod;
 
 import net.fabricmc.api.ModInitializer;
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents;
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.minecraft.registry.Registries;
 import net.minecraft.registry.Registry;
@@ -73,6 +74,8 @@ public class NbmachinaMod implements ModInitializer {
 		NbmachinaSustainQueue.register();
 		NbmachinaScorePlayer.register();
 		NbmachinaSelfTest.register();
+		// M3-39：由 mod 自己驱动机器（真实时间调度，不受服务器刻率影响）
+		ServerTickEvents.END_SERVER_TICK.register(net.nbmachina.mod.machine.NbmachinaMachine::tick);
 		// 机器映射（位置 → 谱面音符）：起服时读一次，红石触发时就能查到"这颗音该多大力"。
 		// M3-23：`/reload`（数据包重载）与 `/nbmachina reloadmap` 也会重读 —— 换谱面时不用重启游戏。
 		ServerLifecycleEvents.SERVER_STARTED.register(NbmachinaMod::reloadMachineMap);
@@ -86,6 +89,9 @@ public class NbmachinaMod implements ModInitializer {
 		try {
 			int n = net.nbmachina.mod.note.NbmachinaNoteBlocks.loadMap(map);
 			LOGGER.info("[nbmachina] 机器映射已加载：{} 个音符盒位置 ← {}", n, map);
+			// M3-39：同一份表也给"mod 驱动机器"用（多出 time_sec / 触发位三列）
+			int m = net.nbmachina.mod.machine.NbmachinaMachine.load(map);
+			LOGGER.info("[nbmachina] 机器驱动谱面已加载：{} 颗音（含真实时间与触发位）", m);
 		} catch (java.io.IOException e) {
 			LOGGER.warn("[nbmachina] 机器映射未加载（{}）：{} —— 音符盒仍会发声，但力度用默认值",
 				map, e.getMessage());

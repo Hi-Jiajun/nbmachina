@@ -57,6 +57,15 @@ public final class NbmachinaCommands {
 			// M3-23：换谱面（machine_map.csv）时不用重启游戏
 			.then(CommandManager.literal("reloadmap")
 				.executes(NbmachinaCommands::reloadMap))
+			// M3-39：由 mod 驱动机器（真实时间调度：不受服务器刻率影响、粒子按真实音高）
+			.then(CommandManager.literal("machine")
+				.executes(ctx -> machineStatus(ctx.getSource()))
+				.then(CommandManager.literal("status").executes(ctx -> machineStatus(ctx.getSource())))
+				.then(CommandManager.literal("start")
+					.executes(ctx -> machineStart(ctx.getSource(), 0.0F))
+					.then(CommandManager.argument("fromSec", FloatArgumentType.floatArg(0.0F, 1000.0F))
+						.executes(ctx -> machineStart(ctx.getSource(), FloatArgumentType.getFloat(ctx, "fromSec")))))
+				.then(CommandManager.literal("stop").executes(ctx -> machineStop(ctx.getSource()))))
 			.then(CommandManager.literal("note")
 				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
 					.executes(ctx -> note(ctx, 1.0F, 1.0F))
@@ -134,6 +143,44 @@ public final class NbmachinaCommands {
 		NbmachinaMod.reloadMachineMap(source.getServer());
 		source.sendFeedback(() -> Text.literal("[nbmachina] 机器映射已重读：当前 "
 			+ net.nbmachina.mod.note.NbmachinaNoteBlocks.mapSize() + " 个位置"), false);
+		return 1;
+	}
+
+	/**
+	 * M3-39 · `/nbm machine start [起始秒]`：由 **mod 自己**驱动机器。
+	 *
+	 * <p>与数据包驱动的区别：这里按 {@link System#nanoTime()} 的**真实时间**触发，
+	 * 所以世界刻率不是 20 tps 时也不会整曲变速（数据包按"刻"计数，100 tps 下会快 5 倍）；
+	 * 粒子也按谱面的**真实音高**上色（原版音符盒只有 25 档）。
+	 */
+	private static int machineStart(ServerCommandSource source, float fromSec) {
+		ServerWorld world = source.getWorld();
+		String err = net.nbmachina.mod.machine.NbmachinaMachine.start(world, fromSec);
+		if (err != null) {
+			source.sendError(Text.literal("[nbmachina] " + err));
+			return 0;
+		}
+		source.sendFeedback(() -> Text.literal(String.format(
+			"[nbmachina] 机器驱动：开始（从 %.1fs 起，共 %d 颗音；真实时间调度，刻率只影响精度不影响速度）",
+			fromSec, net.nbmachina.mod.machine.NbmachinaMachine.size())), true);
+		return 1;
+	}
+
+	private static int machineStop(ServerCommandSource source) {
+		net.nbmachina.mod.machine.NbmachinaMachine.stop(source.getWorld());
+		source.sendFeedback(() -> Text.literal("[nbmachina] 机器驱动：已停止"), true);
+		return 1;
+	}
+
+	private static int machineStatus(ServerCommandSource source) {
+		source.sendFeedback(() -> Text.literal(String.format(
+			"[nbmachina] 机器驱动：%s；谱面 %d 颗 / 已触发 %d 颗 / 走过 %d 刻%s",
+			net.nbmachina.mod.machine.NbmachinaMachine.running() ? "运行中" : "空闲",
+			net.nbmachina.mod.machine.NbmachinaMachine.size(),
+			net.nbmachina.mod.machine.NbmachinaMachine.fired(),
+			net.nbmachina.mod.machine.NbmachinaMachine.ticks(),
+			net.nbmachina.mod.machine.NbmachinaMachine.running()
+				? String.format("（谱面时间 %.1fs）", net.nbmachina.mod.machine.NbmachinaMachine.elapsedSec()) : "")), false);
 		return 1;
 	}
 
