@@ -42,6 +42,7 @@ const clearRe = /execute if score #t styx\.t matches (\d+) run setblock (-?\d+) 
 const problems = [];
 const seenCell = new Map();
 let checked = 0;
+let engineOnly = 0;
 // 兜底清理：落在"没有音符的窗口"里的拆除行不在 bNNN 里，而是统一进 stop / clear_triggers
 const globalClears = new Set();
 for (const f of ['stop', 'clear_triggers', 'reset']) {
@@ -75,6 +76,18 @@ for (const mode of ['lo', 'hi']) {
   for (let i = 0; i < notes.length; i++) {
     const cell = cells[i];
     const key = `${cell.x},${cell.y},${cell.z}`;
+    if (!cell.strict) {
+      // 非严格触发位 → 这一颗音固定走 mod 引擎（`if #nb matches 1 run nbm playat`）
+      engineOnly++;
+      const p = pos(notes[i].step, notes[i].pitch);
+      const want = `${p.x} ${p.y} ${p.z}`;
+      const dir = path.join(PACK, 'data', 'styx', 'function', 'play', mode);
+      const hit = fs.readdirSync(dir).filter((n) => /^b\d+\.mcfunction$/.test(n))
+        .some((n) => fs.readFileSync(path.join(dir, n), 'utf8')
+          .includes(`if score #nb styx.flag matches 1 run nbm playat ${want}`));
+      if (!hit) problems.push(`${mode}: 第 ${i} 颗音既没有严格触发位、也没有引擎兜底行`);
+      continue;
+    }
     if (!places.has(key)) { problems.push(`${mode}: 缺 ${key}（第 ${i} 颗音）`); continue; }
     ok++;
     // ③ 下一刻必须有拆除
@@ -90,7 +103,7 @@ for (const mode of ['lo', 'hi']) {
 const dup = [...seenCell.entries()].filter(([, n]) => n > 1);
 if (dup.length) problems.push(`有 ${dup.length} 个触发位被多颗音共用：${dup.slice(0, 3).map(([k]) => k).join(' ')}`);
 
-console.log(`谱面 ${notes.length} 颗音；lo/hi 合计校验 ${checked} 条`);
+console.log(`谱面 ${notes.length} 颗音；lo/hi 合计校验 ${checked} 条；引擎兜底 ${engineOnly} 条`);
 if (problems.length) {
   console.log(`✘ 不通过，${problems.length} 个问题：`);
   for (const p of problems.slice(0, 10)) console.log('  - ' + p);

@@ -428,17 +428,21 @@ public final class NbmachinaClient implements ClientModInitializer {
 			return 0;
 		}
 		String file = region.file;
-		boolean exists = file != null && java.nio.file.Files.isRegularFile(java.nio.file.Path.of(file));
+		// M3-38b：索引里是**相对采样根**的路径，必须先按 NbmachinaSamples 解析成实际文件，
+		// 否则这里会误报"存在=false / 解码失败"（声音其实正常，只是自检看错了文件）。
+		java.nio.file.Path resolved = NbmachinaSamples.resolve(file);
+		String shown = resolved == null ? String.valueOf(file) : resolved.toString();
+		boolean exists = resolved != null && java.nio.file.Files.isRegularFile(resolved);
 		String decode;
 		try {
-			var pcm = NbmachinaWav.read(java.nio.file.Path.of(file));
+			var pcm = NbmachinaWav.read(resolved);
 			decode = String.format("%dch / %dHz / %.2fs / %d 帧", pcm.channels(), pcm.sampleRate(), pcm.seconds(), pcm.frames());
 		} catch (Exception e) {
 			decode = "解码失败：" + e.getClass().getSimpleName() + ": " + e.getMessage();
 		}
 		src.sendFeedback(Text.literal(String.format(
 			"[nbmachina] selftest %s midi=%d vel=%d\n  采样=%s（存在=%s）\n  区域：loKey..hiKey=%d..%d root=%d 力度 %d..%d 增益%+.1fdB\n  解码：%s\n  引擎就绪=%s 主增益=%.2f",
-			instrument, midi, velocity, file, exists,
+			instrument, midi, velocity, shown, exists,
 			region.loKey, region.hiKey, region.root, region.loVel, region.hiVel, region.gainDb,
 			decode, NbmachinaAudio.ready(), NbmachinaAudio.masterGain())));
 

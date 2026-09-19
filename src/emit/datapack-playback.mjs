@@ -158,12 +158,18 @@ for (const mode of MODES) {
         //   在水平相邻的空位瞬放红石块 → 音符盒真的响 → mod 的 mixin 掐掉原版声音换无损采样。
         //   `sound_on` 会把这条切回"数据包直接派发给 mod 引擎"（`#nb=0` + `#snd=1`），两条互斥。
         const cell = trigCellOf.get(`${x},${y},${z}`);
-        // 提前 TRIGGER_LEAD 刻放红石块（默认 1）：方块事件下一 tick 才执行，这样声音与灯/粒子同刻
-        const placeTick = Math.max(0, t - TRIGGER_LEAD);
-        const placeGuard = placeTick === t ? guard : `execute if score #t styx.t matches ${placeTick} run`;
-        out.push(`${placeGuard} execute if score #nb styx.flag matches 1 run setblock `
-          + `${cell.x} ${cell.y} ${cell.z} minecraft:redstone_block`);
-        addClear(placeTick + 1, `setblock ${cell.x} ${cell.y} ${cell.z} minecraft:air`);
+        if (cell.strict) {
+          // 提前 TRIGGER_LEAD 刻放红石块（默认 1）：方块事件下一 tick 才执行，这样声音与灯/粒子同刻
+          const placeTick = Math.max(0, t - TRIGGER_LEAD);
+          const placeGuard = placeTick === t ? guard : `execute if score #t styx.t matches ${placeTick} run`;
+          out.push(`${placeGuard} execute if score #nb styx.flag matches 1 run setblock `
+            + `${cell.x} ${cell.y} ${cell.z} minecraft:redstone_block`);
+          addClear(placeTick + 1, `setblock ${cell.x} ${cell.y} ${cell.z} minecraft:air`);
+        } else {
+          // 没有"只点亮自己"的触发位（实测 18/3044）：这一颗音改走 mod 引擎，避免顺手点亮旁边的音符盒。
+          // 只在**音符盒模式**（#nb=1）下跑，免得和下面那条 #snd 的派发行重复。
+          out.push(`${guard} execute if score #nb styx.flag matches 1 run nbm playat ${x} ${y} ${z}`);
+        }
         out.push(`${guard} execute unless score #snd styx.flag matches 0 run nbm playat ${x} ${y} ${z}`);
         // 音符粒子：本题材里音符盒本体发不出声（见上），粒子也就没有；这里按 vanilla 的
         // addParticle(NOTE, x+0.5, y+1.2, z+0.5, row/24, 0, 0) 口径补一发。

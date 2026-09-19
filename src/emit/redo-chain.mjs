@@ -55,10 +55,13 @@ w('redo/s4.mcfunction', [
   'function styx:apply_notes_v3',
   'forceload remove all',
   'scoreboard objectives add styx.flag dummy',
-  // M3-23：声音由 mod 的无损引擎出（`nbmachina listen on` = 声音锚在玩家身上，整条机器都听得到）。
+  // M3-23 / M3-38：声音锚在玩家身上（listen on = 整条机器都听得到）。
+  // 注意命令名：改名（nbforge → nbmachina）后服务端命令是 **`/nbm`**，
+  // 这里曾经残留 `nbmachina listen on` → 整个 s4 函数**加载失败**（日志 "Failed to load function styx:redo/s4"），
+  // 于是重做链最后一步永远走不到：不 listen、不重建第三段、也**不会自动开始播放**。
   // 旧的 `/playsound` 监听层（#mon=1）会和它双响 —— 2026-09-18 用户实测"音乐完全不对"就是这两层叠在一起。
   'scoreboard players set #mon styx.flag 0',
-  'nbmachina listen on',
+  'nbm listen on',
   'tellraw @a {"text":"[Styx] 重做完成：地形已修、音符已换、无损引擎已接管（listen on）—— 3 秒后开始播放","color":"gold"}',
   'execute if score #hiwant styx.flag matches 1 run schedule function styx:play/start_hi 60t',
   'execute unless score #hiwant styx.flag matches 1 run schedule function styx:play/start 60t',

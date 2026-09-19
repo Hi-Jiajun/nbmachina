@@ -69,6 +69,7 @@ for (const { x, y, z, instr, row } of newCells.values()) {
 const triggerMap = buildTriggerMapFromPoints([...newCells.values()]);
 if (triggerMap.missing > 0) throw new Error(`有 ${triggerMap.missing} 个音符找不到水平触发位，布局需要改造`);
 for (const cell of triggerMap.cells) {
+  if (!cell.strict) continue;   // 非严格位不摆触发位置（那颗音走 mod 引擎，见 datapack-playback.mjs）
   lines.push(`setblock ${cell.x} ${cell.y} ${cell.z} minecraft:air`);   // 触发位（音符盒同层，水平相邻）
 }
 

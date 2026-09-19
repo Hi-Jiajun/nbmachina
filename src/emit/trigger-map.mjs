@@ -23,6 +23,8 @@ export function buildTriggerMap(notes, pos) {
  * `src/emit/note-blocks.mjs` 摆方块时手上就是坐标，用这个入口避免再算一次。
  */
 export function buildTriggerMapFromPoints(points) {
+  // 音符盒本体所在格（x, y+1, z）—— 用来判断"这个触发位会不会同时点亮别的音符盒"
+  const noteCells = new Set(points.map((p) => `${p.x},${p.y + 1},${p.z}`));
   const occupied = new Set();
   for (const p of points) {
     for (const dy of [-1, 0, 1, 2]) occupied.add(`${p.x},${p.y + dy},${p.z}`);
@@ -30,21 +32,44 @@ export function buildTriggerMapFromPoints(points) {
   const used = new Map();
   const cells = points.map((p, i) => {
     const y = p.y + 1;
+    const self = `${p.x},${y},${p.z}`;
     const candidates = [
       ['zPlus', p.x, y, p.z + 1],
       ['zMinus', p.x, y, p.z - 1],
       ['xPlus', p.x + 1, y, p.z],
       ['xMinus', p.x - 1, y, p.z],
     ];
+    // 严格优先：触发位**只能挨着目标这一个音符盒**。
+    // 否则红石块会顺手点亮旁边的音符盒（实测 3044 个位里有 309 个会"多点亮"）→ 多出来的音。
+    let loose = null;
     for (const [dir, x, cy, z] of candidates) {
       const key = `${x},${cy},${z}`;
       if (occupied.has(key) || used.has(key)) continue;
-      used.set(key, i);
-      return { x, y: cy, z, dir };
+      const cell = { x, y: cy, z, dir };
+      if (!loose) loose = cell;
+      let others = 0;
+      for (const [dx, dy, dz] of [[0, 0, -1], [0, 0, 1], [-1, 0, 0], [1, 0, 0], [0, -1, 0], [0, 1, 0]]) {
+        const k = `${x + dx},${cy + dy},${z + dz}`;
+        if (k !== self && noteCells.has(k)) others++;
+      }
+      if (others === 0) {
+        used.set(key, i);
+        return { ...cell, strict: true };
+      }
+    }
+    if (loose) {
+      used.set(`${loose.x},${loose.y},${loose.z}`, i);
+      return { ...loose, strict: false };
     }
     return null;
   });
-  return { cells, occupied, missing: cells.filter((c) => !c).length };
+  return {
+    cells,
+    occupied,
+    missing: cells.filter((c) => !c).length,
+    strictCount: cells.filter((c) => c?.strict).length,
+    looseCount: cells.filter((c) => c && !c.strict).length,
+  };
 }
 
 /** 触发位所在格 → 该格在"机器占用表"里是否真的空着（自检用） */

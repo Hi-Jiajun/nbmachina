@@ -40,6 +40,9 @@ public final class NbmachinaNoteBlocks {
 	private static final AtomicInteger eventCount = new AtomicInteger();
 	private static final AtomicInteger dispatched = new AtomicInteger();
 	private static final AtomicInteger skipped = new AtomicInteger();
+	/** M3-37b：映射命中/未命中 —— 未命中说明"这个音符盒不在 machine_map 里"（多半是世界里的遗留音符盒） */
+	private static final AtomicInteger mappedHit = new AtomicInteger();
+	private static final AtomicInteger mappedMiss = new AtomicInteger();
 	/** 位置 → 该处方块的"力度"（如果谱面提供过）——先留空，后续由谱面导出填充 */
 	private static final Map<Long, Integer> VELOCITY_BY_POS = new ConcurrentHashMap<>();
 
@@ -81,6 +84,14 @@ public final class NbmachinaNoteBlocks {
 
 	public static int skipped() {
 		return skipped.get();
+	}
+
+	public static int mappedHit() {
+		return mappedHit.get();
+	}
+
+	public static int mappedMiss() {
+		return mappedMiss.get();
 	}
 
 	public static int mapSize() {
@@ -172,6 +183,14 @@ public final class NbmachinaNoteBlocks {
 		if (mapped == null) {
 			mapped = BY_POS.get(new net.minecraft.util.math.BlockPos(pos.getX(), pos.getY() - 1, pos.getZ()).asLong());
 		}
+		if (mapped != null) mappedHit.incrementAndGet();
+		else {
+			int miss = mappedMiss.incrementAndGet();
+			if (miss <= 12) {
+				NbmachinaMod.LOGGER.info("[nbmachina] 音符盒事件未命中谱面映射 #{} pos={} 乐器={} note={}（多半是世界里的遗留音符盒；方块下方={}）",
+					miss, pos.toShortString(), instrument, note, serverWorld.getBlockState(pos.down()).getBlock().toString());
+			}
+		}
 		String voice = mapped != null ? mapped.voice() : voiceOf(instrument);
 		String target = mapped != null ? mapped.instrument() : (voice == null ? null : NbmachinaMod.instrumentForVoice(voice));
 		if (voice == null || target == null) {
@@ -190,16 +209,25 @@ public final class NbmachinaNoteBlocks {
 		int sent = 0;
 		for (ServerPlayerEntity player : server.getPlayerManager().getPlayerList()) {
 			if (player.getEntityWorld() != serverWorld) continue;
-			if (player.squaredDistanceTo(x, y, z) > 48 * 48) continue;   // 只发给听得到的玩家
+			// M3-38b：与 /nbm playat 用**同一套派发口径** ——
+			//   监听模式（listen on，默认）：声音锚在玩家自己身上、不做距离过滤（整条机器 2880 格都听得到）；
+			//   否则按方块物理位置发声，只发给 64 格内的玩家。
+			// 之前这里写死"48 格内"，于是演奏时只能听到身边那一小段 → 用户反馈"歌曲完全不对"。
+			if (!listenMode && player.squaredDistanceTo(x, y, z) > 64 * 64) continue;
+			double px = listenMode ? player.getX() : x;
+			double py = listenMode ? player.getY() : y;
+			double pz = listenMode ? player.getZ() : z;
 			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
 				new NbmachinaPlayPayload(target, voice, midi, velocity,
-					mapped != null ? mapped.durMs() : 0, x, y, z));
+					mapped != null ? mapped.durMs() : 0, px, py, pz));
 			sent++;
 		}
 		dispatched.incrementAndGet();
-		if (eventCount.get() <= 8 || eventCount.get() % 50 == 0) {
+		// 注意：单机里客户端的 onSyncedBlockEvent 也会被 mixin 拦到（ClientWorld → 函数开头就返回），
+		// 所以 eventCount 是"服务端 + 客户端"两份之和；用 dispatched 计数才和音符数对得上。
+		if (dispatched.get() <= 8 || dispatched.get() % 200 == 0) {
 			NbmachinaMod.LOGGER.info("[nbmachina] 音符盒触发 #{} pos={} 乐器={} note={} → {} midi={} vel={} 发给 {} 人",
-				eventCount.get(), pos.toShortString(), instrument, note, target, midi, velocity, sent);
+				dispatched.get(), pos.toShortString(), instrument, note, target, midi, velocity, sent);
 		}
 		return true;
 	}

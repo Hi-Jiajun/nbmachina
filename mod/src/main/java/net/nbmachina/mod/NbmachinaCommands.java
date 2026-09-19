@@ -105,14 +105,21 @@ public final class NbmachinaCommands {
 		ServerCommandSource source = ctx.getSource();
 		source.sendFeedback(() -> Text.literal(String.format(
 			"[nbmachina] 后端 A 在线\n"
-				+ "  自研演奏器：已派发 %d 次（音符盒本体事件 %d / 跳过 %d）；机器映射 %d 个位置\n"
+				+ "  自研演奏器：已派发 %d 次（音符盒本体事件 %d / 映射命中 %d / 未命中 %d / 跳过 %d）；机器映射 %d 个位置\n"
+				+ "  发声开关：音符盒触发 #nb=%d / 数据包直派 #snd=%d / 播放中 #on=%d"
+				+ "（`/function styx:play/sound_off` = 音符盒触发，`sound_on` = 数据包直派）\n"
 				+ "  旧路径（/nbmachina note|sustain）：活跃作业 %d 累计击发 %d 峰值并发 %d"
 				+ "（走自研演奏器时这里一直是 0，是正常的——声音走 nbmachina:play 到客户端无损引擎）\n"
 				+ "  声部→乐器：旋律=%s 低音=%s 打击乐=%s",
 			net.nbmachina.mod.note.NbmachinaNoteBlocks.dispatched(),
 			net.nbmachina.mod.note.NbmachinaNoteBlocks.eventCount(),
+			net.nbmachina.mod.note.NbmachinaNoteBlocks.mappedHit(),
+			net.nbmachina.mod.note.NbmachinaNoteBlocks.mappedMiss(),
 			net.nbmachina.mod.note.NbmachinaNoteBlocks.skipped(),
 			net.nbmachina.mod.note.NbmachinaNoteBlocks.mapSize(),
+			NbmachinaFlags.flag(ctx.getSource().getWorld(), "#nb"),
+			NbmachinaFlags.flag(ctx.getSource().getWorld(), "#snd"),
+			NbmachinaFlags.flag(ctx.getSource().getWorld(), "#on"),
 			NbmachinaSustainQueue.activeJobs(),
 			NbmachinaSustainQueue.totalPlays(),
 			NbmachinaSustainQueue.peakActiveJobs(),
