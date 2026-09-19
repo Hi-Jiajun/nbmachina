@@ -52,7 +52,10 @@ public final class NbmachinaMachine {
 	private static double rate = 1.0;
 	/** 触发提前量（服务器刻）：默认 3。运行时可用 `/nbm machine lead <0..6>` 改，用于现场 A/B。
 	 *  提前量越大 → 载荷越早到客户端 → 客户端越能"等到准确时刻"再发声（代价是红石块更早出现）。 */
-	private static volatile int leadTicks = 6;   // M3-64：实测 3 刻几乎没效果、6 刻 p90 43→24.6ms → 默认 6
+	// M3-65（用户 2026-09-19）：默认改为 **0 刻**。实测同一配置两次测出的 p90 差 2.3 倍
+	// （lead 6：24.6ms vs 57.2ms）→ 剩余抖动由服务器负载/采集链路主导，提前量在 0~12 之间已不构成
+	// 可辨差异；用户明确"用固定 0 刻"。运行时仍可用 `/nbm machine lead <0..20>` 临时提高。
+	private static volatile int leadTicks = 0;
 
 	public static int leadTicks() {
 		return leadTicks;
