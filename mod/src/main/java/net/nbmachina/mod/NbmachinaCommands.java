@@ -76,6 +76,10 @@ public final class NbmachinaCommands {
 									FloatArgumentType.getFloat(ctx, "offsetMs"),
 									FloatArgumentType.getFloat(ctx, "rate")))))))
 				.then(CommandManager.literal("stop").executes(ctx -> machineStop(ctx.getSource()))))
+				.then(CommandManager.literal("silent")
+					.executes(ctx -> machineSilent(ctx.getSource(), null))
+					.then(CommandManager.literal("on").executes(ctx -> machineSilent(ctx.getSource(), true)))
+					.then(CommandManager.literal("off").executes(ctx -> machineSilent(ctx.getSource(), false))))
 			.then(CommandManager.literal("note")
 				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
 					.executes(ctx -> note(ctx, 1.0F, 1.0F))
@@ -177,6 +181,19 @@ public final class NbmachinaCommands {
 		source.sendFeedback(() -> Text.literal(String.format(
 			"[nbmachina] 机器驱动：开始（从 %.1fs 起，全局偏移 %+.0fms，速率 %.5f，共 %d 颗音；真实时间调度，刻率只影响精度不影响速度）",
 			fromSec, offsetMs, rate, net.nbmachina.mod.machine.NbmachinaMachine.size())), true);
+		return 1;
+	}
+
+	/**
+	 * `/nbm machine silent on|off`（M3-51）：音符盒静音（灯/粒子/触发照常），
+	 * 声音改由客户端 `/nbmc play` 的 nanoTime 调度出 —— 把节奏从"服务器刻（50ms）"提到 1ms 级。
+	 */
+	private static int machineSilent(ServerCommandSource source, Boolean on) {
+		boolean value = on != null ? on : !net.nbmachina.mod.note.NbmachinaNoteBlocks.silent();
+		net.nbmachina.mod.note.NbmachinaNoteBlocks.setSilent(value);
+		source.sendFeedback(() -> Text.literal(String.format(
+			"[nbmachina] 音符盒静音：%s%s", value ? "开" : "关",
+			value ? "（机器照常亮灯出粒子，声音请用客户端 /nbmc play —— 1ms 级调度）" : "（回到音符盒发声）")), true);
 		return 1;
 	}
 

@@ -51,6 +51,18 @@ public final class NbmachinaClient implements ClientModInitializer {
 		NbmachinaAudio.start();
 		NbmachinaMod.LOGGER.info("[nbmachina] 客户端入口：乐器 {} 个（{}）", loaded, NbmachinaInstruments.lastError());
 
+		// M3-51：服务端说"机器从第 X 秒开始跑了" → 客户端用**自己的时钟**从同一时间点起播（1ms 级）
+		ClientPlayNetworking.registerGlobalReceiver(
+			net.nbmachina.mod.net.NbmachinaMachineSyncPayload.ID, (payload, context) ->
+				context.client().execute(() -> {
+					boolean ok = NbmachinaClientPlayer.start(payload.fromSec());
+					NbmachinaMod.LOGGER.info("[nbmachina] 机器同步包：从 {}s 起播客户端精确音轨 → {}", payload.fromSec(), ok);
+					if (context.player() != null) {
+						context.player().sendMessage(Text.literal(ok
+							? "[nbmachina] 客户端精确音轨已同步起播（1ms 级调度）"
+							: "[nbmachina] 客户端精确音轨起播失败（没有谱面？/nbmc status 看详情）"), false);
+					}
+				}));
 		ClientPlayNetworking.registerGlobalReceiver(NbmachinaPlayPayload.ID, (payload, context) ->
 			NbmachinaAudio.play(payload.instrument(), payload.voice(), payload.midi(), payload.velocity(), payload.durMs(),
 				payload.x(), payload.y(), payload.z()));

@@ -152,6 +152,15 @@ public final class NbmachinaMachine {
 		running = true;
 		maintainForceload(world);
 		silenceDataPack(world);
+		// M3-51：广播"从这一秒开始"给所有客户端 —— 静音模式下由客户端 nanoTime 调度出声（1ms 级）
+		try {
+			for (var player : world.getServer().getPlayerManager().getPlayerList()) {
+				net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
+					new net.nbmachina.mod.net.NbmachinaMachineSyncPayload(fromSec));
+			}
+		} catch (Exception e) {
+			NbmachinaMod.LOGGER.warn("[nbmachina] 同步包发送失败（不影响机器）：{}", e.toString());
+		}
 		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动开始：从 {}s 起，全局偏移 {}ms，速率 {}（谱面 {} 颗音，第 {} 颗）",
 			fromSec, leadMs, rate, NOTES.size(), cursor);
 		return null;

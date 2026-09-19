@@ -280,7 +280,7 @@ const allSteps = [];
 WINDOWS.forEach(([xa, xb], i) => {
   const cmds = [];
   for (let x = xa; x < xb; x += 5) {
-    cmds.push(`fill ${x} 80 -178 ${Math.min(x + 4, xb - 1)} 165 -114 minecraft:air`);
+    cmds.push(`fill ${x} 55 -200 ${Math.min(x + 4, xb - 1)} 200 -110 minecraft:air`);
   }
   allSteps.push({ name: `a${i + 1}`, xa, xb, cmds });
 });
@@ -306,3 +306,39 @@ fs.writeFileSync(ALL_OUT, [
   '',
 ].join('\n'), 'utf8');
 console.log(`写出 ${ALL_OUT} + wipe_all/${allSteps.map((s) => `${s.name}(${s.cmds.length}条)`).join(' ')}`);
+
+// ---- 彻底铲平版（用户 2026-09-19："把区块内所有方块都清除掉"）：整列清空（y −64..319）
+// 注意：这会把地形一起抹掉（机器所在的那条带会变成虚空），重建只能用 styx:redo 铺机器本身。
+const VOID_OUT = path.join(dir, 'wipe_void.mcfunction');
+fs.mkdirSync(path.join(dir, 'wipe_void'), { recursive: true });
+const voidSteps = [];
+WINDOWS.forEach(([xa, xb], i) => {
+  const cmds = [];
+  for (let x = xa; x < xb; x += 2) {
+    cmds.push(`fill ${x} -64 ${WZ0} ${Math.min(x + 1, xb - 1)} 319 ${WZ1} minecraft:air`);
+  }
+  voidSteps.push({ name: `v${i + 1}`, xa, xb, cmds });
+});
+voidSteps.forEach((st, i) => {
+  const tail = [];
+  if (i + 1 < voidSteps.length) {
+    tail.push('forceload remove all');
+    tail.push(`forceload add ${voidSteps[i + 1].xa} ${ZA} ${voidSteps[i + 1].xb} ${ZB}`);
+    tail.push(`schedule function styx:wipe_void/${voidSteps[i + 1].name} 60t`);
+    tail.push('tellraw @a {"text":"[Styx] 铲平中…下一个窗口","color":"gray"}');
+  } else {
+    tail.push('forceload remove all');
+    tail.push('tellraw @a {"text":"[Styx] ⚠ 整列已清空（地形也没了）—— 现在跑 /function styx:redo 重建机器","color":"red"}');
+  }
+  fs.writeFileSync(path.join(dir, 'wipe_void', `${st.name}.mcfunction`), [...st.cmds, ...tail, ''].join('\n'), 'utf8');
+});
+fs.writeFileSync(VOID_OUT, [
+  '# M3-52 · 彻底铲平：把机器那条带（z −200..−110）整列 y −64..319 清成空气（地形一起没）',
+  'scoreboard objectives add styx.flag dummy',
+  'forceload remove all',
+  `forceload add ${voidSteps[0].xa} ${ZA} ${voidSteps[0].xb} ${ZB}`,
+  `schedule function styx:wipe_void/${voidSteps[0].name} 60t`,
+  'tellraw @a {"text":"[Styx] ⚠ 开始整列清空（地形会消失，只保留机器重建能力）…","color":"red"}',
+  '',
+].join('\n'), 'utf8');
+console.log(`写出 ${VOID_OUT} + wipe_void/${voidSteps.map((s) => `${s.name}(${s.cmds.length}条)`).join(' ')}`);

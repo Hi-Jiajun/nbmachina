@@ -74,6 +74,23 @@ public final class NbmachinaNoteBlocks {
 		enabled = value;
 	}
 
+	/**
+	 * M3-51 · **静音模式**：音符盒照常被触发（灯/粒子/机器都在跑），但**不出声**。
+	 *
+	 * <p>为什么需要它：音符盒的发声时刻受**服务器刻**限制（20 tps = 50ms 量化），实测节奏 p90 ≈ 17ms，
+	 * 用户能听出来。要更严只能让声音走**客户端调度**（`/nbmc play`，nanoTime，实测抖动 0.18ms），
+	 * 那时必须让音符盒闭嘴，否则两套声音会叠。
+	 */
+	private static volatile boolean silent = false;
+
+	public static boolean silent() {
+		return silent;
+	}
+
+	public static void setSilent(boolean value) {
+		silent = value;
+	}
+
 	public static int eventCount() {
 		return eventCount.get();
 	}
@@ -173,6 +190,8 @@ public final class NbmachinaNoteBlocks {
 		if (!enabled || !(world instanceof ServerWorld serverWorld)) {
 			return false;
 		}
+		// 静音模式：吞掉原版声音、也不派发我们的引擎（声音交给客户端 /nbmc play 精确调度）
+		if (silent) return true;
 		NoteBlockInstrument instrument = state.get(NoteBlock.INSTRUMENT);
 		int note = state.get(NoteBlock.NOTE);
 		// ① 优先用"机器位置 → 谱面音符"映射：这样力度就是谱面里的真实力度

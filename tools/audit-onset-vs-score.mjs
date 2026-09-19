@@ -261,7 +261,8 @@ if (wrong.length) {
 }
 // 4) 节奏
 const p90 = dt.length ? dt[Math.floor(dt.length * 0.9)] : 0;
-if (p90 > 30) {
+// 阈值：客户端精确音轨路径（--hires）要 p90 ≤ 10ms；音符盒发声受服务器刻量化，放宽到 30ms
+if (p90 > (argv.includes('--hires') ? 10 : 30)) {
   console.log(`④ 节奏 p90 = ${p90.toFixed(1)}ms 超过 30ms → 用偏移/速率补偿：/nbm machine start 0 ${(-p90 / 2).toFixed(0)} ${(1 + p90 / 1e5).toFixed(5)}`);
 } else {
   console.log(`④ 节奏 p90 = ${p90.toFixed(1)}ms 在阈值内 → 不需要补偿`);

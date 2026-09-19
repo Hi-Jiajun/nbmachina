@@ -69,6 +69,8 @@ public class NbmachinaMod implements ModInitializer {
 		LOGGER.info("[nbmachina] onInitialize：已注册自定义音色事件 demo_bell/demo_pad/demo_strings/demo_bass");
 		// P2：音符协议（服务端 → 客户端）。必须在两边都注册，否则客户端拒收。
 		PayloadTypeRegistry.playS2C().register(NbmachinaPlayPayload.ID, NbmachinaPlayPayload.CODEC);
+		PayloadTypeRegistry.playS2C().register(net.nbmachina.mod.net.NbmachinaMachineSyncPayload.ID,
+			net.nbmachina.mod.net.NbmachinaMachineSyncPayload.CODEC);
 		LOGGER.info("[nbmachina] 已注册 S2C 音符协议 nbmachina:play");
 		NbmachinaCommands.register();
 		NbmachinaSustainQueue.register();
