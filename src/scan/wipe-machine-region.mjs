@@ -135,6 +135,19 @@ const expected = new Set(mapCsv.slice(1).map((l) => {
 
 const leftover = noteBlocks.filter(([x, y, z]) => !expected.has(`${x},${y},${z}`));
 console.log(`扫描完成：音符盒 ${noteBlocks.length} 个（当前谱面应有 ${expected.size} 个），其中**遗留 ${leftover.length}** 个；红石块 ${redstoneBlocks.length} 个`);
+{
+  const box = (arr) => (arr.length
+    ? `x ${Math.min(...arr.map((a) => a[0]))}..${Math.max(...arr.map((a) => a[0]))} / `
+      + `y ${Math.min(...arr.map((a) => a[1]))}..${Math.max(...arr.map((a) => a[1]))} / `
+      + `z ${Math.min(...arr.map((a) => a[2]))}..${Math.max(...arr.map((a) => a[2]))}`
+    : '（无）');
+  console.log(`  全部音符盒包围盒：${box(noteBlocks)}`);
+  console.log(`  遗留音符盒包围盒：${box(leftover)}`);
+  const hist = new Map();
+  for (const [, y] of noteBlocks) hist.set(y, (hist.get(y) ?? 0) + 1);
+  console.log('  y 分布：' + [...hist.entries()].sort((a, b) => a[0] - b[0])
+    .map(([y, n]) => `${y}:${n}`).join(' '));
+}
 
 const lines = [
   '# M3-38c 由 src/scan/wipe-machine-region.mjs 生成：清掉机器区域里的所有音符盒/红石块（含历史遗留）',
@@ -149,21 +162,84 @@ for (const [x, y, z] of redstoneBlocks) lines.push(`setblock ${x} ${y} ${z} mine
 lines.push('');
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
-// 拆成几段、每隔 1 tick 执行一段：2.9 万条 setblock 一次性跑会让服务器卡住好几秒
-const CHUNK = 6000;
-const body = lines.slice(2, lines.length - 1);
-const parts = [];
-for (let i = 0; i < body.length; i += CHUNK) parts.push(body.slice(i, i + CHUNK));
+
+// ⚠ 关键：`setblock` **只对已加载的区块生效**。机器长 2400 格，站在这头时那头的 setblock 会静默失败
+// （2026-09-19 第一次 wipe 只清掉一小部分就是这个原因）。所以按 x 分窗口，每个窗口先 forceload、
+// 等 2 秒再清，清完换下一个窗口。forceload 单次上限 256 区块 → 窗口取 400 格宽（25×9=225 区块）。
+const WINDOWS = [[430, 830], [830, 1230], [1230, 1630], [1630, 2030], [2030, 2430], [2430, 2900]];
+const ZA = -240, ZB = -110;
 const dir = path.dirname(OUT);
 fs.mkdirSync(path.join(dir, 'wipe'), { recursive: true });
-parts.forEach((cmds, i) => {
-  fs.writeFileSync(path.join(dir, 'wipe', `s${i + 1}.mcfunction`), cmds.join('\n') + '\n', 'utf8');
+const body = lines.slice(2, lines.length - 1);
+
+const steps = [];
+WINDOWS.forEach(([xa, xb], i) => {
+  const cmds = body.filter((l) => {
+    const m = /^setblock (-?\d+) /.exec(l);
+    return m && +m[1] >= xa && +m[1] < xb;
+  });
+  steps.push({ name: `s${i + 1}`, xa, xb, cmds });
 });
-const entry = [
+
+steps.forEach((st, i) => {
+  const tail = [];
+  if (i + 1 < steps.length) {
+    tail.push('forceload remove all');
+    tail.push(`forceload add ${steps[i + 1].xa} ${ZA} ${steps[i + 1].xb} ${ZB}`);
+    tail.push(`schedule function styx:wipe/${steps[i + 1].name} 40t`);
+    tail.push(`tellraw @a {"text":"[Styx] 清理中…窗口 ${i + 2}/${steps.length}","color":"gray"}`);
+  } else {
+    tail.push('forceload remove all');
+    tail.push('tellraw @a {"text":"[Styx] 机器区域清理完成（清除音符盒方块）—— 现在跑 /function styx:redo 重建","color":"green"}');
+  }
+  const head = i === 0 ? [] : [];
+  fs.writeFileSync(path.join(dir, 'wipe', `${st.name}.mcfunction`),
+    [...head, ...st.cmds, ...tail, ''].join('\n'), 'utf8');
+});
+
+fs.writeFileSync(OUT, [
   ...lines.slice(0, 2),
-  ...parts.map((_, i) => `schedule function styx:wipe/s${i + 1} ${i + 1}t`),
-  'tellraw @a {"text":"[Styx] 正在清除机器区域的历史方块（分 ' + parts.length + ' 段，约 ' + parts.length + ' 秒）…","color":"gold"}',
+  'scoreboard objectives add styx.flag dummy',
+  'forceload remove all',
+  `forceload add ${steps[0].xa} ${ZA} ${steps[0].xb} ${ZB}`,
+  `schedule function styx:wipe/${steps[0].name} 40t`,
+  `tellraw @a {"text":"[Styx] 正在清除机器区域的历史方块（分 ${steps.length} 个窗口，先强加载区块，约 30 秒）…","color":"gold"}`,
   '',
-];
-fs.writeFileSync(OUT, entry.join('\n'), 'utf8');
-console.log(`写出 ${OUT} + wipe/s1..s${parts.length}：共 ${body.length} 条指令（每段 ${CHUNK}）`);
+].join('\n'), 'utf8');
+console.log(`写出 ${OUT} + wipe/${steps.map((s) => `${s.name}(${s.cmds.length}条)`).join(' ')}`);
+
+// ---- 彻底版：把整条机器的**工作空间**直接 fill 成空气（用户 2026-09-19："直接把这个区域清空都行"）----
+// 范围取 y 80..130 / z -178..-114（机器甲板 84..110、音符盒 85..111、扫描到的遗留最高 129），
+// 不碰 y<80 的地面。每条 fill 控制在 32768 格以内（6 × 51 × 65 = 19890）。
+const ALL_OUT = path.join(dir, 'wipe_all.mcfunction');
+fs.mkdirSync(path.join(dir, 'wipe_all'), { recursive: true });
+const allSteps = [];
+WINDOWS.forEach(([xa, xb], i) => {
+  const cmds = [];
+  for (let x = xa; x < xb; x += 6) {
+    cmds.push(`fill ${x} 80 -178 ${Math.min(x + 5, xb - 1)} 130 -114 minecraft:air`);
+  }
+  allSteps.push({ name: `a${i + 1}`, xa, xb, cmds });
+});
+allSteps.forEach((st, i) => {
+  const tail = [];
+  if (i + 1 < allSteps.length) {
+    tail.push('forceload remove all');
+    tail.push(`forceload add ${allSteps[i + 1].xa} ${ZA} ${allSteps[i + 1].xb} ${ZB}`);
+    tail.push(`schedule function styx:wipe_all/${allSteps[i + 1].name} 40t`);
+  } else {
+    tail.push('forceload remove all');
+    tail.push('tellraw @a {"text":"[Styx] 区域已整体清空（y80..130）—— 现在跑 /function styx:redo 重建","color":"green"}');
+  }
+  fs.writeFileSync(path.join(dir, 'wipe_all', `${st.name}.mcfunction`), [...st.cmds, ...tail, ''].join('\n'), 'utf8');
+});
+fs.writeFileSync(ALL_OUT, [
+  '# M3-38c · 彻底清空机器工作空间（y80..130 / z-178..-114），比 styx:wipe 更粗暴：连甲板/灯/遗留方块一起填成空气',
+  'scoreboard objectives add styx.flag dummy',
+  'forceload remove all',
+  `forceload add ${allSteps[0].xa} ${ZA} ${allSteps[0].xb} ${ZB}`,
+  `schedule function styx:wipe_all/${allSteps[0].name} 40t`,
+  `tellraw @a {"text":"[Styx] 正在整体清空机器区域（分 ${allSteps.length} 个窗口，约 30 秒）…","color":"gold"}`,
+  '',
+].join('\n'), 'utf8');
+console.log(`写出 ${ALL_OUT} + wipe_all/${allSteps.map((s) => `${s.name}(${s.cmds.length}条)`).join(' ')}`);
