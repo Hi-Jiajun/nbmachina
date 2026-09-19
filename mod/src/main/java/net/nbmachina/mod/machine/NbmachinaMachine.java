@@ -208,8 +208,11 @@ public final class NbmachinaMachine {
 		int firedThisTick = 0;
 		while (cursor < NOTES.size()) {
 			Note n = NOTES.get(cursor);
-			// now 已经是"谱面时间"（含速率与偏移），直接比较即可
-			if (n.timeSec() > now + tickSec) break;
+			// now 已经是"谱面时间"（含速率与偏移）。
+			// M3-54：提前量从 1 刻改成 **2 刻**——音符盒的方块事件是**下一 tick 开头**才处理的，
+			// 1 刻提前量会让载荷在目标时刻之后才到客户端（实测 p90 49ms 全落在"迟到"一侧）；
+			// 提前 2 刻后载荷约在目标前 ~50ms 到达，客户端就能用 nanoTime 等到准确时刻再发声。
+			if (n.timeSec() > now + 2 * tickSec) break;
 			final BlockPos notePos = new BlockPos(n.x(), n.y() + 1, n.z());
 			if (n.strict()) {
 				BlockPos trig = new BlockPos(n.tx(), n.ty(), n.tz());
