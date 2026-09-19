@@ -209,6 +209,17 @@ console.log(`（敏感性：若放宽到 k+3，可再多通过 ${passK3 - cluste
 console.log(`✔ 通过 ${ok.length} / ${notes.length}（${(100 * ok.length / notes.length).toFixed(2)}%）`);
 console.log(`✘ 错音 ${wrong.length} / 缺音 ${missing.length} / 多余起音 ${extra.length}`);
 if (dt.length) console.log(`节奏：中位 ${dt[dt.length >> 1].toFixed(1)}ms / p90 ${dt[Math.floor(dt.length * 0.9)].toFixed(1)}ms / 最大 ${dt[dt.length - 1].toFixed(1)}ms`);
+if (dt.length) {
+  // M3-66：**这才是"音与音之间的相对先后"** —— 去掉整体延迟（中位）之后剩下的离散程度。
+  // 做法：把每颗音的时间偏差减去中位数，再看 p90−p10。整体延迟（固定偏移）不会影响它。
+  const med = dt[dt.length >> 1];
+  const rel = dt.map((v) => v - med).sort((a, b) => a - b);
+  const p10 = rel[Math.floor(rel.length * 0.1)], p90 = rel[Math.floor(rel.length * 0.9)];
+  const mean = rel.reduce((a, b) => a + b, 0) / rel.length;
+  const sd = Math.sqrt(rel.reduce((a, b) => a + (b - mean) ** 2, 0) / rel.length);
+  console.log(`相对抖动（去掉整体延迟后）：p90−p10 = ${(p90 - p10).toFixed(1)}ms / 标准差 ${sd.toFixed(1)}ms`
+    + `　← 这一项才反映"音与音之间的先后是否齐"`);
+}
 const show = (a, f, n = 12) => a.slice(0, n).map(f).join('\n  ');
 if (wrong.length) console.log('错音（谱面秒 | 应有音级 | 该组缺的音级 | ms）：\n  ' + show(wrong, (x) => `${x.t.toFixed(2)}s | ${x.wantPc} | 缺 ${x.missed.join(',')} | ${(x.dtMs * 1000).toFixed(0)}ms`));
 if (missing.length) console.log('缺音（谱面秒 | midi）：\n  ' + show(missing, (x) => `${x.t.toFixed(2)}s | ${x.midi}`));
