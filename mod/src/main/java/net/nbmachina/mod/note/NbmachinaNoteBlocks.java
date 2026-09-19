@@ -141,7 +141,8 @@ public final class NbmachinaNoteBlocks {
 			double pz = listenMode ? player.getZ() : z;
 			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
 				new NbmachinaPlayPayload(mapped.instrument(), mapped.voice(), mapped.midi(), mapped.velocity(),
-					mapped.durMs(), px, py, pz));
+					mapped.durMs(), px, py, pz,
+					net.nbmachina.mod.machine.NbmachinaMachine.scoreTimeAt(pos.asLong())));
 			sent++;
 		}
 		dispatched.incrementAndGet();
@@ -238,7 +239,9 @@ public final class NbmachinaNoteBlocks {
 			double pz = listenMode ? player.getZ() : z;
 			net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking.send(player,
 				new NbmachinaPlayPayload(target, voice, midi, velocity,
-					mapped != null ? mapped.durMs() : 0, px, py, pz));
+					mapped != null ? mapped.durMs() : 0, px, py, pz,
+					// M3-53：带上"这颗音在谱面里的时间" → 客户端用本地时钟精确发声（去掉服务器刻量化）
+					net.nbmachina.mod.machine.NbmachinaMachine.scoreTimeAt(pos.asLong())));
 			sent++;
 		}
 		dispatched.incrementAndGet();

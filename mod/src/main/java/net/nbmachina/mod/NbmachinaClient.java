@@ -44,6 +44,11 @@ import net.nbmachina.mod.score.NbmachinaClientPlayer;
  * </pre>
  */
 public final class NbmachinaClient implements ClientModInitializer {
+	/** M3-53：机器起播锚点（machine_sync 包给的谱面秒 + 本地接收时刻），用来把音符盒的声音对齐到准确时刻 */
+	private static volatile long anchorNanos = 0L;
+	private static volatile double anchorScoreSec = -1.0;
+	private static volatile int scheduledCount = 0;
+
 	@Override
 	public void onInitializeClient() {
 		int loaded = NbmachinaInstruments.reload();
@@ -55,17 +60,34 @@ public final class NbmachinaClient implements ClientModInitializer {
 		ClientPlayNetworking.registerGlobalReceiver(
 			net.nbmachina.mod.net.NbmachinaMachineSyncPayload.ID, (payload, context) ->
 				context.client().execute(() -> {
-					boolean ok = NbmachinaClientPlayer.start(payload.fromSec());
+					// 记录锚点：从这一刻起，音符盒带来的"谱面时间"可以直接换算成本地时刻（1ms 级对齐）
+					anchorNanos = System.nanoTime();
+					anchorScoreSec = payload.fromSec();
+					// 默认**不**启动整条客户端音轨（音符盒才是发声体）；需要精确整轨时用 /nbmc play
+					boolean ok = true;
 					NbmachinaMod.LOGGER.info("[nbmachina] 机器同步包：从 {}s 起播客户端精确音轨 → {}", payload.fromSec(), ok);
 					if (context.player() != null) {
 						context.player().sendMessage(Text.literal(ok
-							? "[nbmachina] 客户端精确音轨已同步起播（1ms 级调度）"
+							? "[nbmachina] 已对齐机器时钟：音符盒声音将按谱面时间精确发声（1ms 级）"
 							: "[nbmachina] 客户端精确音轨起播失败（没有谱面？/nbmc status 看详情）"), false);
 					}
 				}));
-		ClientPlayNetworking.registerGlobalReceiver(NbmachinaPlayPayload.ID, (payload, context) ->
-			NbmachinaAudio.play(payload.instrument(), payload.voice(), payload.midi(), payload.velocity(), payload.durMs(),
-				payload.x(), payload.y(), payload.z()));
+		ClientPlayNetworking.registerGlobalReceiver(NbmachinaPlayPayload.ID, (payload, context) -> {
+			// M3-53：**音符盒仍是发声体**，但时刻不再受服务器刻量化 —— 载荷里带"这颗音在谱面里的时间"，
+			// 客户端用本地时钟等到准确时刻再放音（粗睡+自旋，实测抖动 0.18ms）。
+			// 需要先把"机器起播锚点"记下来（machine_sync 包给的 fromSec + 本地接收时刻）。
+			Runnable play = () -> NbmachinaAudio.play(payload.instrument(), payload.voice(), payload.midi(),
+				payload.velocity(), payload.durMs(), payload.x(), payload.y(), payload.z());
+			if (payload.scoreTimeSec() > 0 && anchorScoreSec >= 0) {
+				long target = anchorNanos + Math.round((payload.scoreTimeSec() - anchorScoreSec) * 1e9);
+				if (target > System.nanoTime()) {
+					net.nbmachina.mod.audio.NbmachinaScheduler.at(target, play);
+					scheduledCount++;
+					return;
+				}
+			}
+			play.run();
+		});
 
 		ClientTickEvents.END_CLIENT_TICK.register(NbmachinaClient::tick);
 		ClientCommandRegistrationCallback.EVENT.register((dispatcher, access) -> dispatcher.register(

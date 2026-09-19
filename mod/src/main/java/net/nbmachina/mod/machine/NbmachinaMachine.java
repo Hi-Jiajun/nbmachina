@@ -41,6 +41,8 @@ public final class NbmachinaMachine {
 	}
 
 	private static final List<Note> NOTES = new ArrayList<>();
+	/** 音符盒方块坐标（packed）→ 这颗音在谱面里的时间：给"音符盒发声 + 客户端精确时刻"用 */
+	private static final java.util.Map<Long, Double> TIME_BY_POS = new java.util.HashMap<>();
 	private static boolean running = false;
 	private static long anchorNanos = 0L;
 	private static double startSec = 0.0;
@@ -86,6 +88,7 @@ public final class NbmachinaMachine {
 				// 触发位写成"音符盒上方"（y+2）表示这颗音没有严格水平触发位 → 走引擎兜底
 				boolean strict = ty == y + 1;
 				NOTES.add(new Note(x, y, z, c[3].trim(), c[4].trim(), midi, vel, dur, t, tx, ty, tz, strict));
+				TIME_BY_POS.put(net.minecraft.util.math.BlockPos.asLong(x, y + 1, z), t);
 			} catch (RuntimeException ignored) {
 				// 坏行跳过
 			}
@@ -96,6 +99,12 @@ public final class NbmachinaMachine {
 
 	public static int size() {
 		return NOTES.size();
+	}
+
+	/** 某个音符盒（方块坐标 packed）对应的谱面时间；没有就返回 0（= 立即播） */
+	public static double scoreTimeAt(long packedPos) {
+		Double v = TIME_BY_POS.get(packedPos);
+		return v == null ? 0.0 : v;
 	}
 
 	public static boolean running() {

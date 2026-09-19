@@ -23,22 +23,41 @@ import net.minecraft.util.Identifier;
  * 而是照抄演奏者的放音时刻。
  */
 public record NbmachinaPlayPayload(String instrument, String voice, int midi, int velocity, int durMs,
-								double x, double y, double z)
+								double x, double y, double z, double scoreTimeSec)
 	implements CustomPayload {
+
+	/** 立即播放（scoreTimeSec = 0）——给 /nbm 命令等即时路径用 */
+	public NbmachinaPlayPayload(String instrument, String voice, int midi, int velocity, int durMs,
+							double x, double y, double z) {
+		this(instrument, voice, midi, velocity, durMs, x, y, z, 0.0);
+	}
 
 	public static final CustomPayload.Id<NbmachinaPlayPayload> ID =
 		new CustomPayload.Id<>(Identifier.of("nbmachina", "play"));
 
-	public static final PacketCodec<RegistryByteBuf, NbmachinaPlayPayload> CODEC = PacketCodec.tuple(
-		PacketCodecs.STRING, NbmachinaPlayPayload::instrument,
-		PacketCodecs.STRING, NbmachinaPlayPayload::voice,
-		PacketCodecs.VAR_INT, NbmachinaPlayPayload::midi,
-		PacketCodecs.VAR_INT, NbmachinaPlayPayload::velocity,
-		PacketCodecs.VAR_INT, NbmachinaPlayPayload::durMs,
-		PacketCodecs.DOUBLE, NbmachinaPlayPayload::x,
-		PacketCodecs.DOUBLE, NbmachinaPlayPayload::y,
-		PacketCodecs.DOUBLE, NbmachinaPlayPayload::z,
-		NbmachinaPlayPayload::new);
+	// M3-53：多了一个 `scoreTimeSec`（这颗音在谱面里的时间，0 = 立即播），tuple 不够用 → 手写编解码
+	public static final PacketCodec<RegistryByteBuf, NbmachinaPlayPayload> CODEC = PacketCodec.of(
+		(payload, buf) -> {
+			PacketCodecs.STRING.encode(buf, payload.instrument());
+			PacketCodecs.STRING.encode(buf, payload.voice());
+			PacketCodecs.VAR_INT.encode(buf, payload.midi());
+			PacketCodecs.VAR_INT.encode(buf, payload.velocity());
+			PacketCodecs.VAR_INT.encode(buf, payload.durMs());
+			PacketCodecs.DOUBLE.encode(buf, payload.x());
+			PacketCodecs.DOUBLE.encode(buf, payload.y());
+			PacketCodecs.DOUBLE.encode(buf, payload.z());
+			PacketCodecs.DOUBLE.encode(buf, payload.scoreTimeSec());
+		},
+		buf -> new NbmachinaPlayPayload(
+			PacketCodecs.STRING.decode(buf),
+			PacketCodecs.STRING.decode(buf),
+			PacketCodecs.VAR_INT.decode(buf),
+			PacketCodecs.VAR_INT.decode(buf),
+			PacketCodecs.VAR_INT.decode(buf),
+			PacketCodecs.DOUBLE.decode(buf),
+			PacketCodecs.DOUBLE.decode(buf),
+			PacketCodecs.DOUBLE.decode(buf),
+			PacketCodecs.DOUBLE.decode(buf)));
 
 	@Override
 	public CustomPayload.Id<? extends CustomPayload> getId() {
