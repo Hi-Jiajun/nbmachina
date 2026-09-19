@@ -58,6 +58,8 @@ const SECTIONS_JSON = opt('sections', path.join(P.build, 'dynamics-sections.json
 //   这两个量由 tools/calibrate-from-reference.mjs 从参考演奏里量出来，写进谱面的 `durMs` 列。
 //   `--no-lengths` 可退回旧行为（让采样自然衰减到底），用于 A/B。
 const LENGTHS = !argv.includes('--no-lengths');
+/** M3-59：头部留白（秒）——补上视频开头那段静音，让母版与视频 t=0 对齐（实测 3.917s） */
+const LEAD_IN = Math.max(0, Number(opt('lead-in', '0')));
 /** M3-31：是否启用 sta（断奏）采样（默认关，见下方说明） */
 const STA = argv.includes('--sta');
 // M3-22 第二轮（用户反馈"低音之间污染太严重、像一直踩着踏板"）：
@@ -302,15 +304,21 @@ const dynOf = (e) => {
 for (const e of events) {
     // M3-24：优先用谱面里的精确时刻（参考演奏的真实时间），否则退回格位时间
     const t = Number.isFinite(e.timeSec) ? e.timeSec : e.step * STEP_SECONDS;
+    // M3-59（用户 2026-09-19）：加 `--lead-in` 让母版把**视频开头那段静音**也留出来。
+    // 实测 Animenz 视频开头 3.70s 是静音、母版 t=0 对应视频 3.917s —— 补上这段之后，
+    // 母版与视频就是"t=0 对齐 t=0"，出片 `--offset` 直接填 0。
+    const tIn = t + LEAD_IN;
   const { vel127, gain } = dynOf(e);
     if (e.kind === 'vanilla') {
       const layer = e.instr === 'basedrum' ? 'kick' : 'hat';
-      if (keep(layer)) triggers.push({ layer, midi: GM[e.instr] ?? 36, vel127, gain, t, durMs: e.durMs, keyMs: e.keyMs });
-    } else if (e.timbre === 'strings' && keep('melody')) triggers.push({ layer: 'melody', midi: e.midi, vel127, gain, t, durMs: e.durMs, keyMs: e.keyMs });
-    else if (e.timbre === 'bell' && keep('inner')) triggers.push({ layer: 'inner', midi: e.midi, vel127, gain, t, durMs: e.durMs, keyMs: e.keyMs });
-    else if (e.timbre === 'bass' && keep('bass')) triggers.push({ layer: 'bass', midi: e.midi, vel127, gain, t, durMs: e.durMs, keyMs: e.keyMs });
+    if (keep(layer)) triggers.push({ layer, midi: GM[e.instr] ?? 36, vel127, gain, t: tIn, durMs: e.durMs, keyMs: e.keyMs });
+  } else if (e.timbre === 'strings' && keep('melody')) triggers.push({ layer: 'melody', midi: e.midi, vel127, gain, t: tIn, durMs: e.durMs, keyMs: e.keyMs });
+  else if (e.timbre === 'bell' && keep('inner')) triggers.push({ layer: 'inner', midi: e.midi, vel127, gain, t: tIn, durMs: e.durMs, keyMs: e.keyMs });
+  else if (e.timbre === 'bass' && keep('bass')) triggers.push({ layer: 'bass', midi: e.midi, vel127, gain, t: tIn, durMs: e.durMs, keyMs: e.keyMs });
 }
-const dur = Math.max(...triggers.map((x) => x.t), 0) + 8;   // 尾巴留 8 秒（钢琴/竖琴自然衰减）
+// 时长：默认 = 最后一颗音 + 8 秒尾巴；`--duration` 可强制对齐视频总长（例如 298.75）
+const DURATION = Number(opt('duration', '0'));
+const dur = DURATION > 0 ? DURATION : Math.max(...triggers.map((x) => x.t), 0) + 8;
 {
   const vels = triggers.map((x) => x.vel127).sort((a, b) => a - b);
   const q = (p) => vels[Math.floor((vels.length - 1) * p)];
