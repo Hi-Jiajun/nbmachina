@@ -22,8 +22,9 @@ const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const OUT = opt('out', path.join(P.datapackDir, 'function', 'wipe.mcfunction'));
 
-// 机器区域（含历史布局的余量）：x 480..2831、y 84..110 是当前机器；老布局更低/更靠 z 负方向
-const X0 = 430, X1 = 2900, Y0 = 55, Y1 = 130, Z0 = -235, Z1 = -115;
+// 扫描范围：机器本体 + 周围山地（2026-09-19 用户："后面山地这一块没有清除，一并清除掉"）。
+// 按 section 的 palette 先判"这一格区有没有音符盒"，只有命中的 section 才逐格解 —— 快得多。
+const X0 = 300, X1 = 3050, Y0 = -60, Y1 = 255, Z0 = -600, Z1 = 200;
 
 class Reader {
   constructor(d) { this.d = d; this.p = 0; }
@@ -110,16 +111,49 @@ const at = (x, y, z) => {
 
 const noteBlocks = [];
 const redstoneBlocks = [];
-for (let x = X0; x <= X1; x++) {
-  for (let z = Z0; z <= Z1; z++) {
-    for (let y = Y0; y <= Y1; y++) {
-      const name = at(x, y, z);
-      if (!name) continue;
-      if (name === 'minecraft:note_block') noteBlocks.push([x, y, z]);
-      else if (name === 'minecraft:redstone_block') redstoneBlocks.push([x, y, z]);
+/** 一个 section 里所有目标方块的位置（只遍历 4096 格，且只在 palette 命中时做） */
+function scanSection(sec, cx, cz, target, out) {
+  const bs = sec?.block_states;
+  if (!bs?.palette) return;
+  const idx = bs.palette.findIndex((p) => p.Name === target);
+  if (idx < 0) return;
+  const n = bs.palette.length;
+  const bits = n === 1 ? 0 : Math.max(4, Math.ceil(Math.log2(n)));
+  const mask = bits ? (1n << BigInt(bits)) - 1n : 0n;
+  const data = bs.data ?? [];
+  const longs = data.map((v) => BigInt.asUintN(64, BigInt(v)));
+  for (let y = 0; y < 16; y++) {
+    for (let z = 0; z < 16; z++) {
+      for (let x = 0; x < 16; x++) {
+        let v = 0;
+        if (bits) {
+          const i2 = (y << 8) | (z << 4) | x;
+          const bit = BigInt(i2 * bits);
+          const li = Number(bit >> 6n);
+          const off = Number(bit & 63n);
+          if (li >= longs.length) continue;
+          v = longs[li] >> BigInt(off);
+          if (off + bits > 64 && li + 1 < longs.length) v |= longs[li + 1] << BigInt(64 - off);
+          v &= mask;
+        }
+        if (Number(v) !== idx) continue;
+        const wx = cx * 16 + x, wy = sec.Y * 16 + y, wz = cz * 16 + z;
+        if (wx < X0 || wx > X1 || wy < Y0 || wy > Y1 || wz < Z0 || wz > Z1) continue;
+        out.push([wx, wy, wz]);
+      }
     }
   }
-  if (x % 400 === 0) process.stdout.write(`  扫描到 x=${x}（音符盒 ${noteBlocks.length}）\n`);
+}
+for (let cx = X0 >> 4; cx <= (X1 >> 4); cx++) {
+  for (let cz = Z0 >> 4; cz <= (Z1 >> 4); cz++) {
+    const root = getChunk(cx, cz);
+    if (!root?.sections) continue;
+    for (const sec of root.sections) {
+      scanSection(sec, cx, cz, 'minecraft:note_block', noteBlocks);
+      scanSection(sec, cx, cz, 'minecraft:redstone_block', redstoneBlocks);
+    }
+  }
+  if (cx % 32 === 0) process.stdout.write(`  扫描到 cx=${cx}（音符盒 ${noteBlocks.length}）\n`);
 }
 
 // 当前谱面的音符盒坐标（甲板坐标 +1 层）→ 用来区分"该留的"和"遗留的"
