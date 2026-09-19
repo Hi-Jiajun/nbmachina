@@ -575,6 +575,11 @@ public final class NbmachinaAudio {
 	/** float32 能力（run() 里探测一次） */
 	private static volatile boolean FLOAT_OK = false;
 
+	/** 给校准脉冲用：优先返回 float32 单声道格式，扩展不可用时退回 16bit */
+	public static int float32FormatOrMono16() {
+		return FLOAT_OK ? EXTFloat32.AL_FORMAT_MONO_FLOAT32 : AL10.AL_FORMAT_MONO16;
+	}
+
 	/** 截到 {@link #MAX_SECONDS} 秒，并在尾部做 0.5s 淡出（避免截断爆音）。包内可见：供离线自检直接调。 */
 	static float[] truncate(float[] pcm, int channels, int sampleRate) {
 		int maxFrames = (int) Math.round(MAX_SECONDS * sampleRate);

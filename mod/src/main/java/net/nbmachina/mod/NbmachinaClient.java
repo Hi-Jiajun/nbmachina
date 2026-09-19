@@ -1,6 +1,7 @@
 package net.nbmachina.mod;
 
 import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
 
 import java.util.ArrayList;
@@ -101,6 +102,16 @@ public final class NbmachinaClient implements ClientModInitializer {
 				.then(ClientCommandManager.literal("status").executes(ctx -> status(ctx.getSource())))
 				.then(ClientCommandManager.literal("reload").executes(ctx -> reload(ctx.getSource())))
 				.then(ClientCommandManager.literal("samples").executes(ctx -> samples(ctx.getSource())))
+				// M3-61：校准脉冲 —— 每隔 N 秒放一声 3kHz 短脉冲 + 在玩家身边放一圈亮粒子，
+				// 用来量"音频输出+采集"相对"画面"的固定延迟（录一次就能算出来）
+				.then(ClientCommandManager.literal("click")
+					.executes(ctx -> clicks(ctx.getSource(), 5.0F, 8))
+					.then(ClientCommandManager.argument("intervalSec", FloatArgumentType.floatArg(1.0F, 30.0F))
+						.executes(ctx -> clicks(ctx.getSource(), FloatArgumentType.getFloat(ctx, "intervalSec"), 8))
+						.then(ClientCommandManager.argument("count", IntegerArgumentType.integer(2, 40))
+							.executes(ctx -> clicks(ctx.getSource(),
+								FloatArgumentType.getFloat(ctx, "intervalSec"),
+								IntegerArgumentType.getInteger(ctx, "count"))))))
 				.then(ClientCommandManager.literal("instruments")
 					.executes(ctx -> list(ctx.getSource(), null))
 					.then(ClientCommandManager.argument("filter", StringArgumentType.word())
@@ -218,6 +229,46 @@ public final class NbmachinaClient implements ClientModInitializer {
 				+ "  /nbmc instrument clear [声部]   恢复谱面原值\n"
 				+ "  /nbmc samples                采样库自检（采样根 / 每个乐器缺多少文件）\n"
 				+ "  /nbmc reload                 重读 config/nbmachina/instruments.json"));
+	}
+
+	/**
+	 * M3-61 · `/nbmc click [间隔秒] [次数]`：按**本地时钟**（nanoTime，1ms 级）放校准脉冲，
+	 * 同时在玩家身边放一圈亮粒子。录屏后可以用"粒子亮起帧 vs 音频脉冲位置"算出采集链路延迟。
+	 */
+	private static int clicks(FabricClientCommandSource src, float interval, int count) {
+		ClientPlayerEntity player = src.getPlayer();
+		if (player == null) return 0;
+		final double px = player.getX(), py = player.getY(), pz = player.getZ();
+		final long t0 = System.nanoTime();
+		Thread t = new Thread(() -> {
+			for (int i = 0; i < count; i++) {
+				final int idx = i;
+				long target = t0 + Math.round(i * interval * 1e9);
+				net.nbmachina.mod.audio.NbmachinaScheduler.at(target, () -> {
+					net.nbmachina.mod.audio.NbmachinaClick.playNow(px, py, pz);
+					// 视觉：脚下一圈亮粒子（END_ROD 在录像里很好认）
+					// 视觉：客户端世界生成一圈 END_ROD（在录像里很容易认出来）
+					MinecraftClient.getInstance().execute(() -> {
+						var w = MinecraftClient.getInstance().world;
+						if (w == null) return;
+						for (int k = 0; k < 24; k++) {
+							double a = k / 24.0 * Math.PI * 2;
+							w.addParticleClient(net.minecraft.particle.ParticleTypes.END_ROD,
+								px + Math.cos(a) * 1.2, py + 0.2, pz + Math.sin(a) * 1.2,
+								0.0, 0.35, 0.0);
+						}
+					});
+					NbmachinaMod.LOGGER.info("[nbmachina] 校准脉冲 #{} @ {}ms（相对起点的标称时刻）",
+						idx + 1, Math.round(idx * interval * 1000));
+				});
+			}
+		}, "nbmachina-click");
+		t.setDaemon(true);
+		t.start();
+		src.sendFeedback(Text.literal(String.format(
+			"[nbmachina] 校准脉冲：%d 声，间隔 %.1fs（共 %.1fs）；同时会在你脚下放亮粒子。开始录屏吧",
+			count, interval, interval * count)));
+		return 1;
 	}
 
 	/**
