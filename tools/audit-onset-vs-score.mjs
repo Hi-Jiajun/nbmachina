@@ -53,6 +53,19 @@ const notes = rows.slice(1).map((l) => { const c = l.split(','); return { t: +c[
   .sort((a, b) => a.t - b.t);
 console.log(`谱面 ${notes.length} 颗音；录音 ${(rec.length / SR).toFixed(1)}s；对齐 AT=${AT}s`);
 
+// M3-63：**先判录音有没有声音**。之前全静音的录音会让"逐音音频证据"里的 0/0 变成 Infinity，
+// 于是误报"3044/3044 全都有证据" —— 直接在这里拦掉。
+{
+  let s = 0;
+  for (let i = 0; i < rec.length; i++) s += rec[i] * rec[i];
+  const rmsDb = 20 * Math.log10(Math.sqrt(s / Math.max(1, rec.length)) + 1e-12);
+  if (rmsDb < -70) {
+    console.error(`✘ 录音无效：整轨 RMS ${rmsDb.toFixed(1)}dBFS（全静音）—— 检查 OBS 的音频输出采集设备是否与系统默认输出一致`);
+    process.exit(2);
+  }
+  console.log(`录音电平：整轨 RMS ${rmsDb.toFixed(1)}dBFS`);
+}
+
 /* ① 起音检测 */
 const N = 2048, HOP = 1024;
 const win = hannWindow(N);

@@ -52,14 +52,14 @@ public final class NbmachinaMachine {
 	private static double rate = 1.0;
 	/** 触发提前量（服务器刻）：默认 3。运行时可用 `/nbm machine lead <0..6>` 改，用于现场 A/B。
 	 *  提前量越大 → 载荷越早到客户端 → 客户端越能"等到准确时刻"再发声（代价是红石块更早出现）。 */
-	private static volatile int leadTicks = 3;
+	private static volatile int leadTicks = 6;   // M3-64：实测 3 刻几乎没效果、6 刻 p90 43→24.6ms → 默认 6
 
 	public static int leadTicks() {
 		return leadTicks;
 	}
 
 	public static void setLeadTicks(int v) {
-		leadTicks = Math.max(0, Math.min(6, v));
+		leadTicks = Math.max(0, Math.min(20, v));   // M3-64：上限 6 → 20（用户要试更大提前量）
 	}
 	private static int cursor = 0;
 	private static int firedCount = 0;

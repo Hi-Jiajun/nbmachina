@@ -83,7 +83,7 @@ public final class NbmachinaCommands {
 				// M3-62：触发提前量（刻）——现场 A/B 用：0 = 不提前（声音会晚一整格），3 = 默认
 				.then(CommandManager.literal("lead")
 					.executes(ctx -> machineLead(ctx.getSource(), null))
-					.then(CommandManager.argument("ticks", IntegerArgumentType.integer(0, 6))
+					.then(CommandManager.argument("ticks", IntegerArgumentType.integer(0, 20))
 						.executes(ctx -> machineLead(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "ticks"))))))
 			.then(CommandManager.literal("note")
 				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
