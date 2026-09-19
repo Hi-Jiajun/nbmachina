@@ -130,7 +130,10 @@ for (const b of batches) {
       }
     }
   }
-  for (const r of rows.slice(b.from, b.to + 1)) lines.push(`place template styx:flat_b_${String(r.k).padStart(2, '0')} ${r.x0} ${r.y} ${r.z0}`);
+  // M3-55：**不再摆 flat_b_* 平台结构**。它们是早期"给机器铺一层地板、避开地形"的遗留物，
+  // 现在机器只由 apply_notes_v3 摆音符盒+灯（底座已取消），再摆这些平台只会在世界后段留下
+  // 一堆和音乐无关的方块（用户 2026-09-19 在 test 世界后段看到的就是它们）。
+  // 地形削槽（下面的 fill）保留：它保证音符盒所在那一段是空气，粒子/灯光不被埋。
   for (const r of rows.slice(b.from, b.to + 1)) for (let x = r.x0; x <= r.x0 + 47; x += 8) lines.push(`setblock ${x} ${r.y - 1} -156 minecraft:sea_lantern`);
   fs.writeFileSync(`${DP}/flat_build_v2${b.name}.mcfunction`, lines.join('\n') + '\n', 'utf8');
   console.log(`flat_build_v2${b.name}: ${lines.length - 1} 条（段 ${rows[b.from].k}..${rows[b.to].k}）`);

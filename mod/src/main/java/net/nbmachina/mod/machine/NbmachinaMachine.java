@@ -58,6 +58,10 @@ public final class NbmachinaMachine {
 	private static final List<BlockPos> PENDING_TRIGGERS = new ArrayList<>();
 	/** 这一刻点亮的灯，下一刻熄灭 */
 	private static final List<BlockPos> PENDING_LAMPS = new ArrayList<>();
+	/** 待放的"视觉"（灯/粒子）：触发位提前放，但视觉必须等这颗音真正到点 */
+	private record PendingVisual(int x, int y, int z, int midi, double dueSec) {
+	}
+	private static final List<PendingVisual> pendingVisual = new ArrayList<>();
 	/**
 	 * M3-41：机器长 2400 格，**只有已加载的区块才能放红石块**（`ServerWorld.setBlockState` 对未加载区块
 	 * 会静默失败）。玩家一走远、或曲子的后段超出加载范围，触发就没了 → 用户听到"播到某个时间就没声音"。
@@ -205,6 +209,18 @@ public final class NbmachinaMachine {
 		// ② 真实时间到了哪些音就触发哪些（提前一刻，方块事件下一 tick 才执行）
 		final double now = songTimeSec();
 		final double tickSec = server.getTickManager().getNanosPerTick() / 1e9;
+		// 到点的视觉：点灯 + 出粒子（真实音高上色），下一刻熄灭
+		for (var it = pendingVisual.iterator(); it.hasNext(); ) {
+			PendingVisual v = it.next();
+			if (v.dueSec() > now) continue;
+			float pitch01 = (float) Math.max(0.0, Math.min(1.0, (v.midi() - 21) / 87.0));
+			world.spawnParticles(ParticleTypes.NOTE, v.x() + 0.5, v.y() + 1.2, v.z() + 0.5,
+				1, pitch01, 0.0, 0.0, 1.0);
+			BlockPos lamp = new BlockPos(v.x(), v.y() - 1, v.z());
+			world.setBlockState(lamp, Blocks.REDSTONE_LAMP.getDefaultState().with(RedstoneLampBlock.LIT, Boolean.TRUE), 2);
+			PENDING_LAMPS.add(lamp);
+			it.remove();
+		}
 		int firedThisTick = 0;
 		while (cursor < NOTES.size()) {
 			Note n = NOTES.get(cursor);
@@ -212,7 +228,7 @@ public final class NbmachinaMachine {
 			// M3-54：提前量从 1 刻改成 **2 刻**——音符盒的方块事件是**下一 tick 开头**才处理的，
 			// 1 刻提前量会让载荷在目标时刻之后才到客户端（实测 p90 49ms 全落在"迟到"一侧）；
 			// 提前 2 刻后载荷约在目标前 ~50ms 到达，客户端就能用 nanoTime 等到准确时刻再发声。
-			if (n.timeSec() > now + 2 * tickSec) break;
+			if (n.timeSec() > now + 3 * tickSec) break;
 			final BlockPos notePos = new BlockPos(n.x(), n.y() + 1, n.z());
 			if (n.strict()) {
 				BlockPos trig = new BlockPos(n.tx(), n.ty(), n.tz());
@@ -224,12 +240,10 @@ public final class NbmachinaMachine {
 					new NbmachinaNoteBlocks.Mapped(n.instrument(), n.voice(), n.midi(), n.velocity(), n.durMs()));
 			}
 			// 粒子：真实音高 → 0..1（钢琴 A0=21 .. C8=108）
-			float pitch01 = (float) Math.max(0.0, Math.min(1.0, (n.midi() - 21) / 87.0));
-			world.spawnParticles(ParticleTypes.NOTE, n.x() + 0.5, n.y() + 1.2, n.z() + 0.5,
-				1, pitch01, 0.0, 0.0, 1.0);
-			BlockPos lamp = new BlockPos(n.x(), n.y() - 1, n.z());
-			world.setBlockState(lamp, Blocks.REDSTONE_LAMP.getDefaultState().with(RedstoneLampBlock.LIT, Boolean.TRUE), 2);
-			PENDING_LAMPS.add(lamp);
+			// 但**视觉要延到该音真正到点**才做（提前 3 刻只是为了让载荷先到客户端；
+			// 灯/粒子提前亮会看得出发光在声音之前）→ 排进 pendingVisual，到点再放。
+			final Note fn = n;
+			pendingVisual.add(new PendingVisual(fn.x(), fn.y(), fn.z(), fn.midi(), fn.timeSec() - offsetMs / 1000.0));
 			cursor++;
 			firedCount++;
 			firedThisTick++;

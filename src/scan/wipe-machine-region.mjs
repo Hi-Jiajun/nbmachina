@@ -342,3 +342,15 @@ fs.writeFileSync(VOID_OUT, [
   '',
 ].join('\n'), 'utf8');
 console.log(`写出 ${VOID_OUT} + wipe_void/${voidSteps.map((s) => `${s.name}(${s.cmds.length}条)`).join(' ')}`);
+
+// M3-56（用户："wipe脚本要清理干净所有包括音符盒方块"）：
+// **默认 `styx:wipe` 改成彻底清**（y55..200 整段清空，含旧平台/灯/甲板/一切方块），
+// 想只清音符盒+红石块+灯（保留地形）就用 `styx:wipe_notes`。
+fs.copyFileSync(OUT, path.join(dir, 'wipe_notes.mcfunction'));
+fs.writeFileSync(OUT, [
+  '# M3-56 默认 wipe = 彻底清：把机器那条带 y55..200 的所有方块清成空气（保留 y<55 的地面）',
+  '# 只想清音符盒/红石块/灯、保留地形 → 用 styx:wipe_notes',
+  'function styx:wipe_all',
+  '',
+].join('\n'), 'utf8');
+console.log('默认 wipe 已改为"彻底清"（调 wipe_all）；过滤版保留为 styx:wipe_notes');
