@@ -87,6 +87,20 @@ public final class NbmachinaSelfTest {
 			node != null, node == null ? "-" : String.join(",",
 				node.getChildren().stream().map(c -> c.getName()).toList()));
 
+		// M3-36 采样库定位：索引（jar 内置 / config）→ 采样根 → 逐文件在位检查。
+		// 专门验"换机器不用改绝对路径"这条链路，无头服务器上也能跑。
+		try {
+			int inst = net.nbmachina.mod.audio.NbmachinaInstruments.reload();
+			NbmachinaMod.LOGGER.info("[nbmachina][selftest] 乐器库：{} 个乐器；采样根 {}", inst,
+				net.nbmachina.mod.audio.NbmachinaSamples.describe());
+			if (inst > 0) {
+				NbmachinaMod.LOGGER.info("[nbmachina][selftest] 采样自检：{}",
+					String.join(" | ", net.nbmachina.mod.audio.NbmachinaInstruments.sampleReport()));
+			}
+		} catch (Exception e) {
+			NbmachinaMod.LOGGER.warn("[nbmachina][selftest] 乐器库自检异常：{}", e.toString());
+		}
+
 		// P2-2 谱面直读：<游戏目录>/nbmachina/score.csv 存在就解析并抽查"到点计数"
 		java.nio.file.Path scoreFile = NbmachinaScorePlayer.defaultFile(server);
 		if (NbmachinaScorePlayer.exists(scoreFile)) {

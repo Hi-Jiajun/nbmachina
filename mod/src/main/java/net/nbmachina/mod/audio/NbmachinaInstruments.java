@@ -1,6 +1,8 @@
 package net.nbmachina.mod.audio;
 
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.Reader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -8,8 +10,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
@@ -252,25 +256,74 @@ public final class NbmachinaInstruments {
 	/** 重新加载（懒加载入口；返回加载到的乐器数，失败返回 -1 并记录原因） */
 	public static synchronized int reload() {
 		BY_ID.clear();
+		NbmachinaSamples.invalidate();
 		for (Path p : candidates()) {
 			if (!Files.isRegularFile(p)) continue;
 			try (Reader reader = Files.newBufferedReader(p, StandardCharsets.UTF_8)) {
-				Root root = GSON.fromJson(reader, Root.class);
-				if (root == null || root.instruments == null) continue;
-				for (Instrument inst : root.instruments) {
-					if (inst == null || inst.id == null) continue;
-					BY_ID.put(inst.id, inst);
-				}
-				lastError = null;
-				NbmachinaMod.LOGGER.info("[nbmachina] 乐器库已加载：{} 个乐器（{}）", BY_ID.size(), p);
-				return BY_ID.size();
+				int n = loadInto(reader, p.toString());
+				if (n > 0) return n;
 			} catch (IOException | RuntimeException e) {
 				lastError = e.getClass().getSimpleName() + ": " + e.getMessage();
 				NbmachinaMod.LOGGER.warn("[nbmachina] 乐器库解析失败 {}：{}", p, lastError);
 			}
 		}
-		lastError = "没有找到 instruments.json（试过 " + candidates() + "）";
+		// M3-36：没有配置文件 → 用 **jar 内置索引**（相对路径）。这样"只装 jar + 采样库"就能跑，
+		// 换机器或发给别人都不需要手工生成 instruments.json。
+		try (InputStream in = NbmachinaInstruments.class.getResourceAsStream(BUNDLED_INDEX)) {
+			if (in != null) {
+				try (Reader reader = new InputStreamReader(in, StandardCharsets.UTF_8)) {
+					int n = loadInto(reader, "jar 内置索引");
+					if (n > 0) return n;
+				}
+			}
+		} catch (IOException | RuntimeException e) {
+			lastError = "内置索引读取失败：" + e.getClass().getSimpleName() + ": " + e.getMessage();
+		}
+		lastError = "没有找到 instruments.json（试过 " + candidates() + "，也没读到 jar 内置索引）";
 		return -1;
+	}
+
+	/** jar 内的默认乐器索引（由 `tools/export-mod-instruments.mjs --relative` 生成） */
+	public static final String BUNDLED_INDEX = "/nbmachina-instruments.json";
+
+	private static int loadInto(Reader reader, String label) {
+		Root root = GSON.fromJson(reader, Root.class);
+		if (root == null || root.instruments == null) return 0;
+		for (Instrument inst : root.instruments) {
+			if (inst == null || inst.id == null) continue;
+			BY_ID.put(inst.id, inst);
+		}
+		if (BY_ID.isEmpty()) return 0;
+		lastError = null;
+		NbmachinaMod.LOGGER.info("[nbmachina] 乐器库已加载：{} 个乐器（{}）；采样根 {}", BY_ID.size(), label, NbmachinaSamples.describe());
+		return BY_ID.size();
+	}
+
+	/**
+	 * M3-36 · 采样库自检（`/nbmc samples`）：逐乐器统计"索引里的采样文件有多少真的在位"。
+	 *
+	 * <p>按**去重后的文件**统计（一个 wav 可能被多个 region 引用），所以数字比区域数小。
+	 */
+	public static List<String> sampleReport() {
+		if (BY_ID.isEmpty()) reload();
+		List<String> out = new ArrayList<>();
+		int totalFiles = 0, totalMissing = 0;
+		for (Instrument inst : BY_ID.values()) {
+			Set<Path> files = new LinkedHashSet<>();
+			for (Region r : inst.regions) {
+				Path p = NbmachinaSamples.resolve(r.file);
+				if (p != null) files.add(p);
+			}
+			int ok = 0;
+			for (Path p : files) if (Files.isRegularFile(p)) ok++;
+			int missing = files.size() - ok;
+			totalFiles += files.size();
+			totalMissing += missing;
+			out.add(String.format("%s：%d/%d 个采样在位%s（%d 区域）",
+				inst.id, ok, files.size(), missing == 0 ? " ✔" : " ✘ 缺 " + missing, inst.regions.size()));
+		}
+		out.add(String.format("合计 %d 个采样文件，缺 %d", totalFiles, totalMissing));
+		return out;
 	}
 
 	public static synchronized Instrument get(String id) {

@@ -21,6 +21,7 @@ import net.minecraft.util.math.MathHelper;
 
 import net.nbmachina.mod.audio.NbmachinaAudio;
 import net.nbmachina.mod.audio.NbmachinaInstruments;
+import net.nbmachina.mod.audio.NbmachinaSamples;
 import net.nbmachina.mod.audio.NbmachinaWav;
 import net.nbmachina.mod.net.NbmachinaPlayPayload;
 import net.nbmachina.mod.score.NbmachinaClientPlayer;
@@ -65,6 +66,7 @@ public final class NbmachinaClient implements ClientModInitializer {
 				})
 				.then(ClientCommandManager.literal("status").executes(ctx -> status(ctx.getSource())))
 				.then(ClientCommandManager.literal("reload").executes(ctx -> reload(ctx.getSource())))
+				.then(ClientCommandManager.literal("samples").executes(ctx -> samples(ctx.getSource())))
 				.then(ClientCommandManager.literal("instruments")
 					.executes(ctx -> list(ctx.getSource(), null))
 					.then(ClientCommandManager.argument("filter", StringArgumentType.word())
@@ -180,7 +182,29 @@ public final class NbmachinaClient implements ClientModInitializer {
 				+ "  /nbmc instrument [声部] [乐器]  运行时换琴（不带参数看当前映射与可选乐器）\n"
 				+ "  /nbmc instrument set <声部|all> <乐器>   运行时换琴（all = 全部声部）\n"
 				+ "  /nbmc instrument clear [声部]   恢复谱面原值\n"
+				+ "  /nbmc samples                采样库自检（采样根 / 每个乐器缺多少文件）\n"
 				+ "  /nbmc reload                 重读 config/nbmachina/instruments.json"));
+	}
+
+	/**
+	 * M3-36 · `/nbmc samples`：采样库自检。
+	 *
+	 * <p>换机器、换目录、或别人第一次装完之后跑这条，一眼看出"索引里的采样到底在不在"。
+	 * 缺文件的处置写在 {@code docs/INSTALL.md}（一键脚本 {@code tools/install-samples.mjs}）。
+	 */
+	private static int samples(FabricClientCommandSource src) {
+		StringBuilder sb = new StringBuilder("[nbmachina] 采样库：" + NbmachinaSamples.describe() + "\n");
+		boolean missing = false;
+		for (String line : NbmachinaInstruments.sampleReport()) {
+			sb.append("  ").append(line).append('\n');
+			if (line.contains("✘")) missing = true;
+		}
+		src.sendFeedback(Text.literal(sb.toString().trim()));
+		if (missing) {
+			src.sendFeedback(Text.literal("[nbmachina] 有采样缺失 → 跑 `node tools/install-samples.mjs`（见 docs/INSTALL.md），"
+				+ "或把采样库整个放到：" + NbmachinaSamples.candidates().get(0)));
+		}
+		return missing ? 0 : 1;
 	}
 
 	/** M3-30：列出当前音色映射 + 可选乐器 */

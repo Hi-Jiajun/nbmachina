@@ -522,6 +522,10 @@ public final class NbmachinaAudio {
 
 	/** 取（或解码并缓存）某个采样文件的 AL buffer；失败返回 0 */
 	private static int bufferFor(String file) {
+		// M3-36：索引里存的是**相对采样根**的路径（换机器/换目录都能用），这里解析成实际文件
+		java.nio.file.Path resolved = NbmachinaSamples.resolve(file);
+		if (resolved == null) return 0;
+		file = resolved.toString();
 		Integer cached = BUFFERS.get(file);
 		if (cached != null) return cached;
 		try {

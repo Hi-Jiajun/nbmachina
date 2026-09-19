@@ -28,6 +28,20 @@ const CLIENT_GAME_DIR = 'C:/Program Files/PCL2/.minecraft/versions/1.21.10-Fabri
 
 const OUT = opt('out', path.join(P.build, 'nbmachina_instruments.json'));
 const DEPLOY = has('deploy');
+/** 目录里第一个 SFZ（找不到就退回约定文件名）—— 让"自己用 sf2-dump 展开的 SF2 库"也能直接接上 */
+const firstSfz = (dir, fallbackName) => {
+  try {
+    const hit = fs.readdirSync(dir).filter((n) => n.toLowerCase().endsWith('.sfz'));
+    return hit.length ? `${dir}/${hit[0]}` : fallbackName;
+  } catch {
+    return fallbackName;
+  }
+};
+// M3-36：`--relative` 让索引里的采样路径变成**相对采样根**（默认 `_toolchain`），
+// 这样 jar 内置的索引不绑定某台机器的绝对路径：mod 侧用 NbmachinaSamples 解析根目录
+// （环境变量 NBMACHINA_SAMPLES → config/nbmachina/samples.json → 游戏目录下的常见位置）。
+const RELATIVE = has('relative');
+const BASE = opt('base', TC);
 
 /** 乐器清单：id → SFZ 与署名（顺序即 `/nbmc instruments` 的显示顺序） */
 const INSTRUMENTS = [
@@ -59,7 +73,7 @@ const INSTRUMENTS = [
     id: 'disklavier_sf2',
     name: 'Yamaha Disklavier Pro（SF2 子集 · 对照）',
     license: 'CC-BY 3.0 · Zenph Studios / R. G. Saez',
-    sfz: `${TC}/piano/disklavier_sfz/acoustic_grand_piano_ydp_20080910.sfz`,
+    sfz: firstSfz(`${TC}/piano/disklavier_sfz`, `${TC}/piano/disklavier_sfz/acoustic_grand_piano_ydp_20080910.sfz`),
   },
   // ---- 下面三件来自 VSCO 2 CE（CC0）：把贝斯/内声部/打击乐从"钢琴顶替"换成真乐器 ----
   {
@@ -219,6 +233,21 @@ for (const def of list) {
 }
 
 fs.mkdirSync(path.dirname(OUT), { recursive: true });
+if (RELATIVE) {
+  // 相对化：所有采样都应在 BASE 下；跑到外面去的（不该有）保留绝对路径并告警
+  let escaped = 0;
+  const rel = (f) => {
+    const r = path.relative(BASE, f).replace(/\\/g, '/');
+    if (r.startsWith('..')) { escaped++; return f; }
+    return r;
+  };
+  for (const inst of out.instruments) {
+    for (const region of inst.regions) region.file = rel(region.file);
+  }
+  out.sampleRootHint = 'nbmachina-samples';
+  out.pathsRelativeTo = BASE;
+  console.log(`已相对化：基准 ${BASE}；越界保留绝对路径 ${escaped} 个`);
+}
 fs.writeFileSync(OUT, JSON.stringify(out, null, 1), 'utf8');
 const sizeMb = (fs.statSync(OUT).size / 1048576).toFixed(2);
 console.log(`写出 ${OUT}（${out.instruments.length} 个乐器，${sizeMb}MB）`);
