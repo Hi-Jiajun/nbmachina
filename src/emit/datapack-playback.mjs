@@ -1,6 +1,12 @@
 // 生成「自动播放器」数据包函数（实体音符盒发声版）：
-//   每个音符：在音符盒【上方】瞬放红石方块再拆掉 —— 音符盒收到充能就自己发声（真·红石音乐）
+//   每个音符：在音符盒**水平相邻**的空位瞬放红石块、下一刻拆掉 —— 音符盒收到充能就自己发声（真·红石音乐）
 //   同时点亮它正下方两格处的红石灯做视觉指示
+//
+// M3-37（2026-09-19）：触发位必须在**同一层的水平相邻格**。无头实验证明 1.21.10 里
+// 红石块放在正上方 / 正下方 / 隔着导体甲板下方都**不会**触发音符盒（docs/M3-37-noteblock-trigger-matrix.md）。
+// 触发位由 src/emit/trigger-map.mjs 统一算（与 note-blocks.mjs 摆块/清位同源）。
+// 发声默认走音符盒本体（`#nb=1` + `#snd=0`）：装了 mod 由 mixin 换成无损采样，
+// 没装 mod 就是原版音符盒声；`/function styx:play/sound_on` 可切回"数据包直派 mod 引擎"。
 //
 // 生成物（两级派发，单刻只碰「当前组里的桶」）：
 //   styx:play/tick            每刻入口（tick 标签指向它）
@@ -17,6 +23,7 @@ import {
   STEP_SECONDS, switchTick, buildTickGroups, planBuckets, planBins, callsPerTick, pad,
 } from './tick-map.mjs';
 import { makePos } from './layout-pos.mjs';
+import { buildTriggerMap } from './trigger-map.mjs';
 import { resolvePaths } from '../core/paths.mjs';
 
 const P = resolvePaths();
@@ -27,6 +34,9 @@ const opt = (name, dflt) => { const i = argv.indexOf(`--${name}`); return i >= 0
 // 口径修正（M2-3）：默认吃 arrange-all 的最终机器谱面。过去默认 notes_v3（**没经过编排**的那一版），
 // 结果 M2-1 轮次重生成数据包时把力度/延音/打击乐全丢了、e2e 触发数对不上（279 vs 295）。
 const NOTES_CSV = opt('notes', P.machineScore);
+// M3-37：红石块要**提前一刻**放。方块事件（NoteBlock.onSyncedBlockEvent）是排队到**下一 tick 开头**
+// 才真正执行的，所以"在第 T 刻放红石块"听到的声音落在 T+1；提前到 T-1 放，声音才和灯/粒子/时刻表对齐。
+const TRIGGER_LEAD = Math.max(0, Number(opt('trigger-lead', '1')));
 
 // 方案 A：单排（49 段一条线），逐段高度从 single_row_profile.json 读
 const ROWS_PROFILE = JSON.parse(fs.readFileSync(P.profile, 'utf8'));
@@ -68,6 +78,20 @@ fs.mkdirSync(P.tagDir, { recursive: true });
 const summary = [];
 const allLastPos = new Map(); // "x,y,z" -> pos（stop 时熄灯）
 
+// M3-37：每个音符的**水平触发位**（放红石块 → 音符盒响 → mod 接管音色）。
+// 两套表（lo/hi）用的是同一批坐标，算一次即可。
+const TRIG = buildTriggerMap(notes, pos);
+if (TRIG.missing > 0) {
+  throw new Error(`有 ${TRIG.missing} 个音符找不到水平触发位 —— 布局需要加触发道（见 docs/M3-37）`);
+}
+const trigKey = (n) => {
+  const p = pos(n.step, n.pitch);
+  return `${p.x},${p.y},${p.z}`;
+};
+const trigCellOf = new Map(notes.map((n, i) => [trigKey(n), TRIG.cells[i]]));
+/** 落在"没有任何音符的窗口"里的触发位清理：交给 stop 兜底（去重） */
+const pendingStopClears = new Set();
+
 for (const mode of MODES) {
   const groups = buildTickGroups(notes, mode.tps);
   const ticks = [...groups.keys()];
@@ -81,6 +105,20 @@ for (const mode of MODES) {
   let prevNotes = [];
   let switched = false;
   const sw = switchTick(mode.tps);
+  // 待清除的触发位（音符盒触发后下一刻把红石块拆掉）：
+  // 桶是按 100 刻分组的区间，所以先用"目标刻所在桶"归位；落在**没有任何音符的窗口**里的清理
+  // 统一交给 stop（那里会兜底清一遍，避免世界留下散落的红石块）。
+  const bucketByIndex = new Map(buckets.map((b) => [b.index, b]));
+  const clearsByBucket = new Map();   // bucketIndex -> [{tick, cmd}]
+  const addClear = (tick, cmd) => {
+    const bucket = bucketByIndex.get(Math.floor(tick / 100));
+    if (!bucket) {
+      pendingStopClears.add(cmd);
+      return;
+    }
+    if (!clearsByBucket.has(bucket.index)) clearsByBucket.set(bucket.index, []);
+    clearsByBucket.get(bucket.index).push({ tick, cmd });
+  };
 
   for (const bucket of buckets) {
     const out = [];
@@ -116,6 +154,16 @@ for (const mode of MODES) {
         // M3-29：发声行加 `#snd` 守卫（默认开）。客户端高精度播放（/nbmc play）要接管声音时，
         // 用 `/function styx:play/sound_off` 把这条关掉，避免数据包与客户端双响；
         // 机器照样亮灯/出粒子（视觉仍由数据包驱动）。
+        // M3-37：默认改成**音符盒本体触发**（`#nb=1` + `#snd=0`）：
+        //   在水平相邻的空位瞬放红石块 → 音符盒真的响 → mod 的 mixin 掐掉原版声音换无损采样。
+        //   `sound_on` 会把这条切回"数据包直接派发给 mod 引擎"（`#nb=0` + `#snd=1`），两条互斥。
+        const cell = trigCellOf.get(`${x},${y},${z}`);
+        // 提前 TRIGGER_LEAD 刻放红石块（默认 1）：方块事件下一 tick 才执行，这样声音与灯/粒子同刻
+        const placeTick = Math.max(0, t - TRIGGER_LEAD);
+        const placeGuard = placeTick === t ? guard : `execute if score #t styx.t matches ${placeTick} run`;
+        out.push(`${placeGuard} execute if score #nb styx.flag matches 1 run setblock `
+          + `${cell.x} ${cell.y} ${cell.z} minecraft:redstone_block`);
+        addClear(placeTick + 1, `setblock ${cell.x} ${cell.y} ${cell.z} minecraft:air`);
         out.push(`${guard} execute unless score #snd styx.flag matches 0 run nbm playat ${x} ${y} ${z}`);
         // 音符粒子：本题材里音符盒本体发不出声（见上），粒子也就没有；这里按 vanilla 的
         // addParticle(NOTE, x+0.5, y+1.2, z+0.5, row/24, 0, 0) 口径补一发。
@@ -130,6 +178,10 @@ for (const mode of MODES) {
         triggers++;
       }
       prevNotes = list.map((n) => pos(n.step, n.pitch));
+    }
+    // M3-37：本桶内到期的"拆触发位"（带自己的刻守卫，可能落在没有音符的刻上）
+    for (const { tick, cmd } of clearsByBucket.get(bucket.index) ?? []) {
+      out.push(`execute if score #t styx.t matches ${tick} run ${cmd}`);
     }
     fs.writeFileSync(`${dir}/b${pad(bucket.index)}.mcfunction`, out.join('\n') + '\n', 'utf8');
   }
@@ -177,6 +229,10 @@ const counterReset = [
   'scoreboard players set #hits styx.flag 0',
   'scoreboard players set #mh styx.flag 0',
   'scoreboard players set #mb styx.flag 0',
+  // M3-37：默认走**音符盒本体触发**（#nb=1），数据包直接派发 mod 引擎那条路（#snd=1）关掉，
+  // 否则同一个音会响两遍（音符盒 + playat）。用 /function styx:play/sound_on|off 切换。
+  'scoreboard players set #nb styx.flag 1',
+  'scoreboard players set #snd styx.flag 0',
 ];
 
 const startLines = (mode) => [
@@ -196,10 +252,19 @@ fs.writeFileSync(`${DP}/function/play/start_hi.mcfunction`, [
 ].join('\n') + '\n', 'utf8');
 
 const stopOff = [...allLastPos.values()].map((p) => `setblock ${p.x} ${p.y - 1} ${p.z} minecraft:redstone_lamp[lit=false]`);
+// M3-37：清触发位。正常播放时每颗音的触发位在下一刻就被拆掉，这里只管两种情况：
+//   ① 演奏中途 stop（当前刻刚放下的红石块还没来得及拆）；
+//   ② 落在"没有音符的窗口"里的清理（生成时归到 pendingStopClears）。
+const clearTriggerLines = [
+  ...[...TRIG.cells].map((c) => `setblock ${c.x} ${c.y} ${c.z} minecraft:air`),
+  ...pendingStopClears,
+];
+fs.writeFileSync(`${DP}/function/play/clear_triggers.mcfunction`, clearTriggerLines.join('\n') + '\n', 'utf8');
 fs.writeFileSync(`${DP}/function/play/stop.mcfunction`, [
   'scoreboard players set #on styx.flag 0',
   'scoreboard players set #t styx.t -1',
   ...stopOff,
+  ...clearTriggerLines,
   'forceload remove all',
   'tellraw @a {"text":"[Styx] 演奏结束/已停止","color":"aqua"}',
 ].join('\n') + '\n', 'utf8');
@@ -210,6 +275,7 @@ fs.writeFileSync(`${DP}/function/play/reset.mcfunction`, [
   ...counterReset,
   'scoreboard players set #mon styx.flag 0',
   ...stopOff,
+  ...clearTriggerLines,
   'forceload remove all',
 ].join('\n') + '\n', 'utf8');
 
@@ -225,10 +291,12 @@ fs.writeFileSync(`${DP}/function/play/monitor_off.mcfunction`,
 fs.writeFileSync(`${DP}/function/play/sound_off.mcfunction`,
   'scoreboard objectives add styx.flag dummy\n'
   + 'scoreboard players set #snd styx.flag 0\n'
-  + 'tellraw @a {"text":"[Styx] 数据包发声：关（声音交给客户端 /nbmc play，机器照旧亮灯出粒子）","color":"gold"}\n', 'utf8');
+  + 'scoreboard players set #nb styx.flag 1\n'
+  + 'tellraw @a {"text":"[Styx] 发声：音符盒本体（红石块触发 → mod 接管音色；没装 mod 就是原版音符盒声）","color":"gold"}\n', 'utf8');
 fs.writeFileSync(`${DP}/function/play/sound_on.mcfunction`,
   'scoreboard players set #snd styx.flag 1\n'
-  + 'tellraw @a {"text":"[Styx] 数据包发声：开（默认；每颗音由数据包派发给 mod 引擎）","color":"gray"}\n', 'utf8');
+  + 'scoreboard players set #nb styx.flag 0\n'
+  + 'tellraw @a {"text":"[Styx] 发声：数据包直派 mod 引擎（不触发音符盒；/nbmc play 的客户端播放也用这一档）","color":"gray"}\n', 'utf8');
 
 fs.writeFileSync(`${DP}/function/play/report.mcfunction`, [
   'tellraw @s {"text":"[Styx] 已触发音符数：","color":"aqua","extra":[{"score":{"name":"#hits","objective":"styx.flag"},"color":"yellow"}]}',
@@ -252,8 +320,9 @@ fs.writeFileSync(`${DP}/function/play/doctor.mcfunction`, [
   'execute unless block 480 84 -160 minecraft:oak_planks run say [Styx/doctor] 甲板缺失 ✘（先跑 styx:redo）',
   'execute if block 480 83 -160 minecraft:redstone_lamp run say [Styx/doctor] 指示灯在位 ✔',
   'execute unless block 480 83 -160 minecraft:redstone_lamp run say [Styx/doctor] 指示灯缺失 ✘（先跑 styx:redo）',
-  'execute unless block 480 86 -160 minecraft:air run say [Styx/doctor] ⚠ 音符盒上方被占（不影响 mod 发声，但原版音符盒不会响）',
-  'tellraw @a {"text":"[Styx/doctor] 声音由 mod 无损引擎出（/nbm playat 逐音驱动）；机器负责灯与粒子","color":"gray"}',
+  'execute unless block 480 86 -160 minecraft:air run say [Styx/doctor] ⚠ 音符盒上方被占（不影响触发，但视觉上会挤）',
+  'execute if block 480 85 -161 minecraft:air run say [Styx/doctor] 触发位在位 ✔（音符盒同层水平相邻那格是空气）',
+  'tellraw @a {"text":"[Styx/doctor] 默认：红石块触发音符盒本体 → 装 mod 时由 mixin 换成无损采样（没装 mod 即原版音符盒声）；/function styx:play/sound_on 可切回数据包直派 mod 引擎","color":"gray"}',
 ].join('\n') + '\n', 'utf8');
 fs.writeFileSync(`${DP}/function/play/doctor/check.mcfunction`, [
   'scoreboard players operation #dt styx.t = #t styx.t',
@@ -274,4 +343,5 @@ for (const s of summary) {
 }
 const lo = summary[0], hi = summary[1];
 console.log(`对比旧的单级全扫：100 tps 单刻调用 ${hi.buckets} → ${hi.callsPerTick}（${((1 - hi.callsPerTick / hi.buckets) * 100).toFixed(0)}%↓）；20 tps 单刻调用 ${hi.buckets} → ${lo.callsPerTick}`);
-console.log('已生成 play/{tick,start,start_hi,stop,reset,report,monitor_on,monitor_off,sound_on,sound_off}、play/{lo,hi}/{tick,binNN,bNNN}、doctor(+check)');
+console.log(`触发位：${TRIG.cells.length} 个音符各有一个水平触发位（首选方向 z+1 ${TRIG.cells.filter((c) => c.dir === 'zPlus').length} 个）；兜底清理 ${pendingStopClears.size} 条`);
+console.log('已生成 play/{tick,start,start_hi,stop,reset,clear_triggers,report,monitor_on,monitor_off,sound_on,sound_off}、play/{lo,hi}/{tick,binNN,bNNN}、doctor(+check)');

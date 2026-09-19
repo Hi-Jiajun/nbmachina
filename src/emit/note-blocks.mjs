@@ -8,6 +8,7 @@
 //   --old 用来生成"清掉旧坐标"的指令（旧 row 与新 row 不同时先把旧位置清空）
 import fs from 'node:fs';
 import { makePos, DECK_BLOCK, noteBlockOf } from './layout-pos.mjs';
+import { buildTriggerMapFromPoints } from './trigger-map.mjs';
 import { resolvePaths } from '../core/paths.mjs';
 
 const P = resolvePaths();
@@ -61,6 +62,14 @@ for (const { x, y, z, instr, row } of newCells.values()) {
   lines.push(`setblock ${x} ${y} ${z} ${DECK_BLOCK[instr]}`);                        // 甲板（决定音色）
   lines.push(`setblock ${x} ${y + 1} ${z} ${noteBlockOf(instr, row)}`);             // 音符盒
   lines.push(`setblock ${x} ${y - 1} ${z} minecraft:redstone_lamp[lit=false]`);      // 灯
+}
+
+// M3-37：触发位 —— 每个音符盒要有一个**水平相邻**的空格放红石块（实验见 docs/M3-37）。
+// 这里把它们清成空气（保证"放红石块 → 拆掉"之后恢复成空气，而不是把地形挖出个洞）。
+const triggerMap = buildTriggerMapFromPoints([...newCells.values()]);
+if (triggerMap.missing > 0) throw new Error(`有 ${triggerMap.missing} 个音符找不到水平触发位，布局需要改造`);
+for (const cell of triggerMap.cells) {
+  lines.push(`setblock ${cell.x} ${cell.y} ${cell.z} minecraft:air`);   // 触发位（音符盒同层，水平相邻）
 }
 
 fs.mkdirSync(DP, { recursive: true });

@@ -166,6 +166,12 @@ public final class NbmachinaNoteBlocks {
 		int note = state.get(NoteBlock.NOTE);
 		// ① 优先用"机器位置 → 谱面音符"映射：这样力度就是谱面里的真实力度
 		Mapped mapped = BY_POS.get(pos.asLong());
+		// M3-37：`machine_map.csv` 记的是**甲板**那一格（makePos 的 y），而方块事件给的是**音符盒**那一格，
+		// 所以位置命中不了时再往下看一格。补上这一条，音符盒路线才能拿到逐音的力度/时值/乐器，
+		// 否则会退回"由方块状态推算 + 力度写死 100"。
+		if (mapped == null) {
+			mapped = BY_POS.get(new net.minecraft.util.math.BlockPos(pos.getX(), pos.getY() - 1, pos.getZ()).asLong());
+		}
 		String voice = mapped != null ? mapped.voice() : voiceOf(instrument);
 		String target = mapped != null ? mapped.instrument() : (voice == null ? null : NbmachinaMod.instrumentForVoice(voice));
 		if (voice == null || target == null) {

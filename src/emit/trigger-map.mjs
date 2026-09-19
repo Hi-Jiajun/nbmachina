@@ -1,0 +1,53 @@
+// M3-37 · 触发位映射（单一来源）：给每个音符算一个**水平相邻**的空位，用来"放红石块 → 音符盒响"。
+//
+// 为什么必须水平相邻：2026-09-19 的无头实验（docs/M3-37-noteblock-trigger-matrix.md）证明
+// 1.21.10 里只有**水平相邻**的红石块能触发音符盒 —— 正上方、正下方、隔着导体甲板下方都不行。
+// 而现在的密集单排布局里，音符盒左右是别的音符盒，所以要在音符盒那一层找"没被机器占用"的格子。
+//
+// 占用格定义（与 src/emit/note-blocks.mjs 摆的方块一一对应）：
+//   灯 (x, y-1, z) / 甲板 (x, y, z) / 音符盒 (x, y+1, z) / 旧触发位 (x, y+2, z)
+// 候选触发位只在**音符盒那一层**（y+1）里选，按 zPlus → zMinus → xPlus → xMinus 的固定顺序；
+// 同一个格子只允许一个音符用（否则两音的"放置/清除"会互相打架）。
+
+/**
+ * @param {Array<{step:number, pitch:number}>} notes 机器谱面（step = 格位，pitch = 音符盒 row 0..24）
+ * @param {(step:number, pitch:number) => {x:number,y:number,z:number}} pos makePos(profile)
+ * @returns {{cells: Array<{x:number,y:number,z:number,dir:string}|null>, occupied: Set<string>, missing: number}}
+ */
+export function buildTriggerMap(notes, pos) {
+  return buildTriggerMapFromPoints(notes.map((n) => pos(n.step, n.pitch)));
+}
+
+/**
+ * 同上，但直接用**已经算好的甲板坐标**（`{x,y,z}` = 甲板那一格）。
+ * `src/emit/note-blocks.mjs` 摆方块时手上就是坐标，用这个入口避免再算一次。
+ */
+export function buildTriggerMapFromPoints(points) {
+  const occupied = new Set();
+  for (const p of points) {
+    for (const dy of [-1, 0, 1, 2]) occupied.add(`${p.x},${p.y + dy},${p.z}`);
+  }
+  const used = new Map();
+  const cells = points.map((p, i) => {
+    const y = p.y + 1;
+    const candidates = [
+      ['zPlus', p.x, y, p.z + 1],
+      ['zMinus', p.x, y, p.z - 1],
+      ['xPlus', p.x + 1, y, p.z],
+      ['xMinus', p.x - 1, y, p.z],
+    ];
+    for (const [dir, x, cy, z] of candidates) {
+      const key = `${x},${cy},${z}`;
+      if (occupied.has(key) || used.has(key)) continue;
+      used.set(key, i);
+      return { x, y: cy, z, dir };
+    }
+    return null;
+  });
+  return { cells, occupied, missing: cells.filter((c) => !c).length };
+}
+
+/** 触发位所在格 → 该格在"机器占用表"里是否真的空着（自检用） */
+export function cellKey(cell) {
+  return `${cell.x},${cell.y},${cell.z}`;
+}
