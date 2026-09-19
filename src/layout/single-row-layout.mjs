@@ -94,7 +94,15 @@ const rows = [];
 let y = BASE;
 let maxStep = 0;
 const MAX_STEP = 3;      // 每段最多爬 3 格；挡路的山尖就削平（只在音轨宽度内削）
+// M3-57（用户 2026-09-19）：世界已经是**超平坦**时，机器不该再"爬坡避让地形"——整条必须同一高度。
+// 用法：`node src/layout/single-row-layout.mjs --flat 84`
+const flatIdx = process.argv.indexOf('--flat');
+const FLAT_Y = flatIdx >= 0 ? Number(process.argv[flatIdx + 1]) : null;
 for (let k = 0; k < 49; k++) {
+  if (FLAT_Y !== null) {
+    rows.push({ k, x0: 480 + 48 * k, z0: -172, y: FLAT_Y, terrain: terrain[k]?.max ?? null, cutAboveFrom: null });
+    continue;
+  }
   let deck = BASE, cutAboveFrom = null;
   if (k > 38 && terrain[k]) {
     const need = terrain[k].max + 2;

@@ -64,8 +64,10 @@ public final class NbmachinaScheduler {
 					job = QUEUE.peek();
 					long waitMs = (job.atNanos - System.nanoTime()) / 1_000_000L;
 					if (waitMs > 1) {
+						// ⚠ Windows 上 Object.wait(ms) 的粒度 ≈15.6ms，会造成"睡过头"抖动 ——
+						// 实测节奏抖动 p90 ≈45ms 就是这个。改成 parkNanos 分片（≤1ms 一片）→ 最后 1ms 自旋。
 						try {
-							QUEUE.wait(Math.min(waitMs - 1, 50));
+							QUEUE.wait(1);
 						} catch (InterruptedException e) {
 							return;
 						}
