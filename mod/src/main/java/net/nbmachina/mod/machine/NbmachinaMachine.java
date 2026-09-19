@@ -44,6 +44,8 @@ public final class NbmachinaMachine {
 	private static boolean running = false;
 	private static long anchorNanos = 0L;
 	private static double startSec = 0.0;
+	/** 全局时间偏移（毫秒，正数 = 整曲提前触发）：用来把游戏内与母版对齐（由 compare-ingame-vs-master 量出来） */
+	private static double offsetMs = 0.0;
 	private static int cursor = 0;
 	private static int firedCount = 0;
 	private static int tickCount = 0;
@@ -115,7 +117,12 @@ public final class NbmachinaMachine {
 	}
 
 	public static synchronized String start(ServerWorld world, double fromSec) {
+		return start(world, fromSec, 0.0);
+	}
+
+	public static synchronized String start(ServerWorld world, double fromSec, double leadMs) {
 		if (NOTES.isEmpty()) return "没有谱面：先 /nbm reloadmap（或确认 nbmachina/machine_map.csv 存在）";
+		offsetMs = leadMs;
 		cursor = 0;
 		firedCount = 0;
 		tickCount = 0;
@@ -127,7 +134,8 @@ public final class NbmachinaMachine {
 		anchorNanos = System.nanoTime();
 		running = true;
 		maintainForceload(world);
-		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动开始：从 {}s 起（谱面 {} 颗音，第 {} 颗）", fromSec, NOTES.size(), cursor);
+		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动开始：从 {}s 起，全局偏移 {}ms（谱面 {} 颗音，第 {} 颗）",
+			fromSec, leadMs, NOTES.size(), cursor);
 		return null;
 	}
 
@@ -164,7 +172,7 @@ public final class NbmachinaMachine {
 		int firedThisTick = 0;
 		while (cursor < NOTES.size()) {
 			Note n = NOTES.get(cursor);
-			if (n.timeSec() > now + tickSec) break;
+			if (n.timeSec() - offsetMs / 1000.0 > now + tickSec) break;
 			final BlockPos notePos = new BlockPos(n.x(), n.y() + 1, n.z());
 			if (n.strict()) {
 				BlockPos trig = new BlockPos(n.tx(), n.ty(), n.tz());

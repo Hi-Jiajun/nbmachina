@@ -62,9 +62,14 @@ public final class NbmachinaCommands {
 				.executes(ctx -> machineStatus(ctx.getSource()))
 				.then(CommandManager.literal("status").executes(ctx -> machineStatus(ctx.getSource())))
 				.then(CommandManager.literal("start")
-					.executes(ctx -> machineStart(ctx.getSource(), 0.0F))
+					.executes(ctx -> machineStart(ctx.getSource(), 0.0F, 0.0F))
 					.then(CommandManager.argument("fromSec", FloatArgumentType.floatArg(0.0F, 1000.0F))
-						.executes(ctx -> machineStart(ctx.getSource(), FloatArgumentType.getFloat(ctx, "fromSec")))))
+						.executes(ctx -> machineStart(ctx.getSource(),
+							FloatArgumentType.getFloat(ctx, "fromSec"), 0.0F))
+						.then(CommandManager.argument("offsetMs", FloatArgumentType.floatArg(-500.0F, 500.0F))
+							.executes(ctx -> machineStart(ctx.getSource(),
+								FloatArgumentType.getFloat(ctx, "fromSec"),
+								FloatArgumentType.getFloat(ctx, "offsetMs"))))))
 				.then(CommandManager.literal("stop").executes(ctx -> machineStop(ctx.getSource()))))
 			.then(CommandManager.literal("note")
 				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
@@ -153,16 +158,16 @@ public final class NbmachinaCommands {
 	 * 所以世界刻率不是 20 tps 时也不会整曲变速（数据包按"刻"计数，100 tps 下会快 5 倍）；
 	 * 粒子也按谱面的**真实音高**上色（原版音符盒只有 25 档）。
 	 */
-	private static int machineStart(ServerCommandSource source, float fromSec) {
+	private static int machineStart(ServerCommandSource source, float fromSec, float offsetMs) {
 		ServerWorld world = source.getWorld();
-		String err = net.nbmachina.mod.machine.NbmachinaMachine.start(world, fromSec);
+		String err = net.nbmachina.mod.machine.NbmachinaMachine.start(world, fromSec, offsetMs);
 		if (err != null) {
 			source.sendError(Text.literal("[nbmachina] " + err));
 			return 0;
 		}
 		source.sendFeedback(() -> Text.literal(String.format(
-			"[nbmachina] 机器驱动：开始（从 %.1fs 起，共 %d 颗音；真实时间调度，刻率只影响精度不影响速度）",
-			fromSec, net.nbmachina.mod.machine.NbmachinaMachine.size())), true);
+			"[nbmachina] 机器驱动：开始（从 %.1fs 起，全局偏移 %+.0fms，共 %d 颗音；真实时间调度，刻率只影响精度不影响速度）",
+			fromSec, offsetMs, net.nbmachina.mod.machine.NbmachinaMachine.size())), true);
 		return 1;
 	}
 
