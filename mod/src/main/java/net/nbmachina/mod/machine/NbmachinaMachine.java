@@ -55,7 +55,9 @@ public final class NbmachinaMachine {
 	// M3-65（用户 2026-09-19）：默认改为 **0 刻**。实测同一配置两次测出的 p90 差 2.3 倍
 	// （lead 6：24.6ms vs 57.2ms）→ 剩余抖动由服务器负载/采集链路主导，提前量在 0~12 之间已不构成
 	// 可辨差异；用户明确"用固定 0 刻"。运行时仍可用 `/nbm machine lead <0..20>` 临时提高。
-	private static volatile int leadTicks = 0;
+	// M3-67（用户 2026-09-20）：默认 0 → **8 刻**。两轮 A/B 里 8 刻的单次表现最好（p90 1.7ms），
+	// 而 6 刻两次测出 24.6ms / 57.2ms（噪声主导）；用户判断"0 还是不太好"，取更大的安全余量。
+	private static volatile int leadTicks = 8;
 
 	public static int leadTicks() {
 		return leadTicks;
