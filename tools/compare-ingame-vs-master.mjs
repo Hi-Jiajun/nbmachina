@@ -153,8 +153,12 @@ function corr(a, b, bFrom, n) {
   return sab / (Math.sqrt(sa * sb) + 1e-12);
 }
 
-const first = fineOffset(0);
-const lastSec = Math.max(0, Math.min(LEN - 2, (rec.length / SR) - 2));
+// 细对齐的窗口要落在"有音乐"的地方：录像常常比音乐早开始几秒（先按录制、再启动机器），
+// 那段时间是静音，窗首取 0 会得到 r=0 的假失败。这里把窗首推到"母版侧 ≥1s 的第一个位置"。
+const coarseT0 = M0 + coarseBins * 0.01;            // 录音 t=0 ↔ 母版（粗对齐）
+const firstMusicSec = Math.max(0, 1.0 - coarseT0);
+const first = fineOffset(firstMusicSec);
+const lastSec = Math.max(firstMusicSec + 1, Math.min(LEN - 2, (rec.length / SR) - 2));
 const last = fineOffset(lastSec);
 const driftMs = (last.t0 - first.t0) * 1000;
 const spanSec = lastSec;

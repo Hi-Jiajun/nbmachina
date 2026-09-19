@@ -134,6 +134,7 @@ public final class NbmachinaMachine {
 		anchorNanos = System.nanoTime();
 		running = true;
 		maintainForceload(world);
+		silenceDataPack(world);
 		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动开始：从 {}s 起，全局偏移 {}ms（谱面 {} 颗音，第 {} 颗）",
 			fromSec, leadMs, NOTES.size(), cursor);
 		return null;
@@ -206,6 +207,29 @@ public final class NbmachinaMachine {
 	}
 
 	/** 滚动强加载：当前音 .. 未来 {@link #FORCELOAD_AHEAD_SEC} 秒涉及的区块（z 取机器那条带的 6 个 chunk） */
+	/**
+	 * M3-43：由 mod 驱动时，**把数据包那套播放关掉**。
+	 *
+	 * <p>2026-09-19 真机实测：录像期间客户端收到 **4600 条**音符（谱面只有 3044 条）——
+	 * 因为 `styx:redo` 结尾会自动起播，用户又跑了 `/nbm machine start`，两条链路同时在触发：
+	 * 同一颗音被红石块触发两次 + 数据包再派发一次 → 声音重叠、总电平冲顶（录像里 262 个样本削到 0.995+），
+	 * 听感就是"奇怪的杂音"。这里把 `#on`（数据包播放）、`#nb`（它的红石块触发）、`#snd`（它的派发）全置 0，
+	 * 机器完全交给 mod 驱动；想回到数据包驱动就 `/nbm machine stop` + `/function styx:play/start`。
+	 */
+	private static void silenceDataPack(ServerWorld world) {
+		try {
+			var server = world.getServer();
+			var src = server.getCommandSource().withSilent().withMaxLevel(4);
+			var cm = server.getCommandManager();
+			cm.parseAndExecute(src, "scoreboard objectives add styx.flag dummy");
+			cm.parseAndExecute(src, "scoreboard players set #on styx.flag 0");
+			cm.parseAndExecute(src, "scoreboard players set #nb styx.flag 0");
+			cm.parseAndExecute(src, "scoreboard players set #snd styx.flag 0");
+		} catch (Exception e) {
+			NbmachinaMod.LOGGER.warn("[nbmachina] 关闭数据包播放失败（不影响 mod 驱动）：{}", e.toString());
+		}
+	}
+
 	private static void maintainForceload(ServerWorld world) {
 		if (NOTES.isEmpty()) return;
 		int i = Math.min(cursor, NOTES.size() - 1);
