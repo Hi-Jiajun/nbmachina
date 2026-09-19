@@ -26,6 +26,10 @@ public final class NbmachinaSelfTest {
 
 	private static boolean running;
 	private static int ticks;
+	/** M3-37 音符盒触发实验：分相位布置（方块事件要到下一 tick 才派发，不能同 tick 连做） */
+	private static int expPhase = 0;
+	private static int[] expDelta = new int[6];
+	private static int expMark = 0;
 	/** 谱面播放器自检用：前 2.0s 应有的到点数（由谱面算出来，不写死——打击乐入库后会变） */
 	private static int expectAt2s = -1;
 
@@ -46,6 +50,10 @@ public final class NbmachinaSelfTest {
 				return;
 			}
 			ticks++;
+			// M3-37：音符盒触发矩阵实验（每个布置隔一 tick，方块事件下一 tick 才派发）
+			if (ticks >= 8 && ticks <= 26 && ticks % 2 == 0) {
+				experimentStep(server, ticks);
+			}
 			if (ticks == 40) {
 				NbmachinaMod.LOGGER.info("[nbmachina][selftest] t=40 活跃延音作业={} 累计击发={}",
 					NbmachinaSustainQueue.activeJobs(), NbmachinaSustainQueue.totalPlays());
@@ -69,6 +77,81 @@ public final class NbmachinaSelfTest {
 				server.stop(false);
 			}
 		});
+	}
+
+	/**
+	 * M3-37 · 音符盒触发矩阵：方块事件要到**下一 tick** 才派发，所以"布置 → 隔一拍读计数"。
+	 * 三个用例回答一个设计问题：**能不能让音符盒真的响，并且不占用它上方的格子**。
+	 *   ① 基准：harp + 上方空气 + 侧面红石块（正常红石音乐机的触发方式）
+	 *   ② 关键：snare（非基座类乐器）+ 触发位在**正上方**（上方被占）
+	 *   ③ 备选：石头甲板（导体）+ 红石块在**甲板下方** + 上方空气
+	 */
+	private static void experimentStep(MinecraftServer server, int tick) {
+		ServerWorld world = server.getOverworld();
+		net.minecraft.util.math.BlockPos pos = new net.minecraft.util.math.BlockPos(0, 120, 0);
+		int idx = (tick - 8) / 2;
+		switch (idx) {
+			case 0 -> {
+				clearColumn(world, pos);
+				world.setBlockState(pos.down(), Blocks.OAK_PLANKS.getDefaultState(), 3);
+				world.setBlockState(pos, noteBlock(net.minecraft.block.enums.NoteBlockInstrument.HARP), 3);
+				world.setBlockState(pos.east(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3);
+				expMark = NbmachinaNoteBlocks.eventCount();
+			}
+			case 1 -> expDelta[0] = NbmachinaNoteBlocks.eventCount() - expMark;
+			case 2 -> {
+				clearColumn(world, pos);
+				world.setBlockState(pos.down(), Blocks.OAK_PLANKS.getDefaultState(), 3);
+				world.setBlockState(pos, noteBlock(net.minecraft.block.enums.NoteBlockInstrument.SNARE), 3);
+				world.setBlockState(pos.up(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3);
+				expMark = NbmachinaNoteBlocks.eventCount();
+			}
+			case 3 -> expDelta[1] = NbmachinaNoteBlocks.eventCount() - expMark;
+			case 4 -> {
+				clearColumn(world, pos);
+				world.setBlockState(pos.down(2), Blocks.REDSTONE_BLOCK.getDefaultState(), 3);
+				world.setBlockState(pos.down(), Blocks.STONE.getDefaultState(), 3);   // 导体甲板
+				world.setBlockState(pos, noteBlock(net.minecraft.block.enums.NoteBlockInstrument.HARP), 3);
+				expMark = NbmachinaNoteBlocks.eventCount();
+			}
+			case 5 -> {
+				expDelta[2] = NbmachinaNoteBlocks.eventCount() - expMark;
+			}
+			case 6 -> {
+				clearColumn(world, pos);
+				world.setBlockState(pos.down(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3);  // 触发位＝正下方
+				world.setBlockState(pos, noteBlock(net.minecraft.block.enums.NoteBlockInstrument.HARP), 3);
+				expMark = NbmachinaNoteBlocks.eventCount();
+			}
+			case 7 -> {
+				expDelta[3] = NbmachinaNoteBlocks.eventCount() - expMark;
+				NbmachinaMod.LOGGER.info("[nbmachina][selftest] 音符盒触发矩阵："
+					+ "① 上方空气+侧面触发 → {} 次；② 非基座类+触发在正上方 → {} 次；"
+					+ "③ 石头甲板+触发在甲板下 → {} 次；④ 触发位在**正下方** → {} 次",
+					expDelta[0], expDelta[1], expDelta[2], expDelta[3]);
+				NbmachinaMod.LOGGER.info("[nbmachina][selftest] 判定：①={}（触发机制通不通）；"
+					+ "②={}；③={}；④={} → {}",
+					expDelta[0] > 0 ? "通" : "不通",
+					expDelta[1] > 0 ? "能" : "不能",
+					expDelta[2] > 0 ? "能" : "不能",
+					expDelta[3] > 0 ? "能" : "不能",
+					expDelta[3] > 0
+						? "音符盒可以只靠**正下方**的触发位发声 → 现有密集布局只需把甲板那一格改成触发位，不用重建"
+						: expDelta[0] > 0 ? "只有**水平相邻**的触发位有效 → 要回到音符盒路线必须给每个音符留出侧向一格（布局重建）"
+						: "触发机制本身没复现，先查 mixin/红石");
+			}
+			default -> { }
+		}
+	}
+
+	private static net.minecraft.block.BlockState noteBlock(net.minecraft.block.enums.NoteBlockInstrument instrument) {
+		return Blocks.NOTE_BLOCK.getDefaultState().with(net.minecraft.block.NoteBlock.INSTRUMENT, instrument);
+	}
+
+	private static void clearColumn(ServerWorld world, net.minecraft.util.math.BlockPos pos) {
+		for (int dy = -3; dy <= 3; dy++) world.setBlockState(pos.up(dy), Blocks.AIR.getDefaultState(), 3);
+		world.setBlockState(pos.east(), Blocks.AIR.getDefaultState(), 3);
+		world.setBlockState(pos.west(), Blocks.AIR.getDefaultState(), 3);
 	}
 
 	private static void run(MinecraftServer server) {
@@ -127,23 +210,58 @@ public final class NbmachinaSelfTest {
 			NbmachinaMod.LOGGER.info("[nbmachina][selftest] 谱面文件不存在（{}），跳过谱面自检", scoreFile);
 		}
 
-		// M3-21 音符盒注入：真放一个音符盒 + 红石块触发，看 mixin 有没有真的进来
+		// M3-21 / M3-37 音符盒触发实验：三种布置各放一次，看 mixin 到底在哪些布置下被调到。
+		// 背景：M3-21 §6 的结论是"harp/bass（基座类乐器）上方必须是空气，所以触发位没地方放"，
+		// 由此把发声改成了 /nbm playat。但那条规则可能**只对基座类乐器成立** ——
+		// 若换成非基座类乐器（沙→snare、金块→bell…），正上方就可以放触发位，音符盒仍然会真的响。
+		// 这个实验直接决定"机器能不能重新走音符盒发声"。
 		try {
 			ServerWorld world = server.getOverworld();
 			net.minecraft.util.math.BlockPos pos = new net.minecraft.util.math.BlockPos(0, 100, 0);
-			// 复刻机器的真实布局：y-1 触发行（红石块）/ y 甲板 / y+1 音符盒（上方必须空气）
-			// —— M3-21b 的关键：触发位必须在**甲板下方**，不能压在音符盒上方，
-			//    否则 NoteBlock.playNote 的"上方必须是空气"检查会直接 return（机器从来没响过就是这个）。
-			// 先清空：上一轮自检留下的方块还在，重复 setBlockState 同样的方块**不会产生方块更新**。
+			// 先清空：重复 setBlockState 同样的方块**不会产生方块更新**
 			world.setBlockState(pos, Blocks.AIR.getDefaultState(), 3);
 			world.setBlockState(pos.up(), Blocks.AIR.getDefaultState(), 3);
 			world.setBlockState(pos.down(), Blocks.AIR.getDefaultState(), 3);
-			world.setBlockState(pos.south(), Blocks.AIR.getDefaultState(), 3);
-			world.setBlockState(pos, Blocks.SAND.getDefaultState(), 3);            // y   = 甲板（harp）
-			world.setBlockState(pos.up(), Blocks.NOTE_BLOCK.getDefaultState(), 3); // y+1 = 音符盒
-			world.setBlockState(pos.down(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3); // y-1 = 触发
-			NbmachinaMod.LOGGER.info("[nbmachina][selftest] 已按机器布局放置：红石块 {}/甲板 {}/音符盒 {}（触发一次，看注入计数）",
-				pos.down().toShortString(), pos.toShortString(), pos.up().toShortString());
+			world.setBlockState(pos.up(2), Blocks.AIR.getDefaultState(), 3);
+			int e0 = NbmachinaNoteBlocks.eventCount();
+
+			// 注意：`/setblock`（以及这里的 setBlockState）放出来的音符盒**不会**自动按下方方块算乐器，
+			// 默认是 harp —— 所以必须显式指定 INSTRUMENT，否则测不出"非基座类"这一档。
+			var harp = Blocks.NOTE_BLOCK.getDefaultState()
+				.with(net.minecraft.block.NoteBlock.INSTRUMENT, net.minecraft.block.enums.NoteBlockInstrument.HARP);
+			var snare = Blocks.NOTE_BLOCK.getDefaultState()
+				.with(net.minecraft.block.NoteBlock.INSTRUMENT, net.minecraft.block.enums.NoteBlockInstrument.SNARE);
+			var base = Blocks.OAK_PLANKS.getDefaultState();   // 音符盒下方垫一块木头（保证有底座）
+
+			// A：基座类（harp）+ 触发位在**正上方** → 预期被"上方必须空气"拦下
+			world.setBlockState(pos.down(), base, 3);
+			world.setBlockState(pos, harp, 3);
+			world.setBlockState(pos.up(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3);
+			int eA = NbmachinaNoteBlocks.eventCount();
+
+			// B：非基座类（snare）+ 触发位在**正上方** → 这正是"能不能回到音符盒发声"的关键
+			world.setBlockState(pos.up(), Blocks.AIR.getDefaultState(), 3);
+			world.setBlockState(pos, Blocks.AIR.getDefaultState(), 3);
+			world.setBlockState(pos, snare, 3);
+			world.setBlockState(pos.up(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3);
+			int eB = NbmachinaNoteBlocks.eventCount();
+
+			// C：基座类（harp）+ 上方空气 + 触发位在**侧面** → 证明"触发机制本身是通的"
+			world.setBlockState(pos.up(), Blocks.AIR.getDefaultState(), 3);
+			world.setBlockState(pos.east(), Blocks.AIR.getDefaultState(), 3);
+			world.setBlockState(pos, Blocks.AIR.getDefaultState(), 3);
+			world.setBlockState(pos, harp, 3);
+			world.setBlockState(pos.east(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3);
+			int eC = NbmachinaNoteBlocks.eventCount();
+
+			NbmachinaMod.LOGGER.info("[nbmachina][selftest] 音符盒触发实验：A 基座类+触发在正上方 → 事件 {}；"
+				+ "B 非基座类(snare)+触发在正上方 → 事件 {}；C 基座类+触发在侧面 → 事件 {}",
+				eA - e0, eB - eA, eC - eB);
+			NbmachinaMod.LOGGER.info("[nbmachina][selftest] 结论：{}",
+				eC - eB > 0 && eB - eA > 0
+					? "非基座类乐器 + 上方触发位**可以让音符盒真的响** → 机器可以回到音符盒路线（mod 只负责换音色）"
+					: eC - eB > 0 ? "触发机制通，但上方触发位被拦 → 只能改用侧向/重建布局"
+					: "连侧向触发都没进 mixin，需要查 mixin 是否真的生效（见 docs/M3-37）");
 		} catch (Exception e) {
 			NbmachinaMod.LOGGER.warn("[nbmachina][selftest] 音符盒注入自检布置失败：{}", e.toString());
 		}
