@@ -75,11 +75,16 @@ public final class NbmachinaCommands {
 									FloatArgumentType.getFloat(ctx, "fromSec"),
 									FloatArgumentType.getFloat(ctx, "offsetMs"),
 									FloatArgumentType.getFloat(ctx, "rate")))))))
-				.then(CommandManager.literal("stop").executes(ctx -> machineStop(ctx.getSource()))))
+				.then(CommandManager.literal("stop").executes(ctx -> machineStop(ctx.getSource())))
 				.then(CommandManager.literal("silent")
 					.executes(ctx -> machineSilent(ctx.getSource(), null))
 					.then(CommandManager.literal("on").executes(ctx -> machineSilent(ctx.getSource(), true)))
 					.then(CommandManager.literal("off").executes(ctx -> machineSilent(ctx.getSource(), false))))
+				// M3-62：触发提前量（刻）——现场 A/B 用：0 = 不提前（声音会晚一整格），3 = 默认
+				.then(CommandManager.literal("lead")
+					.executes(ctx -> machineLead(ctx.getSource(), null))
+					.then(CommandManager.argument("ticks", IntegerArgumentType.integer(0, 6))
+						.executes(ctx -> machineLead(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "ticks"))))))
 			.then(CommandManager.literal("note")
 				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
 					.executes(ctx -> note(ctx, 1.0F, 1.0F))
@@ -200,6 +205,16 @@ public final class NbmachinaCommands {
 	private static int machineStop(ServerCommandSource source) {
 		net.nbmachina.mod.machine.NbmachinaMachine.stop(source.getWorld());
 		source.sendFeedback(() -> Text.literal("[nbmachina] 机器驱动：已停止"), true);
+		return 1;
+	}
+
+	/** M3-62：`/nbm machine lead [0..6]` —— 查看/设置红石块触发提前量（刻），用于现场 A/B */
+	private static int machineLead(ServerCommandSource source, Integer ticks) {
+		if (ticks != null) net.nbmachina.mod.machine.NbmachinaMachine.setLeadTicks(ticks);
+		int cur = net.nbmachina.mod.machine.NbmachinaMachine.leadTicks();
+		source.sendFeedback(() -> Text.literal(String.format(
+			"[nbmachina] 触发提前量 = %d 刻（%.0fms）%s", cur, cur * 50.0,
+				ticks == null ? "" : "（已生效，下次 /nbm machine start 或用当前值继续）")), true);
 		return 1;
 	}
 

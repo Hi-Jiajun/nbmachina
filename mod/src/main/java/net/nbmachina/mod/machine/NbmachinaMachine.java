@@ -50,6 +50,17 @@ public final class NbmachinaMachine {
 	private static double offsetMs = 0.0;
 	/** 速率系数（1.0 = 原速）：把整曲时间轴按这个系数缩放，用来压平"游戏内 vs 母版"的微小漂移 */
 	private static double rate = 1.0;
+	/** 触发提前量（服务器刻）：默认 3。运行时可用 `/nbm machine lead <0..6>` 改，用于现场 A/B。
+	 *  提前量越大 → 载荷越早到客户端 → 客户端越能"等到准确时刻"再发声（代价是红石块更早出现）。 */
+	private static volatile int leadTicks = 3;
+
+	public static int leadTicks() {
+		return leadTicks;
+	}
+
+	public static void setLeadTicks(int v) {
+		leadTicks = Math.max(0, Math.min(6, v));
+	}
 	private static int cursor = 0;
 	private static int firedCount = 0;
 	private static int tickCount = 0;
@@ -228,7 +239,7 @@ public final class NbmachinaMachine {
 			// M3-54：提前量从 1 刻改成 **2 刻**——音符盒的方块事件是**下一 tick 开头**才处理的，
 			// 1 刻提前量会让载荷在目标时刻之后才到客户端（实测 p90 49ms 全落在"迟到"一侧）；
 			// 提前 2 刻后载荷约在目标前 ~50ms 到达，客户端就能用 nanoTime 等到准确时刻再发声。
-			if (n.timeSec() > now + 3 * tickSec) break;
+			if (n.timeSec() > now + leadTicks * tickSec) break;
 			final BlockPos notePos = new BlockPos(n.x(), n.y() + 1, n.z());
 			if (n.strict()) {
 				BlockPos trig = new BlockPos(n.tx(), n.ty(), n.tz());
