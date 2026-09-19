@@ -267,6 +267,21 @@ public final class NbmachinaSelfTest {
 		}
 
 		ServerWorld overworld = server.getOverworld();
+		// M3-45 实验：`fill … air replace minecraft:note_block` 到底能不能删掉音符盒？
+		// （真机上 styx:wipe 用的是这个过滤器，但用户反馈末尾那段没清掉，先在无头服上验一遍语法）
+		try {
+			net.minecraft.util.math.BlockPos tp = new net.minecraft.util.math.BlockPos(5, 150, 5);
+			overworld.setBlockState(tp, Blocks.NOTE_BLOCK.getDefaultState(), 3);
+			overworld.setBlockState(tp.east(), Blocks.NOTE_BLOCK.getDefaultState(), 3);
+			boolean before = overworld.getBlockState(tp).isOf(Blocks.NOTE_BLOCK);
+			execute(server, "fill 4 149 4 6 151 6 minecraft:air replace minecraft:note_block");
+			boolean after = overworld.getBlockState(tp).isOf(Blocks.NOTE_BLOCK);
+			NbmachinaMod.LOGGER.info("[nbmachina][selftest] fill replace 过滤器实验：放置后={} / fill 后仍在={} → {}",
+				before, after, !after ? "过滤器有效 ✔" : "过滤器无效 ✘（说明 wipe 的写法有问题）");
+		} catch (Exception e) {
+			NbmachinaMod.LOGGER.warn("[nbmachina][selftest] fill 实验失败：{}", e.toString());
+		}
+
 		// 1) 直接调 mod API 发声（完全不经过命令层）
 		NbmachinaCommands.playDirect(overworld, NbmachinaMod.DEMO_BELL, 1.0F, 1.0F);
 		NbmachinaCommands.playDirect(overworld, NbmachinaMod.DEMO_STRINGS, 0.35F, 2.0F);

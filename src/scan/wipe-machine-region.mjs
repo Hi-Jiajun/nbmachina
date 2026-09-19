@@ -201,9 +201,18 @@ fs.mkdirSync(path.dirname(OUT), { recursive: true });
 // （2026-09-19 第一次 wipe 只清掉一小部分就是这个原因）。所以按 x 分窗口，每个窗口先 forceload、
 // 等 2 秒再清，清完换下一个窗口。forceload 单次上限 256 区块 → 窗口取 400 格宽（25×9=225 区块）。
 const WINDOWS = [[430, 830], [830, 1230], [1230, 1630], [1630, 2030], [2030, 2430], [2430, 2900]];
-const ZA = -240, ZB = -110;
+// ⚠ forceload 单次上限 256 区块 —— 2026-09-19 的坑：窗口 6 用了 z −240..−110（9 个 chunk）× x 470 格（30 chunk）
+// = 270 > 256 → **这条 forceload 静默失败**（函数里的报错不写日志）→ 该窗口的 fill 全在未加载区块上执行 →
+// 全部失败 → 用户看到的"末尾那一长段没清掉"。现在把 z 收敛到 fill 真正覆盖的 −200..−110（7 chunk），
+// 并在生成时**断言每个窗口 ≤256 区块**，避免同类问题再偷偷回来。
+const ZA = -200, ZB = -110;
 // 过滤式清除的盒子（机器 + 山地遗留所在的带）：y 55..165、z -200..-110
 const WY0 = 55, WY1 = 165, WZ0 = -200, WZ1 = -110;
+for (const [xa, xb] of WINDOWS) {
+  const cx = Math.floor(xb / 16) - Math.floor(xa / 16) + 1;
+  const cz = Math.floor(ZB / 16) - Math.floor(ZA / 16) + 1;
+  if (cx * cz > 256) throw new Error(`窗口 x${xa}..${xb} 需要 ${cx}×${cz}=${cx * cz} 个区块，超过 forceload 的 256 上限`);
+}
 const dir = path.dirname(OUT);
 fs.mkdirSync(path.join(dir, 'wipe'), { recursive: true });
 const body = lines.slice(2, lines.length - 1);
