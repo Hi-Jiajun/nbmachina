@@ -279,8 +279,11 @@ fs.mkdirSync(path.join(dir, 'wipe_all'), { recursive: true });
 const allSteps = [];
 WINDOWS.forEach(([xa, xb], i) => {
   const cmds = [];
-  for (let x = xa; x < xb; x += 5) {
-    cmds.push(`fill ${x} 55 -200 ${Math.min(x + 4, xb - 1)} 200 -110 minecraft:air`);
+  // ⚠ /fill 单次上限 32768 格：y 55..200（146 层）× z −200..−110（91）= 每格宽 13,286 格 →
+  // 宽度最多 2（2×146×91 = 26,572 ✓）。之前写成 5 宽（66,430）→ **命令静默失败**，
+  // 这正是用户反馈"wipe 完全不生效"的真因（2026-09-19 第三次同源坑：先有 forceload 超 256 区块，然后是 fill 超 32768 格）。
+  for (let x = xa; x < xb; x += 2) {
+    cmds.push(`fill ${x} 55 -200 ${Math.min(x + 1, xb - 1)} 200 -110 minecraft:air`);
   }
   allSteps.push({ name: `a${i + 1}`, xa, xb, cmds });
 });
@@ -292,12 +295,12 @@ allSteps.forEach((st, i) => {
     tail.push(`schedule function styx:wipe_all/${allSteps[i + 1].name} 40t`);
   } else {
     tail.push('forceload remove all');
-    tail.push('tellraw @a {"text":"[Styx] 区域已整体清空（y80..130）—— 现在跑 /function styx:redo 重建","color":"green"}');
+    tail.push('tellraw @a {"text":"[Styx] 区域已整体清空（y55..200，含旧平台/一切方块）—— 现在跑 /function styx:redo 重建","color":"green"}');
   }
   fs.writeFileSync(path.join(dir, 'wipe_all', `${st.name}.mcfunction`), [...st.cmds, ...tail, ''].join('\n'), 'utf8');
 });
 fs.writeFileSync(ALL_OUT, [
-  '# M3-38c · 彻底清空机器工作空间（y80..130 / z-178..-114），比 styx:wipe 更粗暴：连甲板/灯/遗留方块一起填成空气',
+  '# M3-56 · 彻底清空机器工作空间（y55..200 / z-200..-110）：连甲板/灯/旧平台/遗留方块一起填成空气',
   'scoreboard objectives add styx.flag dummy',
   'forceload remove all',
   `forceload add ${allSteps[0].xa} ${ZA} ${allSteps[0].xb} ${ZB}`,
@@ -314,8 +317,12 @@ fs.mkdirSync(path.join(dir, 'wipe_void'), { recursive: true });
 const voidSteps = [];
 WINDOWS.forEach(([xa, xb], i) => {
   const cmds = [];
-  for (let x = xa; x < xb; x += 2) {
-    cmds.push(`fill ${x} -64 ${WZ0} ${Math.min(x + 1, xb - 1)} 319 ${WZ1} minecraft:air`);
+  // 整列清空体积更大：y −64..319（384 层）× 91 宽 = 每格 x 34,944 格，**超过 32768** →
+  // 必须把 z 也切开（每条 z 45 格：384×45 = 17,280 ✓），x 每次只动 1 格。
+  const zMid = Math.floor((WZ0 + WZ1) / 2);
+  for (let x = xa; x < xb; x += 1) {
+    cmds.push(`fill ${x} -64 ${WZ0} ${x} 319 ${zMid} minecraft:air`);
+    cmds.push(`fill ${x} -64 ${zMid + 1} ${x} 319 ${WZ1} minecraft:air`);
   }
   voidSteps.push({ name: `v${i + 1}`, xa, xb, cmds });
 });
