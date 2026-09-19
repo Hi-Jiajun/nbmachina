@@ -52,6 +52,13 @@ public final class NbmachinaMachine {
 	private static final List<BlockPos> PENDING_TRIGGERS = new ArrayList<>();
 	/** 这一刻点亮的灯，下一刻熄灭 */
 	private static final List<BlockPos> PENDING_LAMPS = new ArrayList<>();
+	/**
+	 * M3-41：机器长 2400 格，**只有已加载的区块才能放红石块**（`ServerWorld.setBlockState` 对未加载区块
+	 * 会静默失败）。玩家一走远、或曲子的后段超出加载范围，触发就没了 → 用户听到"播到某个时间就没声音"。
+	 * 这里跟着播放进度**滚动强加载**：始终保持"当前音 + 未来 40 秒"这段区块是强加载的，走过就释放。
+	 */
+	private static final java.util.Set<Long> FORCED = new java.util.HashSet<>();
+	private static final int FORCELOAD_AHEAD_SEC = 40;
 
 	private NbmachinaMachine() {
 	}
@@ -112,12 +119,14 @@ public final class NbmachinaMachine {
 		cursor = 0;
 		firedCount = 0;
 		tickCount = 0;
+		releaseForceload(world);
 		PENDING_TRIGGERS.clear();
 		PENDING_LAMPS.clear();
 		while (cursor < NOTES.size() && NOTES.get(cursor).timeSec() < fromSec) cursor++;
 		startSec = fromSec;
 		anchorNanos = System.nanoTime();
 		running = true;
+		maintainForceload(world);
 		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动开始：从 {}s 起（谱面 {} 颗音，第 {} 颗）", fromSec, NOTES.size(), cursor);
 		return null;
 	}
@@ -131,6 +140,7 @@ public final class NbmachinaMachine {
 			world.setBlockState(p, Blocks.REDSTONE_LAMP.getDefaultState().with(RedstoneLampBlock.LIT, Boolean.FALSE), 2);
 		}
 		PENDING_LAMPS.clear();
+		releaseForceload(world);
 		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动停止：已触发 {} 颗 / 走过 {} 刻 / 用时 {}s", firedCount, tickCount, String.format("%.1f", elapsedSec()));
 	}
 
@@ -139,6 +149,7 @@ public final class NbmachinaMachine {
 		if (!running) return;
 		tickCount++;
 		ServerWorld world = server.getOverworld();
+		if (tickCount % 10 == 0) maintainForceload(world);
 		// ① 拆掉上一刻的触发位、熄灭上一刻的灯
 		for (BlockPos p : PENDING_TRIGGERS) world.setBlockState(p, Blocks.AIR.getDefaultState(), 3);
 		PENDING_TRIGGERS.clear();
@@ -182,6 +193,44 @@ public final class NbmachinaMachine {
 		if (cursor >= NOTES.size() && PENDING_TRIGGERS.isEmpty() && PENDING_LAMPS.isEmpty()) {
 			NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动：全曲结束（{} 颗 / {} 刻）", firedCount, tickCount);
 			running = false;
+			releaseForceload(world);
 		}
+	}
+
+	/** 滚动强加载：当前音 .. 未来 {@link #FORCELOAD_AHEAD_SEC} 秒涉及的区块（z 取机器那条带的 6 个 chunk） */
+	private static void maintainForceload(ServerWorld world) {
+		if (NOTES.isEmpty()) return;
+		int i = Math.min(cursor, NOTES.size() - 1);
+		double until = NOTES.get(i).timeSec() + FORCELOAD_AHEAD_SEC;
+		int x0 = NOTES.get(i).x(), x1 = x0;
+		for (int k = i; k < NOTES.size() && NOTES.get(k).timeSec() <= until; k++) {
+			x0 = Math.min(x0, NOTES.get(k).x());
+			x1 = Math.max(x1, NOTES.get(k).x());
+		}
+		int cx0 = (x0 >> 4) - 2, cx1 = (x1 >> 4) + 2;
+		int cz0 = (-200 >> 4) - 1, cz1 = (-110 >> 4) + 1;
+		for (int cx = cx0; cx <= cx1; cx++) {
+			for (int cz = cz0; cz <= cz1; cz++) {
+				long key = ((long) cx << 32) | (cz & 0xFFFFFFFFL);
+				FORCED.add(key);
+				// 每次都重申一次：数据包的 `/forceload remove all` 会把强加载全部撤掉（包括这里的），
+				// 只靠"新加入时才设置"会在那种情况下静默失效。
+				world.setChunkForced(cx, cz, true);
+			}
+		}
+		java.util.Iterator<Long> it = FORCED.iterator();
+		while (it.hasNext()) {
+			long key = it.next();
+			int cx = (int) (key >> 32);
+			if (cx < cx0 - 6) {
+				world.setChunkForced(cx, (int) key, false);
+				it.remove();
+			}
+		}
+	}
+
+	private static void releaseForceload(ServerWorld world) {
+		for (long key : FORCED) world.setChunkForced((int) (key >> 32), (int) key, false);
+		FORCED.clear();
 	}
 }
