@@ -202,16 +202,23 @@ fs.mkdirSync(path.dirname(OUT), { recursive: true });
 // 等 2 秒再清，清完换下一个窗口。forceload 单次上限 256 区块 → 窗口取 400 格宽（25×9=225 区块）。
 const WINDOWS = [[430, 830], [830, 1230], [1230, 1630], [1630, 2030], [2030, 2430], [2430, 2900]];
 const ZA = -240, ZB = -110;
+// 过滤式清除的盒子（机器 + 山地遗留所在的带）：y 55..165、z -200..-110
+const WY0 = 55, WY1 = 165, WZ0 = -200, WZ1 = -110;
 const dir = path.dirname(OUT);
 fs.mkdirSync(path.join(dir, 'wipe'), { recursive: true });
 const body = lines.slice(2, lines.length - 1);
 
+// ⚠ 2026-09-19 教训：逐格 setblock 依赖"扫描到的坐标"——存档还没落盘时就会漏。
+// 改成**过滤式 fill**：`fill <box> air replace minecraft:note_block` 只删音符盒、保留地形，
+// 不管方块是哪一版留下的、扫描有没有看见，一律清掉。
 const steps = [];
 WINDOWS.forEach(([xa, xb], i) => {
-  const cmds = body.filter((l) => {
-    const m = /^setblock (-?\d+) /.exec(l);
-    return m && +m[1] >= xa && +m[1] < xb;
-  });
+  const cmds = [];
+  for (let x = xa; x < xb; x += 3) {
+    const x2 = Math.min(x + 2, xb - 1);
+    cmds.push(`fill ${x} ${WY0} ${WZ0} ${x2} ${WY1} ${WZ1} minecraft:air replace minecraft:note_block`);
+    cmds.push(`fill ${x} ${WY0} ${WZ0} ${x2} ${WY1} ${WZ1} minecraft:air replace minecraft:redstone_block`);
+  }
   steps.push({ name: `s${i + 1}`, xa, xb, cmds });
 });
 
@@ -250,8 +257,8 @@ fs.mkdirSync(path.join(dir, 'wipe_all'), { recursive: true });
 const allSteps = [];
 WINDOWS.forEach(([xa, xb], i) => {
   const cmds = [];
-  for (let x = xa; x < xb; x += 6) {
-    cmds.push(`fill ${x} 80 -178 ${Math.min(x + 5, xb - 1)} 130 -114 minecraft:air`);
+  for (let x = xa; x < xb; x += 5) {
+    cmds.push(`fill ${x} 80 -178 ${Math.min(x + 4, xb - 1)} 165 -114 minecraft:air`);
   }
   allSteps.push({ name: `a${i + 1}`, xa, xb, cmds });
 });
