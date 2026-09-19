@@ -131,6 +131,29 @@ const LAYER_GAIN = PRESET === 'piano'
     kick: { peak: -6, pan: 0 },
     hat: { peak: -15, pan: 0.12 },
   };
+// M3-35（2026-09-19）· **混音平衡**：只改"层间配比 + 声像"，不碰谱面/音色/力度/总响度。
+// 默认 `off` = 现行口径（三层 ×1.0、全居中）→ 既有产物逐样本不变。
+// 为什么要它：三层同为一架琴时，左手（bass）与内声部会把旋律盖住——实测 stems 的 RMS 是
+// 旋律 −19.8dB / 内声部 −21.7dB / 左手 **−18.4dB**，即"伴奏比旋律还响"。
+// 声像给得极小：真实钢琴低音弦在左、高音在右，所以 bass 偏左、旋律偏右（更像一台琴，
+// 而不是三条各自居中的合成轨）。
+const BALANCE = String(opt('balance', 'off'));
+const BALANCE_PRESETS = {
+  off: null,
+  // 旋律略提（+1.4dB）、内声部退（−1.7dB）、左手压（−2.8dB）→ 旋律对左手相对 +4.2dB
+  piano1: {
+    melody: { gain: 1.18, pan: -0.05 },
+    inner: { gain: 0.82, pan: 0.12 },
+    bass: { gain: 0.72, pan: -0.08 },
+  },
+};
+if (!(BALANCE in BALANCE_PRESETS)) {
+  throw new Error(`--balance 只支持 ${Object.keys(BALANCE_PRESETS).join('/')}`);
+}
+const BAL = BALANCE_PRESETS[BALANCE];
+const LAYER_MIX = BAL
+  ? Object.fromEntries(Object.entries(LAYER_GAIN).map(([k, v]) => [k, { ...v, ...(BAL[k] ?? {}) }]))
+  : LAYER_GAIN;
 // 全钢琴预设：打击乐不属于钢琴改编（与 mod 的 --preset piano 同一口径：basedrum/hat 直接跳过）
 const keep = (layer) => (PRESET === 'piano' && (layer === 'kick' || layer === 'hat'))
   ? false
@@ -370,7 +393,7 @@ const L = new Float64Array(N);
 const R = new Float64Array(N);
 const layerGain = new Map();   // layer -> {gl, gr}：给分层 stems 用（与总线同一套增益/声像）
 for (const [layer, buf] of layerBuf) {
-  const cfg = LAYER_GAIN[layer] ?? { rms: -20, pan: 0 };
+  const cfg = LAYER_MIX[layer] ?? { rms: -20, pan: 0 };
   const s = stat(buf);
   const target = cfg.gain !== undefined
     ? cfg.gain
@@ -383,6 +406,7 @@ for (const [layer, buf] of layerBuf) {
   for (let i = 0; i < N; i++) { L[i] += buf[i] * gl; R[i] += buf[i] * gr; }
   console.log(`  ${layer} 定标 ${cfg.gain !== undefined ? `固定 ×${cfg.gain}`
     : cfg.rms !== undefined ? `RMS ${cfg.rms}dB` : `峰值 ${cfg.peak}dB`}`
+    + ` / 声像 ${cfg.pan >= 0 ? '+' : ''}${cfg.pan}`
     + `：原始峰值 ${s.peak.toFixed(3)} / RMS ${(20 * Math.log10(s.rms + 1e-12)).toFixed(1)}dBFS → 增益 ×${target.toFixed(2)}`);
 }
 
@@ -443,6 +467,7 @@ const manifest = {
     melody: MELODIES[MELODY].label,
     dynamics: DYNAMICS,
     busHpfHz: HPF,
+    balance: BALANCE,
     // 采样库与游戏内一致（高通版）
   },
   files: [],
