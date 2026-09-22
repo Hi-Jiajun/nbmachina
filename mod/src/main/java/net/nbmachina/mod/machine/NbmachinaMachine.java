@@ -8,7 +8,6 @@ import java.util.ArrayList;
 import java.util.List;
 
 import net.minecraft.block.Blocks;
-import net.minecraft.block.RedstoneLampBlock;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
@@ -72,9 +71,7 @@ public final class NbmachinaMachine {
 	private static String lastError = null;
 	/** 这一刻放下的红石块，下一刻拆掉 */
 	private static final List<BlockPos> PENDING_TRIGGERS = new ArrayList<>();
-	/** 这一刻点亮的灯，下一刻熄灭 */
-	private static final List<BlockPos> PENDING_LAMPS = new ArrayList<>();
-	/** 待放的"视觉"（灯/粒子）：触发位提前放，但视觉必须等这颗音真正到点 */
+	/** 待放的粒子：触发位提前放（提前量），但视觉必须等这颗音真正到点 */
 	private record PendingVisual(int x, int y, int z, int midi, double dueSec) {
 	}
 	private static final List<PendingVisual> pendingVisual = new ArrayList<>();
@@ -105,8 +102,11 @@ public final class NbmachinaMachine {
 				int dur = c[7].isBlank() ? 0 : Math.round(Float.parseFloat(c[7].trim()));
 				double t = Double.parseDouble(c[8].trim());
 				int tx = Integer.parseInt(c[9].trim()), ty = Integer.parseInt(c[10].trim()), tz = Integer.parseInt(c[11].trim());
-				// 触发位写成"音符盒上方"（y+2）表示这颗音没有严格水平触发位 → 走引擎兜底
-				boolean strict = ty == y + 1;
+				// M3-70（用户 2026-09-22："让 mod 的红石块放置在音符盒下方激活"）：
+				// 触发位现在记的是**音符盒正下方**那一格（音符盒本体在 y+1）；旧的"水平相邻"（ty == y+1）也认。
+				// 判据直接用几何：红石块与音符盒"相邻"（曼哈顿距离 1）才算真触发位；
+				// 没有触发位的音会被写成 y+2（距离 2）→ 走引擎兜底（见 tick）。
+				boolean strict = Math.abs(tx - x) + Math.abs(ty - (y + 1)) + Math.abs(tz - z) == 1;
 				NOTES.add(new Note(x, y, z, c[3].trim(), c[4].trim(), midi, vel, dur, t, tx, ty, tz, strict));
 				TIME_BY_POS.put(net.minecraft.util.math.BlockPos.asLong(x, y + 1, z), t);
 			} catch (RuntimeException ignored) {
@@ -174,7 +174,6 @@ public final class NbmachinaMachine {
 		tickCount = 0;
 		releaseForceload(world);
 		PENDING_TRIGGERS.clear();
-		PENDING_LAMPS.clear();
 		while (cursor < NOTES.size() && NOTES.get(cursor).timeSec() < fromSec) cursor++;
 		startSec = fromSec;
 		anchorNanos = System.nanoTime();
@@ -200,10 +199,6 @@ public final class NbmachinaMachine {
 		running = false;
 		for (BlockPos p : PENDING_TRIGGERS) world.setBlockState(p, Blocks.AIR.getDefaultState(), 3);
 		PENDING_TRIGGERS.clear();
-		for (BlockPos p : PENDING_LAMPS) {
-			world.setBlockState(p, Blocks.REDSTONE_LAMP.getDefaultState().with(RedstoneLampBlock.LIT, Boolean.FALSE), 2);
-		}
-		PENDING_LAMPS.clear();
 		releaseForceload(world);
 		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动停止：已触发 {} 颗 / 走过 {} 刻 / 用时 {}s", firedCount, tickCount, String.format("%.1f", elapsedSec()));
 	}
@@ -217,10 +212,6 @@ public final class NbmachinaMachine {
 		// ① 拆掉上一刻的触发位、熄灭上一刻的灯
 		for (BlockPos p : PENDING_TRIGGERS) world.setBlockState(p, Blocks.AIR.getDefaultState(), 3);
 		PENDING_TRIGGERS.clear();
-		for (BlockPos p : PENDING_LAMPS) {
-			world.setBlockState(p, Blocks.REDSTONE_LAMP.getDefaultState().with(RedstoneLampBlock.LIT, Boolean.FALSE), 2);
-		}
-		PENDING_LAMPS.clear();
 
 		// ② 真实时间到了哪些音就触发哪些（提前一刻，方块事件下一 tick 才执行）
 		final double now = songTimeSec();
@@ -232,9 +223,8 @@ public final class NbmachinaMachine {
 			float pitch01 = (float) Math.max(0.0, Math.min(1.0, (v.midi() - 21) / 87.0));
 			world.spawnParticles(ParticleTypes.NOTE, v.x() + 0.5, v.y() + 1.2, v.z() + 0.5,
 				1, pitch01, 0.0, 0.0, 1.0);
-			BlockPos lamp = new BlockPos(v.x(), v.y() - 1, v.z());
-			world.setBlockState(lamp, Blocks.REDSTONE_LAMP.getDefaultState().with(RedstoneLampBlock.LIT, Boolean.TRUE), 2);
-			PENDING_LAMPS.add(lamp);
+			// M3-70：机器已经**没有红石灯那一层**了（用户："取消音符盒下面的红石灯"），
+			// 所以这里只出粒子——旧代码往 y-1 塞红石灯，会在这台新机器下面凭空刷出一排灯。
 			it.remove();
 		}
 		int firedThisTick = 0;
@@ -268,7 +258,7 @@ public final class NbmachinaMachine {
 			NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动：已触发 {} 颗（谱面时间 {}s，刻率 {}）",
 				firedCount, String.format("%.2f", now), server.getTickManager().getTickRate());
 		}
-		if (cursor >= NOTES.size() && PENDING_TRIGGERS.isEmpty() && PENDING_LAMPS.isEmpty()) {
+		if (cursor >= NOTES.size() && PENDING_TRIGGERS.isEmpty()) {
 			NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动：全曲结束（{} 颗 / {} 刻）", firedCount, tickCount);
 			running = false;
 			releaseForceload(world);
@@ -304,12 +294,17 @@ public final class NbmachinaMachine {
 		int i = Math.min(cursor, NOTES.size() - 1);
 		double until = NOTES.get(i).timeSec() + FORCELOAD_AHEAD_SEC;
 		int x0 = NOTES.get(i).x(), x1 = x0;
+		// M3-70：z 带**从谱面推**。旧代码把 z 写死成 −200..−110（机器在 z −172..−141 时的坐标），
+		// 换到新的 z 55..82 之后强加载的是一整条**空带**，机器本体全程没被强加载 → 红石块放不下去 → 没声音。
+		int z0 = NOTES.get(i).z(), z1 = z0;
 		for (int k = i; k < NOTES.size() && NOTES.get(k).timeSec() <= until; k++) {
 			x0 = Math.min(x0, NOTES.get(k).x());
 			x1 = Math.max(x1, NOTES.get(k).x());
+			z0 = Math.min(z0, NOTES.get(k).z());
+			z1 = Math.max(z1, NOTES.get(k).z());
 		}
 		int cx0 = (x0 >> 4) - 2, cx1 = (x1 >> 4) + 2;
-		int cz0 = (-200 >> 4) - 1, cz1 = (-110 >> 4) + 1;
+		int cz0 = (z0 >> 4) - 1, cz1 = (z1 >> 4) + 1;
 		for (int cx = cx0; cx <= cx1; cx++) {
 			for (int cz = cz0; cz <= cz1; cz++) {
 				long key = ((long) cx << 32) | (cz & 0xFFFFFFFFL);

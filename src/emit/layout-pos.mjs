@@ -7,7 +7,8 @@ export function makePos(profile) {
   return (step, pitch) => {
     const seg = Math.floor(step / 48), lx = step % 48;
     const r = profile[Math.min(seg, profile.length - 1)];
-    return { x: r.x0 + lx, y: r.y, z: -172 + pitch + 3 };
+    // M3-68：z 的基准改成读剖面里的 z0（便于把整台机器搬到任意原点；老剖面没有 z0 时退回 −172）
+    return { x: r.x0 + lx, y: r.y, z: (r.z0 ?? -172) + pitch + 3 };
   };
 }
 

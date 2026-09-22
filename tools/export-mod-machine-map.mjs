@@ -11,7 +11,7 @@
 // mod 到点就把声音放掉（制音器落下），这才是钢琴"该响多久"的真相——不再靠低音单声部硬掐。
 //
 // 用法：
-//   node tools/export-mod-machine-map.mjs                     # 用默认（视频力度·乐句级）谱面
+//   node tools/export-mod-machine-map.mjs                     # 用默认谱面（= 数据包同源那份）
 //   node tools/export-mod-machine-map.mjs --in build/machine_pipeline_calibrated.csv --deploy
 import fs from 'node:fs';
 import path from 'node:path';
@@ -27,7 +27,10 @@ const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const has = (n) => argv.includes(`--${n}`);
 
-const IN = opt('in', path.join(B, 'machine_pipeline_video_phrase.csv'));
+// M3-70：默认输入改成**与数据包摆块同源的那份谱面**（`note-blocks.mjs --notes` 用的就是它）。
+// 之前默认是 `machine_pipeline_video_phrase.csv`（早期力度实验表：time_sec 全是 0、丢 dur_ms、
+// 还少 138 颗粒子音）—— 谁要是不带 --in 跑一次，mod 的映射就会和世界里的音符盒对不上（听感全错）。
+const IN = opt('in', path.join(B, 'machine_from_reference_shift.csv'));
 const PROFILE = opt('profile', P.profile);
 const OUT = opt('out', path.join(B, 'nbmachina_machine_map.csv'));
 const DEPLOY = has('deploy');

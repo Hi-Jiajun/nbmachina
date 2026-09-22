@@ -10,9 +10,9 @@
 // 用法：node src/scan/wipe-machine-region.mjs [--out <函数路径>]
 import fs from 'node:fs';
 import path from 'node:path';
-import zlib from 'node:zlib';
 
 import { resolvePaths, resolveExternal } from '../core/paths.mjs';
+import { makeSaveReader } from './mca.mjs';
 
 const P = resolvePaths();
 const EX = resolveExternal();
@@ -22,139 +22,25 @@ const argv = process.argv.slice(2);
 const opt = (n, d) => { const i = argv.indexOf(`--${n}`); return i >= 0 ? argv[i + 1] : d; };
 const OUT = opt('out', path.join(P.datapackDir, 'function', 'wipe.mcfunction'));
 
-// 扫描范围：机器本体 + 周围山地（2026-09-19 用户："后面山地这一块没有清除，一并清除掉"）。
+// M3-70：扫描范围**按剖面推导**（顺带把历史上用过的旧 z 带也扫进去）——
+// 换原点/换存档之后 wipe 依然扫得到残留，不用再改代码。
+const prof = JSON.parse(fs.readFileSync(P.profile, 'utf8'));
+const MX0 = prof[0].x0, MX1 = prof[prof.length - 1].x0 + 47;
+const MZ0 = prof[0].z0 ?? -172, MZ1 = MZ0 + 27;
+const MY = prof[0].y;
 // 按 section 的 palette 先判"这一格区有没有音符盒"，只有命中的 section 才逐格解 —— 快得多。
-const X0 = 300, X1 = 3050, Y0 = -60, Y1 = 255, Z0 = -600, Z1 = 200;
+const X0 = Math.min(MX0 - 400, 300), X1 = Math.max(MX1 + 400, 3050);
+// y 下限压到 −128：虚空存档的机器现在贴在 y≈−62，而且区块 section 的 Y 是**有符号 byte**
+// （见 src/scan/mca.mjs 顶部注释），范围放宽一点才不会漏掉负高度里的残留
+const Y0 = Math.min(MY - 64, -128), Y1 = 320;
+const Z0 = Math.min(MZ0 - 120, -220), Z1 = Math.max(MZ1 + 120, -100);
 
-class Reader {
-  constructor(d) { this.d = d; this.p = 0; }
-  u1() { return this.d[this.p++]; }
-  i2() { const v = this.d.readInt16BE(this.p); this.p += 2; return v; }
-  i4() { const v = this.d.readInt32BE(this.p); this.p += 4; return v; }
-  str() { const n = this.d.readUInt16BE(this.p); this.p += 2; const s = this.d.toString('utf8', this.p, this.p + n); this.p += n; return s; }
-  val(t) {
-    switch (t) {
-      case 1: return this.u1();
-      case 2: return this.i2();
-      case 3: return this.i4();
-      case 4: { const v = this.d.readBigInt64BE(this.p); this.p += 8; return v; }
-      case 5: { const v = this.d.readFloatBE(this.p); this.p += 4; return v; }
-      case 6: { const v = this.d.readDoubleBE(this.p); this.p += 8; return v; }
-      case 7: { const n = this.i4(); const v = this.d.subarray(this.p, this.p + n); this.p += n; return v; }
-      case 8: return this.str();
-      case 9: { const it = this.u1(); const n = this.i4(); const a = []; for (let i = 0; i < n; i++) a.push(this.val(it)); return a; }
-      case 10: { const o = {}; for (;;) { const tt = this.u1(); if (tt === 0) return o; o[this.str()] = this.val(tt); } }
-      case 11: { const n = this.i4(); const a = []; for (let i = 0; i < n; i++) a.push(this.i4()); return a; }
-      case 12: { const n = this.i4(); const a = []; for (let i = 0; i < n; i++) { a.push(this.d.readBigInt64BE(this.p)); this.p += 8; } return a; }
-      default: throw new Error('tag ' + t);
-    }
-  }
-}
-
-/** 读一个区块（含所有 section）；不存在返回 null */
-function readChunk(cx, cz) {
-  const p = path.join(SAVE, 'region', `r.${cx >> 5}.${cz >> 5}.mca`);
-  if (!fs.existsSync(p)) return null;
-  const fd = fs.openSync(p, 'r');
-  try {
-    const hdr = Buffer.alloc(8192);
-    fs.readSync(fd, hdr, 0, 8192, 0);
-    const i = (cx & 31) + (cz & 31) * 32;
-    const off = hdr.readUIntBE(i * 4, 3);
-    if (!off) return null;
-    const hb = Buffer.alloc(5);
-    fs.readSync(fd, hb, 0, 5, off * 4096);
-    const len = hb.readInt32BE(0), ct = hb.readUInt8(4);
-    const raw = Buffer.alloc(len - 1);
-    fs.readSync(fd, raw, 0, len - 1, off * 4096 + 5);
-    const data = ct === 2 ? zlib.inflateSync(raw) : zlib.gunzipSync(raw);
-    const r = new Reader(data);
-    const t = r.u1();
-    r.str();
-    return r.val(t);
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-/** section 内单点取方块名（不认识的东西返回 null） */
-function blockAt(sec, x, y, z) {
-  const bs = sec?.block_states;
-  if (!bs?.palette) return null;
-  const n = bs.palette.length;
-  const bits = n === 1 ? 0 : Math.max(4, Math.ceil(Math.log2(n)));
-  let idx = 0;
-  if (bits) {
-    const i2 = ((y & 15) << 8) | ((z & 15) << 4) | (x & 15);
-    const bit = BigInt(i2 * bits);
-    const li = Number(bit >> 6n);
-    const off = Number(bit & 63n);
-    if (li >= (bs.data?.length ?? 0)) return null;
-    let v = BigInt.asUintN(64, BigInt(bs.data[li])) >> BigInt(off);
-    if (off + bits > 64 && li + 1 < bs.data.length) v |= BigInt.asUintN(64, BigInt(bs.data[li + 1])) << BigInt(64 - off);
-    idx = Number(v & ((1n << BigInt(bits)) - 1n));
-  }
-  return bs.palette[idx]?.Name ?? null;
-}
-
-const chunks = new Map();
-const getChunk = (cx, cz) => {
-  const k = `${cx},${cz}`;
-  if (!chunks.has(k)) chunks.set(k, readChunk(cx, cz));
-  return chunks.get(k);
-};
-const at = (x, y, z) => {
-  const root = getChunk(x >> 4, z >> 4);
-  const sec = root?.sections?.find((s) => s.Y === (y >> 4));
-  return sec ? blockAt(sec, x, y, z) : null;
-};
-
-const noteBlocks = [];
-const redstoneBlocks = [];
-/** 一个 section 里所有目标方块的位置（只遍历 4096 格，且只在 palette 命中时做） */
-function scanSection(sec, cx, cz, target, out) {
-  const bs = sec?.block_states;
-  if (!bs?.palette) return;
-  const idx = bs.palette.findIndex((p) => p.Name === target);
-  if (idx < 0) return;
-  const n = bs.palette.length;
-  const bits = n === 1 ? 0 : Math.max(4, Math.ceil(Math.log2(n)));
-  const mask = bits ? (1n << BigInt(bits)) - 1n : 0n;
-  const data = bs.data ?? [];
-  const longs = data.map((v) => BigInt.asUintN(64, BigInt(v)));
-  for (let y = 0; y < 16; y++) {
-    for (let z = 0; z < 16; z++) {
-      for (let x = 0; x < 16; x++) {
-        let v = 0;
-        if (bits) {
-          const i2 = (y << 8) | (z << 4) | x;
-          const bit = BigInt(i2 * bits);
-          const li = Number(bit >> 6n);
-          const off = Number(bit & 63n);
-          if (li >= longs.length) continue;
-          v = longs[li] >> BigInt(off);
-          if (off + bits > 64 && li + 1 < longs.length) v |= longs[li + 1] << BigInt(64 - off);
-          v &= mask;
-        }
-        if (Number(v) !== idx) continue;
-        const wx = cx * 16 + x, wy = sec.Y * 16 + y, wz = cz * 16 + z;
-        if (wx < X0 || wx > X1 || wy < Y0 || wy > Y1 || wz < Z0 || wz > Z1) continue;
-        out.push([wx, wy, wz]);
-      }
-    }
-  }
-}
-for (let cx = X0 >> 4; cx <= (X1 >> 4); cx++) {
-  for (let cz = Z0 >> 4; cz <= (Z1 >> 4); cz++) {
-    const root = getChunk(cx, cz);
-    if (!root?.sections) continue;
-    for (const sec of root.sections) {
-      scanSection(sec, cx, cz, 'minecraft:note_block', noteBlocks);
-      scanSection(sec, cx, cz, 'minecraft:redstone_block', redstoneBlocks);
-    }
-  }
-  if (cx % 32 === 0) process.stdout.write(`  扫描到 cx=${cx}（音符盒 ${noteBlocks.length}）\n`);
-}
+const reader = makeSaveReader(SAVE);
+const hits = reader.scan({ x0: X0, x1: X1, y0: Y0, y1: Y1, z0: Z0, z1: Z1 },
+  ['minecraft:note_block', 'minecraft:redstone_block']);
+const noteBlocks = hits.get('minecraft:note_block');
+const redstoneBlocks = hits.get('minecraft:redstone_block');
+const at = reader.blockAt;
 
 // 当前谱面的音符盒坐标（甲板坐标 +1 层）→ 用来区分"该留的"和"遗留的"
 // machine_map.csv 在客户端游戏目录的 nbmachina/ 下；存档目录的上一级就是游戏目录（saves/<世界>）
@@ -200,19 +86,54 @@ fs.mkdirSync(path.dirname(OUT), { recursive: true });
 // ⚠ 关键：`setblock` **只对已加载的区块生效**。机器长 2400 格，站在这头时那头的 setblock 会静默失败
 // （2026-09-19 第一次 wipe 只清掉一小部分就是这个原因）。所以按 x 分窗口，每个窗口先 forceload、
 // 等 2 秒再清，清完换下一个窗口。forceload 单次上限 256 区块 → 窗口取 400 格宽（25×9=225 区块）。
-const WINDOWS = [[430, 830], [830, 1230], [1230, 1630], [1630, 2030], [2030, 2430], [2430, 2900]];
-// ⚠ forceload 单次上限 256 区块 —— 2026-09-19 的坑：窗口 6 用了 z −240..−110（9 个 chunk）× x 470 格（30 chunk）
-// = 270 > 256 → **这条 forceload 静默失败**（函数里的报错不写日志）→ 该窗口的 fill 全在未加载区块上执行 →
-// 全部失败 → 用户看到的"末尾那一长段没清掉"。现在把 z 收敛到 fill 真正覆盖的 −200..−110（7 chunk），
-// 并在生成时**断言每个窗口 ≤256 区块**，避免同类问题再偷偷回来。
-const ZA = -200, ZB = -110;
-// 过滤式清除的盒子（机器 + 山地遗留所在的带）：y 55..165、z -200..-110
-const WY0 = 55, WY1 = 165, WZ0 = -200, WZ1 = -110;
+// 清理范围 = **机器本体 ∪ 这次扫描到的实际残留**（旧版写死 430..2900 / −200..−110，换原点后清的是空带）
+const hit = [...noteBlocks, ...redstoneBlocks];
+let hMinX = MX0, hMaxX = MX1, hMinY = MY, hMaxY = MY, hMinZ = MZ0, hMaxZ = MZ1;
+for (const [x, y, z] of hit) {
+  hMinX = Math.min(hMinX, x); hMaxX = Math.max(hMaxX, x);
+  hMinY = Math.min(hMinY, y); hMaxY = Math.max(hMaxY, y);
+  hMinZ = Math.min(hMinZ, z); hMaxZ = Math.max(hMaxZ, z);
+}
+// x 边界按区块对齐（16 的整数倍）——不然窗口跨半块，chunk 数会比 winWidth/16 多 1
+const align = (v, dir) => dir < 0 ? Math.floor(v / 16) * 16 : Math.ceil(v / 16) * 16 - 1;
+const XA = align(hMinX - 8, -1), XB = align(hMaxX + 8, +1);
+const ZA = hMinZ - 2, ZB = hMaxZ + 2;
+// y 上限取"甲板上方 +48"：把 undo 快照那条带（clone 到 +40 格）也一起清掉
+const WY0 = hMinY - 8, WY1 = hMaxY + 48;
+// ⚠ forceload 单次上限 256 区块 —— 2026-09-19 的坑：窗口 6 用 30×9=270 区块 → **这条 forceload 静默失败**
+// → 该窗口的 fill 全在未加载区块上执行 → 全部失败 → "末尾那一长段没清掉"。
+// 现在窗口宽度按"z 带占几个 chunk"反推，并在生成时再断言一次。
+const czSpan = Math.floor(ZB / 16) - Math.floor(ZA / 16) + 1;
+// 留一格余量：256 正好卡满时容易因为边界差异溢出（实测踩过 86×3=258）
+const maxChunks = Math.max(1, Math.floor(256 / czSpan) - 1);
+const winWidth = maxChunks * 16;
+const NWIN = Math.ceil((XB - XA + 1) / winWidth);
+const WINDOWS = Array.from({ length: NWIN }, (_, i) =>
+  [XA + i * winWidth, Math.min(XA + (i + 1) * winWidth - 1, XB)]);
 for (const [xa, xb] of WINDOWS) {
   const cx = Math.floor(xb / 16) - Math.floor(xa / 16) + 1;
-  const cz = Math.floor(ZB / 16) - Math.floor(ZA / 16) + 1;
-  if (cx * cz > 256) throw new Error(`窗口 x${xa}..${xb} 需要 ${cx}×${cz}=${cx * cz} 个区块，超过 forceload 的 256 上限`);
+  if (cx * czSpan > 256) throw new Error(`窗口 x${xa}..${xb} 需要 ${cx}×${czSpan} 个区块，超过 forceload 的 256 上限`);
 }
+/**
+ * 体积安全的 fill 生成器：先按 z 切、再按 x 切，保证每条指令 ≤32768 格。
+ * 旧版把宽度写死（2 格 / 1 格），z 带一变宽就会**静默失败**（`/fill` 超限不报错、直接不执行）。
+ */
+const fillBox = (xa, xb, y0, y1, z0, z1, block, replace) => {
+  const out = [];
+  const maxVol = 32768;
+  const yLen = y1 - y0 + 1;
+  const zStep = Math.max(1, Math.floor(maxVol / yLen));
+  for (let z = z0; z <= z1; z += zStep) {
+    const z2 = Math.min(z + zStep - 1, z1);
+    const volYZ = yLen * (z2 - z + 1);
+    const xStep = Math.max(1, Math.floor(maxVol / volYZ));
+    for (let x = xa; x <= xb; x += xStep) {
+      const x2 = Math.min(x + xStep - 1, xb);
+      out.push(`fill ${x} ${y0} ${z} ${x2} ${y1} ${z2} ${block}${replace ? ` replace ${replace}` : ''}`);
+    }
+  }
+  return out;
+};
 const dir = path.dirname(OUT);
 fs.mkdirSync(path.join(dir, 'wipe'), { recursive: true });
 const body = lines.slice(2, lines.length - 1);
@@ -223,10 +144,8 @@ const body = lines.slice(2, lines.length - 1);
 const steps = [];
 WINDOWS.forEach(([xa, xb], i) => {
   const cmds = [];
-  for (let x = xa; x < xb; x += 3) {
-    const x2 = Math.min(x + 2, xb - 1);
-    cmds.push(`fill ${x} ${WY0} ${WZ0} ${x2} ${WY1} ${WZ1} minecraft:air replace minecraft:note_block`);
-    cmds.push(`fill ${x} ${WY0} ${WZ0} ${x2} ${WY1} ${WZ1} minecraft:air replace minecraft:redstone_block`);
+  for (const target of ['minecraft:note_block', 'minecraft:redstone_block', 'minecraft:redstone_lamp']) {
+    cmds.push(...fillBox(xa, xb, WY0, WY1, ZA, ZB, 'minecraft:air', target));
   }
   steps.push({ name: `s${i + 1}`, xa, xb, cmds });
 });
@@ -278,13 +197,8 @@ const ALL_OUT = path.join(dir, 'wipe_all.mcfunction');
 fs.mkdirSync(path.join(dir, 'wipe_all'), { recursive: true });
 const allSteps = [];
 WINDOWS.forEach(([xa, xb], i) => {
-  const cmds = [];
-  // ⚠ /fill 单次上限 32768 格：y 55..200（146 层）× z −200..−110（91）= 每格宽 13,286 格 →
-  // 宽度最多 2（2×146×91 = 26,572 ✓）。之前写成 5 宽（66,430）→ **命令静默失败**，
-  // 这正是用户反馈"wipe 完全不生效"的真因（2026-09-19 第三次同源坑：先有 forceload 超 256 区块，然后是 fill 超 32768 格）。
-  for (let x = xa; x < xb; x += 2) {
-    cmds.push(`fill ${x} 55 -200 ${Math.min(x + 1, xb - 1)} 200 -110 minecraft:air`);
-  }
+  // ⚠ /fill 单次上限 32768 格 —— 切块交给 fillBox（旧版写死 2 格宽，范围一变宽就静默失败）
+  const cmds = fillBox(xa, xb, WY0, WY1, ZA, ZB, 'minecraft:air');
   allSteps.push({ name: `a${i + 1}`, xa, xb, cmds });
 });
 allSteps.forEach((st, i) => {
@@ -295,12 +209,12 @@ allSteps.forEach((st, i) => {
     tail.push(`schedule function styx:wipe_all/${allSteps[i + 1].name} 40t`);
   } else {
     tail.push('forceload remove all');
-    tail.push('tellraw @a {"text":"[Styx] 区域已整体清空（y55..200，含旧平台/一切方块）—— 现在跑 /function styx:redo 重建","color":"green"}');
+    tail.push(`tellraw @a {"text":"[Styx] 区域已整体清空（y${WY0}..${WY1} / z${ZA}..${ZB}，含旧平台/一切方块）—— 现在跑 /function styx:redo 重建","color":"green"}`);
   }
   fs.writeFileSync(path.join(dir, 'wipe_all', `${st.name}.mcfunction`), [...st.cmds, ...tail, ''].join('\n'), 'utf8');
 });
 fs.writeFileSync(ALL_OUT, [
-  '# M3-56 · 彻底清空机器工作空间（y55..200 / z-200..-110）：连甲板/灯/旧平台/遗留方块一起填成空气',
+  `# M3-70 · 彻底清空机器工作空间（y${WY0}..${WY1} / z${ZA}..${ZB}，按剖面 + 扫描残留推导）：连甲板/灯/旧平台/遗留方块一起填成空气`,
   'scoreboard objectives add styx.flag dummy',
   'forceload remove all',
   `forceload add ${allSteps[0].xa} ${ZA} ${allSteps[0].xb} ${ZB}`,
@@ -316,14 +230,8 @@ const VOID_OUT = path.join(dir, 'wipe_void.mcfunction');
 fs.mkdirSync(path.join(dir, 'wipe_void'), { recursive: true });
 const voidSteps = [];
 WINDOWS.forEach(([xa, xb], i) => {
-  const cmds = [];
-  // 整列清空体积更大：y −64..319（384 层）× 91 宽 = 每格 x 34,944 格，**超过 32768** →
-  // 必须把 z 也切开（每条 z 45 格：384×45 = 17,280 ✓），x 每次只动 1 格。
-  const zMid = Math.floor((WZ0 + WZ1) / 2);
-  for (let x = xa; x < xb; x += 1) {
-    cmds.push(`fill ${x} -64 ${WZ0} ${x} 319 ${zMid} minecraft:air`);
-    cmds.push(`fill ${x} -64 ${zMid + 1} ${x} 319 ${WZ1} minecraft:air`);
-  }
+  // 整列清空（y −64..319）：体积更大，fillBox 会同时按 z / x 切（旧版手写"z 切两半 + x 每次 1 格"）
+  const cmds = fillBox(xa, xb, -64, 319, ZA, ZB, 'minecraft:air');
   voidSteps.push({ name: `v${i + 1}`, xa, xb, cmds });
 });
 voidSteps.forEach((st, i) => {
@@ -340,7 +248,7 @@ voidSteps.forEach((st, i) => {
   fs.writeFileSync(path.join(dir, 'wipe_void', `${st.name}.mcfunction`), [...st.cmds, ...tail, ''].join('\n'), 'utf8');
 });
 fs.writeFileSync(VOID_OUT, [
-  '# M3-52 · 彻底铲平：把机器那条带（z −200..−110）整列 y −64..319 清成空气（地形一起没）',
+  `# M3-70 · 彻底铲平：把机器那条带（z ${ZA}..${ZB}）整列 y −64..319 清成空气（地形一起没）`,
   'scoreboard objectives add styx.flag dummy',
   'forceload remove all',
   `forceload add ${voidSteps[0].xa} ${ZA} ${voidSteps[0].xb} ${ZB}`,
@@ -351,11 +259,11 @@ fs.writeFileSync(VOID_OUT, [
 console.log(`写出 ${VOID_OUT} + wipe_void/${voidSteps.map((s) => `${s.name}(${s.cmds.length}条)`).join(' ')}`);
 
 // M3-56（用户："wipe脚本要清理干净所有包括音符盒方块"）：
-// **默认 `styx:wipe` 改成彻底清**（y55..200 整段清空，含旧平台/灯/甲板/一切方块），
+// **默认 `styx:wipe` 改成彻底清**（把机器工作空间整段清空，含旧平台/灯/甲板/一切方块），
 // 想只清音符盒+红石块+灯（保留地形）就用 `styx:wipe_notes`。
 fs.copyFileSync(OUT, path.join(dir, 'wipe_notes.mcfunction'));
 fs.writeFileSync(OUT, [
-  '# M3-56 默认 wipe = 彻底清：把机器那条带 y55..200 的所有方块清成空气（保留 y<55 的地面）',
+  `# M3-70 默认 wipe = 彻底清：把机器工作空间 y${WY0}..${WY1} / z${ZA}..${ZB} 清成空气（范围按剖面 + 扫描残留推导）`,
   '# 只想清音符盒/红石块/灯、保留地形 → 用 styx:wipe_notes',
   'function styx:wipe_all',
   '',

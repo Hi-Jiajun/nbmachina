@@ -23,7 +23,25 @@ export function buildTriggerMap(notes, pos) {
  * `src/emit/note-blocks.mjs` 摆方块时手上就是坐标，用这个入口避免再算一次。
  */
 export function buildTriggerMapFromPoints(points) {
-  // 音符盒本体所在格（x, y+1, z）—— 用来判断"这个触发位会不会同时点亮别的音符盒"
+  // M3-68（用户 2026-09-22）：**触发位改成音符盒正下方**（= 原来甲板那一格 (x,y,z)）。
+  // 用户实测：红石块放音符盒下方可以正常激活，而且这样做天然"只点亮自己"——
+  // 相邻音符盒都在 (x±1,y+1,z) 或 (x,y+1,z±1)，与 (x,y,z) 只成对角关系，不会互相点亮。
+  const noteCells = new Set(points.map((p) => `${p.x},${p.y + 1},${p.z}`));
+  const occupied = new Set();
+  for (const p of points) {
+    for (const dy of [-1, 0, 1, 2]) occupied.add(`${p.x},${p.y + dy},${p.z}`);
+  }
+  const used = new Map();
+  const cells = points.map((p, i) => {
+    const key = `${p.x},${p.y},${p.z}`;
+    used.set(key, i);
+    return { x: p.x, y: p.y, z: p.z, dir: 'below', strict: true };
+  });
+  return { cells, occupied, missing: 0, strictCount: cells.length, looseCount: 0 };
+}
+
+/** 旧的"水平相邻"触发位算法（保留备用：万一哪天又要换回去） */
+export function buildTriggerMapHorizontal(points) {
   const noteCells = new Set(points.map((p) => `${p.x},${p.y + 1},${p.z}`));
   const occupied = new Set();
   for (const p of points) {

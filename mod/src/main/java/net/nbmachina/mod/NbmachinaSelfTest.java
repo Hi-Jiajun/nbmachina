@@ -119,8 +119,10 @@ public final class NbmachinaSelfTest {
 			}
 			case 6 -> {
 				clearColumn(world, pos);
-				world.setBlockState(pos.down(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3);  // 触发位＝正下方
+				// M3-68（用户要求：红石块放音符盒**下方**触发）：注意顺序 —— 机器是先摆好音符盒，
+				// 播放时才在下面放红石块。之前测的是"先放红石块再放音符盒"，那是错的顺序。
 				world.setBlockState(pos, noteBlock(net.minecraft.block.enums.NoteBlockInstrument.HARP), 3);
+				world.setBlockState(pos.down(), Blocks.REDSTONE_BLOCK.getDefaultState(), 3);  // 触发位＝正下方
 				expMark = NbmachinaNoteBlocks.eventCount();
 			}
 			case 7 -> {

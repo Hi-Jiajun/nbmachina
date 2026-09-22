@@ -98,7 +98,15 @@ const MAX_STEP = 3;      // 每段最多爬 3 格；挡路的山尖就削平（�
 // 用法：`node src/layout/single-row-layout.mjs --flat 84`
 const flatIdx = process.argv.indexOf('--flat');
 const FLAT_Y = flatIdx >= 0 ? Number(process.argv[flatIdx + 1]) : null;
+// M3-68：`--origin X,Y,Z` —— 把整台机器的原点搬到指定坐标（x0 = X + 48k、y = Y、z0 = Z − 3）
+// 用法示例（StyxHelix虚空存档）：node src/layout/single-row-layout.mjs --flat -82 --origin 215,-82,58
+const originIdx = process.argv.indexOf('--origin');
+const ORIGIN = originIdx >= 0 ? process.argv[originIdx + 1].split(',').map(Number) : null;
 for (let k = 0; k < 49; k++) {
+  if (ORIGIN) {
+    rows.push({ k, x0: ORIGIN[0] + 48 * k, z0: ORIGIN[2] - 3, y: ORIGIN[1], terrain: terrain[k]?.max ?? null, cutAboveFrom: null });
+    continue;
+  }
   if (FLAT_Y !== null) {
     rows.push({ k, x0: 480 + 48 * k, z0: -172, y: FLAT_Y, terrain: terrain[k]?.max ?? null, cutAboveFrom: null });
     continue;

@@ -64,7 +64,8 @@ for (const { x, y, z, instr, row } of newCells.values()) {
   // 所以底座直接清成空气：机器更干净，也少 3044 个方块的摆放/拆除开销。
   lines.push(`setblock ${x} ${y} ${z} minecraft:air`);                               // 底座（不再需要）
   lines.push(`setblock ${x} ${y + 1} ${z} ${noteBlockOf(instr, row)}`);             // 音符盒
-  lines.push(`setblock ${x} ${y - 1} ${z} minecraft:redstone_lamp[lit=false]`);      // 灯
+  // M3-68（用户 2026-09-22）：**取消音符盒下方的红石灯** —— 那一格现在留给触发用的红石块，
+  // 机器只保留"音符盒"这一层（视觉上也更干净）。
 }
 
 // M3-37：触发位 —— 每个音符盒要有一个**水平相邻**的空格放红石块（实验见 docs/M3-37）。
