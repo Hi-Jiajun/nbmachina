@@ -212,9 +212,12 @@ public final class NbmachinaCommands {
 	private static int machineLead(ServerCommandSource source, Integer ticks) {
 		if (ticks != null) net.nbmachina.mod.machine.NbmachinaMachine.setLeadTicks(ticks);
 		int cur = net.nbmachina.mod.machine.NbmachinaMachine.leadTicks();
+		// M3-71：说清楚这个值到底管什么 —— 用户实测"改了 0/8 听不出区别"，因为**声音时刻由客户端按谱面时间对齐**
+		// （nanoTime 调度），提前量只决定"载荷提前多久发出去"（旧版还会让红石块提前出现，现在红石块已经不放）。
 		source.sendFeedback(() -> Text.literal(String.format(
-			"[nbmachina] 触发提前量 = %d 刻（%.0fms）%s", cur, cur * 50.0,
-				ticks == null ? "" : "（已生效，下次 /nbm machine start 或用当前值继续）")), true);
+			"[nbmachina] 触发提前量 = %d 刻（%.0fms）%s。它只决定载荷提前多久发给客户端（越大越抗卡顿），"
+				+ "声音时刻由客户端按谱面时间对齐 —— 所以调这个值听感就是不会有变化；调太小（0~1 刻）反而会晚一整格",
+			cur, cur * 50.0, ticks == null ? "" : "（已生效，下一次触发即用新值）")), true);
 		return 1;
 	}
 

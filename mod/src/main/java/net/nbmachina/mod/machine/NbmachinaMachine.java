@@ -7,7 +7,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.NoteBlock;
 import net.minecraft.particle.ParticleTypes;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.world.ServerWorld;
@@ -30,8 +32,13 @@ import net.nbmachina.mod.note.NbmachinaNoteBlocks;
  *       想回到数据包驱动就 `/nbm machine stop` + `/function styx:play/start`。</li>
  * </ol>
  *
- * 发声方式不变：在音符盒**水平相邻**的空位放红石块 → 音符盒响 → mixin 掐掉原版声音换无损采样。
- * 没有严格触发位的那几颗音（见 docs/M3-38）直接走引擎派发。
+ * 发声方式（M3-71 起）：**直接把音符盒的"同步方块事件"排进队列**（原版 `NoteBlock` 被红石激活时走的就是
+ * 这一句 `world.addSyncedBlockEvent(pos, this, 0, note)`）→ 音符盒本体照常"响" → mixin 掐掉原版声音换无损采样。
+ *
+ * <p>为什么不再放红石块（2026-09-22 用户："红石块的渲染可不可以隐藏掉；感觉突然冒出来丑丑的"）：
+ * 红石块要提前 {@link #leadTicks} 刻出现、下一刻拆掉，客户端就会看到方块凭空闪一下；改成直接排队后
+ * **世界里没有任何方块被改动**，视觉上干干净净，也顺带消掉了"红石块残留/存档落盘时被写进世界"这一类风险。
+ * 音符盒本体不在（没铺/被挖）的那几颗音才退回引擎直接派发。
  */
 public final class NbmachinaMachine {
 	/** 一条谱面音（来自 `<游戏目录>/nbmachina/machine_map.csv`） */
@@ -69,11 +76,11 @@ public final class NbmachinaMachine {
 	private static int firedCount = 0;
 	private static int tickCount = 0;
 	private static String lastError = null;
-	/** 这一刻放下的红石块，下一刻拆掉 */
-	private static final List<BlockPos> PENDING_TRIGGERS = new ArrayList<>();
 	/** 待放的粒子：触发位提前放（提前量），但视觉必须等这颗音真正到点 */
 	private record PendingVisual(int x, int y, int z, int midi, double dueSec) {
 	}
+	/** M3-71：收尾用——最后一颗音排进"方块事件队列"后要多跑一刻，等事件被处理完再撤强加载 */
+	private static int endTicks = 0;
 	private static final List<PendingVisual> pendingVisual = new ArrayList<>();
 	/**
 	 * M3-41：机器长 2400 格，**只有已加载的区块才能放红石块**（`ServerWorld.setBlockState` 对未加载区块
@@ -172,8 +179,8 @@ public final class NbmachinaMachine {
 		cursor = 0;
 		firedCount = 0;
 		tickCount = 0;
+		endTicks = 0;
 		releaseForceload(world);
-		PENDING_TRIGGERS.clear();
 		while (cursor < NOTES.size() && NOTES.get(cursor).timeSec() < fromSec) cursor++;
 		startSec = fromSec;
 		anchorNanos = System.nanoTime();
@@ -197,8 +204,6 @@ public final class NbmachinaMachine {
 	public static synchronized void stop(ServerWorld world) {
 		if (!running) return;
 		running = false;
-		for (BlockPos p : PENDING_TRIGGERS) world.setBlockState(p, Blocks.AIR.getDefaultState(), 3);
-		PENDING_TRIGGERS.clear();
 		releaseForceload(world);
 		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动停止：已触发 {} 颗 / 走过 {} 刻 / 用时 {}s", firedCount, tickCount, String.format("%.1f", elapsedSec()));
 	}
@@ -209,11 +214,7 @@ public final class NbmachinaMachine {
 		tickCount++;
 		ServerWorld world = server.getOverworld();
 		if (tickCount % 10 == 0) maintainForceload(world);
-		// ① 拆掉上一刻的触发位、熄灭上一刻的灯
-		for (BlockPos p : PENDING_TRIGGERS) world.setBlockState(p, Blocks.AIR.getDefaultState(), 3);
-		PENDING_TRIGGERS.clear();
-
-		// ② 真实时间到了哪些音就触发哪些（提前一刻，方块事件下一 tick 才执行）
+		// ① 真实时间到了哪些音就触发哪些（方块事件下一 tick 开头才被处理，所以留 leadTicks 的提前量）
 		final double now = songTimeSec();
 		final double tickSec = server.getTickManager().getNanosPerTick() / 1e9;
 		// 到点的视觉：点灯 + 出粒子（真实音高上色），下一刻熄灭
@@ -236,12 +237,13 @@ public final class NbmachinaMachine {
 			// 提前 2 刻后载荷约在目标前 ~50ms 到达，客户端就能用 nanoTime 等到准确时刻再发声。
 			if (n.timeSec() > now + leadTicks * tickSec) break;
 			final BlockPos notePos = new BlockPos(n.x(), n.y() + 1, n.z());
-			if (n.strict()) {
-				BlockPos trig = new BlockPos(n.tx(), n.ty(), n.tz());
-				world.setBlockState(trig, Blocks.REDSTONE_BLOCK.getDefaultState(), 3);
-				PENDING_TRIGGERS.add(trig);
+			final BlockState noteState = world.getBlockState(notePos);
+			if (noteState.isOf(Blocks.NOTE_BLOCK)) {
+				// M3-71：**不放红石块**，直接把音符盒的同步方块事件排进队列 —— 与"被红石激活"完全同一条原版路径
+				// （`NoteBlock.neighborUpdate` 内部就是这么写的），客户端那格永远保持空气，没有任何可见方块。
+				world.addSyncedBlockEvent(notePos, Blocks.NOTE_BLOCK, 0, noteState.get(NoteBlock.NOTE));
 			} else {
-				// 没有严格水平触发位 → 直接走引擎（力度/时值/音高都来自谱面）
+				// 音符盒本体不在（还没铺 / 被挖掉）→ 退回引擎直接派发（力度/时值/音高都来自谱面）
 				NbmachinaNoteBlocks.playAt(world, notePos,
 					new NbmachinaNoteBlocks.Mapped(n.instrument(), n.voice(), n.midi(), n.velocity(), n.durMs()));
 			}
@@ -258,7 +260,9 @@ public final class NbmachinaMachine {
 			NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动：已触发 {} 颗（谱面时间 {}s，刻率 {}）",
 				firedCount, String.format("%.2f", now), server.getTickManager().getTickRate());
 		}
-		if (cursor >= NOTES.size() && PENDING_TRIGGERS.isEmpty()) {
+		if (cursor >= NOTES.size()) {
+			// 最后一颗音刚排进方块事件队列 → 再跑一刻，等它被处理（否则撤强加载可能让那颗音丢失）
+			if (endTicks++ == 0) return;
 			NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动：全曲结束（{} 颗 / {} 刻）", firedCount, tickCount);
 			running = false;
 			releaseForceload(world);
