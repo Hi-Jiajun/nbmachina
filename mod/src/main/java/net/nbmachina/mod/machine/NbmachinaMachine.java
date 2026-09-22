@@ -63,7 +63,7 @@ public final class NbmachinaMachine {
 	// 可辨差异；用户明确"用固定 0 刻"。运行时仍可用 `/nbm machine lead <0..20>` 临时提高。
 	// M3-67（用户 2026-09-20）：默认 0 → **8 刻**。两轮 A/B 里 8 刻的单次表现最好（p90 1.7ms），
 	// 而 6 刻两次测出 24.6ms / 57.2ms（噪声主导）；用户判断"0 还是不太好"，取更大的安全余量。
-	private static volatile int leadTicks = 8;
+	private static volatile int leadTicks = 6;   // M3-97：实测 4 刻余量 +148ms、6 刻 ≈+250ms、8 刻 +348ms，0 刻 100% 过期；6 刻兼顾抗抖与视觉提前量
 
 	/** M3-91：载荷余量窗口统计（每 200 颗一报）——提前量 0 vs 8 的客观依据。 */
 	private static double minMarginMs = Double.MAX_VALUE;

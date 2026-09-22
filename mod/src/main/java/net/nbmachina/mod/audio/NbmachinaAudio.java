@@ -334,14 +334,14 @@ public final class NbmachinaAudio {
 				}
 				task = TASKS.poll();
 			}
-			// M3-90：空闲时把"已解码待上传"的采样一次一个地传上去（上限 2 个/轮，避免这一轮过久）。
-			// 这样到该音发声时 buffer 已经存在，发声任务里只剩 alSourcePlay（亚毫秒）。
-			for (int upl = 0; upl < 2; upl++) {
+			// M3-97：上传只在**完全没有待执行任务**时做，而且一轮最多一个。
+			// 之前的"一轮最多 2 个"在采样很大时会把音频线程堵上百毫秒（实测执行延迟最大 117.5ms）：
+			// 那一步要拷贝几 MB 再 alBufferData。现在如果队列里有活，就先伺候活，把上传往后推。
+			if (TASKS.isEmpty()) {
 				String pending = PENDING_UPLOADS.poll();
-				if (pending == null) {
-					break;
+				if (pending != null) {
+					bufferFor(pending);
 				}
-				bufferFor(pending);
 			}
 			int err = AL10.alGetError();
 			if (err != AL10.AL_NO_ERROR) {

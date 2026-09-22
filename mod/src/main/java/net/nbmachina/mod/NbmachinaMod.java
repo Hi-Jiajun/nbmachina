@@ -73,6 +73,8 @@ public class NbmachinaMod implements ModInitializer {
 			net.nbmachina.mod.net.NbmachinaMachineSyncPayload.CODEC);
 		LOGGER.info("[nbmachina] 已注册 S2C 音符协议 nbmachina:play");
 		NbmachinaCommands.register();
+		// M3-98a：把"音符数据方块实体"注册到原版音符盒上（机器自带 NBT）
+		net.nbmachina.mod.note.NbmachinaNoteData.register();
 		NbmachinaSustainQueue.register();
 		NbmachinaScorePlayer.register();
 		NbmachinaSelfTest.register();
