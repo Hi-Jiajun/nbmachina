@@ -9,19 +9,23 @@ import java.util.List;
 import java.util.Map;
 
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.sound.SoundCategory;
+import net.minecraft.text.TranslatableTextContent;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 
 import net.nbmachina.mod.audio.NbmachinaAudio;
 import net.nbmachina.mod.audio.NbmachinaInstruments;
+import net.nbmachina.mod.audio.NbmachinaRecorder;
 import net.nbmachina.mod.audio.NbmachinaSamples;
 import net.nbmachina.mod.audio.NbmachinaWav;
 import net.nbmachina.mod.net.NbmachinaPlayPayload;
@@ -49,12 +53,29 @@ public final class NbmachinaClient implements ClientModInitializer {
 	private static volatile long anchorNanos = 0L;
 	private static volatile double anchorScoreSec = -1.0;
 	private static volatile int scheduledCount = 0;
+	/** M3-76：客户端刻计数（写进录音 json，用于和回放轴核账） */
+	private static volatile long clientTick = 0L;
+
+	/** M3-76：录音输出目录：`<gameDir>/nbmachina/recordings/`（与采样/谱面同级的 nbmachina 目录） */
+	private static java.nio.file.Path recDir() {
+		return FabricLoader.getInstance().getGameDir().resolve("nbmachina").resolve("recordings");
+	}
 
 	@Override
 	public void onInitializeClient() {
 		int loaded = NbmachinaInstruments.reload();
 		NbmachinaInstruments.loadVoices();   // M3-30：音色覆盖表（config/nbmachina/voices.json）
 		NbmachinaAudio.start();
+		NbmachinaRecorder.LOG = (s) -> NbmachinaMod.LOGGER.info(s);   // M3-76：录音器日志走 Fabric logger
+		// M3-76：**回放开始录制 → 我们的录音也从那一刻起算**（ReplayMod 的聊天键 `replaymod.chat.recordingstarted`
+		// 是 TranslatableText，直接按 key 判定，不依赖语言；Flashback 的键名做兼容匹配）。
+		// 这样 WAV 的 t=0 == 回放时间轴的 t=0 → 出片时 offset 恒为 0。
+		ClientReceiveMessageEvents.GAME.register((message, overlay) -> {
+			String key = null;
+			if (message.getContent() instanceof TranslatableTextContent tc) key = tc.getKey();
+			// 统一解析都到主线程做（聊天事件本身就是主线程，这里只是把结果丢给录音器）
+			NbmachinaRecorder.onChatKey(key, message.getString(), clientTick, recDir());
+		});
 		NbmachinaMod.LOGGER.info("[nbmachina] 客户端入口：乐器 {} 个（{}）", loaded, NbmachinaInstruments.lastError());
 
 		// M3-51：服务端说"机器从第 X 秒开始跑了" → 客户端用**自己的时钟**从同一时间点起播（1ms 级）
@@ -112,6 +133,14 @@ public final class NbmachinaClient implements ClientModInitializer {
 							.executes(ctx -> clicks(ctx.getSource(),
 								FloatArgumentType.getFloat(ctx, "intervalSec"),
 								IntegerArgumentType.getInteger(ctx, "count"))))))
+				// M3-76：游戏内无损录音（48k/24bit 立体声 WAV + 锚点 json）——给 ReplayMod / Flashback 出片用。
+				// 一般不用手打：ReplayMod/Flashback 一按录制，聊天栏那条消息会**自动触发开录**（t=0 对齐回放轴）。
+				.then(ClientCommandManager.literal("rec")
+					.executes(ctx -> recStatus(ctx.getSource()))
+					.then(ClientCommandManager.literal("status").executes(ctx -> recStatus(ctx.getSource())))
+					.then(ClientCommandManager.literal("start")
+						.executes(ctx -> recStart(ctx.getSource(), "manual")))
+					.then(ClientCommandManager.literal("stop").executes(ctx -> recStop(ctx.getSource()))))
 				.then(ClientCommandManager.literal("instruments")
 					.executes(ctx -> list(ctx.getSource(), null))
 					.then(ClientCommandManager.argument("filter", StringArgumentType.word())
@@ -201,6 +230,7 @@ public final class NbmachinaClient implements ClientModInitializer {
 
 	/** 每刻：把相机位置/朝向同步给音频线程，并把原版主音量接过来 */
 	private static void tick(MinecraftClient client) {
+		clientTick++;
 		ClientPlayerEntity player = client.player;
 		if (player == null) return;
 		double yaw = Math.toRadians(player.getYaw());
@@ -236,6 +266,34 @@ public final class NbmachinaClient implements ClientModInitializer {
 	 * 同时在玩家身边放一圈亮粒子。录屏后可以用"粒子亮起帧 vs 音频脉冲位置"算出采集链路延迟。
 	 */
 	private static int clicks(FabricClientCommandSource src, float interval, int count) {
+		return clicksInner(src, interval, count);
+	}
+
+	/* ---------------- M3-76：无损录音（/nbmc rec …） ---------------- */
+
+	private static int recStatus(FabricClientCommandSource src) {
+		src.sendFeedback(Text.literal("[nbmachina] 录音：" + NbmachinaRecorder.status()
+			+ "\n  目录：" + recDir()));
+		return 1;
+	}
+
+	private static int recStart(FabricClientCommandSource src, String tag) {
+		String err = NbmachinaRecorder.start(recDir(), tag, clientTick);
+		if (err != null) {
+			src.sendError(Text.literal("[nbmachina] " + err));
+			return 0;
+		}
+		src.sendFeedback(Text.literal("[nbmachina] 无损录音中（48kHz/24bit 立体声）：" + NbmachinaRecorder.wavPath()
+			+ "\n  录音 t=0 = 现在；若想和回放对齐，请**先按回放的录制**（它会自动开录），或手动把这段音频的起点对齐"));
+		return 1;
+	}
+
+	private static int recStop(FabricClientCommandSource src) {
+		src.sendFeedback(Text.literal("[nbmachina] " + NbmachinaRecorder.stop()));
+		return 1;
+	}
+
+	private static int clicksInner(FabricClientCommandSource src, float interval, int count) {
 		ClientPlayerEntity player = src.getPlayer();
 		if (player == null) return 0;
 		final double px = player.getX(), py = player.getY(), pz = player.getZ();

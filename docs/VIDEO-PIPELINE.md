@@ -118,3 +118,47 @@ Flashback 的 `MixinSoundEngine` 只 hook **原版 `SoundEngine.play`**；而 nb
 * 录制起点正好等于机器启动 → `--offset 0`；早录了 N 秒 → `--offset N`。
 * 不确定就打个可见标记：机器启动那一刻执行 `/nbmc click`（3kHz 脉冲 + 脚下 END_ROD 粒子），
   或对 OBS 录音用 `node tools/compare-ingame-vs-master.mjs --record ...` 量出偏移。
+
+## 8. M3-76 · 游戏内无损录音（`/nbmc rec`）—— 让"对齐"这件事消失
+
+用户要求：在 mod 里做游戏内无损录制，且能直接和 ReplayMod / Flashback 配合，**不用手算时间戳**，
+渲染出来的视频里就是游戏里听到的那份音频。
+
+### 怎么工作
+
+* 录音器（`NbmachinaRecorder`）不录声卡，而是**按引擎真正起的每一路声部重建混音**：
+  引擎每次 `alSourcePlay` 都会把（采样文件 / 实际增益 / 音高比 / 谱面时值）交给它，
+  放音（制音器落下、同键重击、低音单音线抢音、被抢声掐掉）时再回填包络 → 与 `NbmachinaAudio` 同一套口径，
+  **可复现**、不受设备重采样/延迟影响。
+* 输出：`<游戏目录>/nbmachina/recordings/nbm-<时间戳>[-tag].wav` = **48kHz / 24bit / 立体声（无损）**，
+  旁边一份同名 `.json` 锚点（采样率、时长、峰值、削顶帧数、录音起点刻、回放录制起点时刻…）。
+* **零对齐**：ReplayMod / Flashback 一按"开始录制"，聊天栏那条 `replaymod.chat.recordingstarted`
+  （TranslatableText，按键名匹配、不看语言）会被客户端 hook 到 → **我们的录音就从那一刻起算**。
+  于是 **WAV 的 t=0 == 回放时间轴的 t=0**。
+* 手动开关：`/nbmc rec start|stop|status`（一般不用，自动那条更准）。
+
+### ReplayMod（优先支持，零偏移）
+
+```bash
+# 1) 正常录回放（mod 会自动开始录音，聊天栏会打一行"无损录音开始"）
+# 2) ReplayMod 渲染：Encoding Preset 选 MKV - Lossless（或任意画质）
+# 3) 一条命令合片：锚点文件里已经写好了音轨路径与偏移
+node tools/mux-video.mjs --report "<游戏目录>/nbmachina/recordings/nbm-XXXX.json" \
+     --video D:/render/styx_lossless.mkv --out build/final/styx_final.mkv
+```
+
+`--report` 会读出音轨与 `replayOffsetSec`（自动开录时恒为 0），不需要你输 `--offset`。
+
+### Flashback
+
+Flashback 的编辑器里新建 **Audio Track** → 加 keyframe（文件选择器）→ 选那条 `nbm-XXXX.wav`
+→ **放在 0 秒**（因为 t=0 已经对齐）→ Audio Codec 选 OPUS（它只有 AAC/MP3/OPUS/VORBIS）。
+
+### 自检 / 边界
+
+* 脱离游戏也能验：`_scratch-m3-76/RecorderSelfTest.java` 用三路已知声部跑一遍，
+  输出的 WAV 逐 0.2s RMS 与预期一致（0.0312 = 主增益 0.5 × 源 RMS、确定性放音、抢声立刻掐、淡出后静音）；
+  `_scratch-m3-76/wav-stats.mjs` 是配套的波形统计脚本。
+* 单文件最长 90 分钟（约 1.5GB）；录音中若游戏卡顿，混音线程会自动补上（它按**起播时刻**记账，不是按处理时刻）。
+* 录音的 t=0 是"引擎起播那一刻"，不含声卡输出延迟（约几十毫秒）——**对视频同步反而更准**，
+  因为画面也是同一条命令链路出来的。

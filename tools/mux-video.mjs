@@ -46,8 +46,21 @@ function defaultAudio() {
   }
   return path.join(P.build, 'master', 'styx_master_48k24bit.wav');
 }
-const AUDIO = opt('audio', defaultAudio());
-const OFFSET = Number(opt('offset', '0'));      // 音乐在视频里从第几秒开始
+// M3-76：`--report <录音 json>` —— 直接读 mod 录下来的锚点文件：
+// WAV 的 t=0 == 回放录制开始的 t=0（mod 在 ReplayMod/Flashback 按下录制时自动开录），
+// 所以 offset 恒为 0，音轨路径也从 json 里取 → 用户不用手算任何时间戳。
+const REPORT = opt('report', '');
+let reportAudio = null, reportOffset = null;
+if (REPORT) {
+  if (!fs.existsSync(REPORT)) throw new Error(`找不到录音锚点：${REPORT}`);
+  const j = JSON.parse(fs.readFileSync(REPORT, 'utf8'));
+  reportAudio = path.join(path.dirname(REPORT), j.audio ?? '');
+  reportOffset = Number(j.replayOffsetSec ?? 0);
+  console.log(`录音锚点：${path.basename(REPORT)}  时长 ${j.durationSec}s  采样 ${j.sampleRate}Hz/${j.bitsPerSample}bit/${j.channels}ch`
+    + `  声部 ${j.startedVoices}  峰值 ${j.peak}${j.clampedFrames ? `  ⚠ 削顶 ${j.clampedFrames} 帧` : ''}`);
+}
+const AUDIO = opt('audio', reportAudio ?? defaultAudio());
+const OFFSET = Number(opt('offset', reportOffset ?? '0'));      // 音乐在视频里从第几秒开始
 const TAIL = Number(opt('tail', '6'));          // 结尾多留几秒（画面延续）
 const AAC = has('aac');
 const FLAC = has('flac');

@@ -362,6 +362,7 @@ public final class NbmachinaAudio {
 			if (v.dueToRelease(now)) {
 				v.releaseStartMs = now;
 				releasedByScore++;
+				NbmachinaRecorder.onVoiceRelease(v.source, v.fadeMs);   // M3-76：录音器同步放音
 			}
 			if (v.isReleasing()) {
 				float f = v.fadeFactor(now);
@@ -410,6 +411,7 @@ public final class NbmachinaAudio {
 			if (!sameKey && !sameVoiceLine) continue;
 			v.releaseStartMs = now;
 			dampedCount++;
+			NbmachinaRecorder.onVoiceRelease(v.source, v.fadeMs);       // M3-76：同上
 		}
 	}
 
@@ -498,6 +500,14 @@ public final class NbmachinaAudio {
 			// 有谱面时值 → 用制音器放音时长（低音弦重、放音慢）；没有 → 沿用旧的两条规则
 			durMs > 0 ? damperMs(midi) : ("bass".equalsIgnoreCase(voice) ? BASS_FADE_MS : RESTRIKE_FADE_MS),
 			durMs));
+		// M3-76：录音器按"引擎真正起的这一路"重建混音（采样/增益/音高/时值同一套口径）
+		if (NbmachinaRecorder.recording()) {
+			java.nio.file.Path wavPath = NbmachinaSamples.resolve(file);
+			if (wavPath != null) {
+				NbmachinaRecorder.onVoiceStart(source, wavPath, Math.max(0f, Math.min(4f, gain * masterGain)),
+					Math.max(0.25f, Math.min(4f, pitch)), durMs, midi);
+			}
+		}
 		if (durMs > 0) withDuration++;
 		playedCount++;
 		if (ACTIVE.size() > peakActive) peakActive = ACTIVE.size();
@@ -514,6 +524,8 @@ public final class NbmachinaAudio {
 			}
 		}
 		if (oldest == 0) return 0;
+		// M3-76：被抢走的声部是**立刻掐掉**（不是放音），录音器里也要按"立刻结束"处理
+		NbmachinaRecorder.onVoiceRelease(oldest, 0L);
 		AL10.alSourceStop(oldest);
 		ACTIVE.remove(oldest);
 		stolenCount++;
