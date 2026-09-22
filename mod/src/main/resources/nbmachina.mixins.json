@@ -4,7 +4,8 @@
 	"package": "net.nbmachina.mod.mixin",
 	"compatibilityLevel": "JAVA_21",
 	"mixins": [
-		"NoteBlockMixin"
+		"NoteBlockMixin",
+		"NoteBlockDataMixin"
 	],
 	"injectors": {
 		"defaultRequire": 1

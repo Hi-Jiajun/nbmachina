@@ -27,12 +27,27 @@ const readCsv = (p) => {
   const lines = fs.readFileSync(p, 'utf8').trim().split(/\r?\n/);
   const h = lines[0].split(',');
   const iStep = h.indexOf('step'), iInstr = h.indexOf('instrument'), iRow = h.indexOf('row');
+  // M3-98a：把"这颗音是什么"也读出来（写进方块实体用）。注意两套谱面的列名不同：
+  //   machine_from_reference_shift.csv → midi / velMidi / durMs / time_seconds
+  //   machine_pipeline.csv            → velocity 是 0..1 的归一化值（没有 velMidi）
+  const iMidi = h.indexOf('midi');
+  const iVel = h.indexOf('velMidi') >= 0 ? h.indexOf('velMidi') : h.indexOf('velocity');
+  const iDur = h.indexOf('durMs');
+  const iTime = h.indexOf('time_seconds') >= 0 ? h.indexOf('time_seconds') : h.indexOf('time_sec');
   return lines.slice(1).map((l) => {
     const c = l.split(',');
     // 保留真实音色（打击乐层用 basedrum/hat），未知值退回 harp
     const raw = c[iInstr];
     const instr = ['harp', 'bass', 'basedrum', 'hat'].includes(raw) ? raw : 'harp';
-    return { step: +c[iStep], instr, row: +c[iRow] };
+    const rawVel = iVel >= 0 ? +c[iVel] : null;
+    const velMidi = rawVel === null ? null : (rawVel <= 1.5 ? Math.round(rawVel * 127) : Math.round(rawVel));
+    return {
+      step: +c[iStep], instr, row: +c[iRow],
+      midi: iMidi >= 0 ? +c[iMidi] : null,
+      velMidi,
+      durMs: iDur >= 0 ? +c[iDur] : null,
+      timeSec: iTime >= 0 ? +c[iTime] : null,
+    };
   });
 };
 
@@ -45,7 +60,16 @@ const oldCells = [...new Set(old.map((n) => { const p = pos(n.step, n.row); retu
 const newCells = new Map();
 for (const n of notes) {
   const p = pos(n.step, n.row);
-  newCells.set(`${p.x},${p.y},${p.z}`, { ...p, instr: n.instr, row: n.row });
+  // M3-98a：把"这颗音是什么"一起带上 —— 生成时写进音符盒的方块实体（NBT），运行时就不必再依赖 CSV
+  newCells.set(`${p.x},${p.y},${p.z}`, {
+    ...p, instr: n.instr, row: n.row,
+    instrument: n.instrument ?? "salamander48",
+    voice: n.voice ?? n.instr ?? "harp",
+    midi: n.midi ?? 60,
+    velocity: n.velMidi ?? 100,
+    durMs: n.durMs ?? 0,
+    timeSec: n.timeSec ?? null,
+  });
 }
 
 const lines = [
@@ -58,12 +82,17 @@ for (const k of oldCells) {
   lines.push(`setblock ${x} ${+y + 1} ${z} minecraft:air`);
   lines.push(`setblock ${x} ${+y - 1} ${z} minecraft:air`);
 }
-for (const { x, y, z, instr, row } of newCells.values()) {
+for (const { x, y, z, instr, row, instrument, voice, midi, velocity, durMs, timeSec } of newCells.values()) {
   // M3-39（用户："既然目前底座音色不变，就把音符盒的底座都不要了"）：
   // 底座只在**原版音符盒发声**时决定乐器，而 mod 模式下声音一律由引擎出（乐器取自谱面映射）。
   // 所以底座直接清成空气：机器更干净，也少 3044 个方块的摆放/拆除开销。
   lines.push(`setblock ${x} ${y} ${z} minecraft:air`);                               // 底座（不再需要）
   lines.push(`setblock ${x} ${y + 1} ${z} ${noteBlockOf(instr, row)}`);             // 音符盒
+  // M3-98a：紧接着把音符数据写进该音符盒的方块实体（键名与 NoteDataBlockEntity 一致，平铺）。
+  // 必须**先 setblock 再 merge**：方块实体要等方块放下之后才存在。
+  const timePart = (timeSec === null || timeSec === undefined) ? "" : `,nbm_time_sec:${Number(timeSec).toFixed(3)}`;
+  lines.push(`data merge block ${x} ${y + 1} ${z} {nbm_instrument:"${instrument}",nbm_voice:"${voice}",`
+    + `nbm_midi:${midi},nbm_velocity:${velocity},nbm_dur_ms:${durMs}${timePart}}`);
   // M3-68（用户 2026-09-22）：**取消音符盒下方的红石灯** —— 那一格现在留给触发用的红石块，
   // 机器只保留"音符盒"这一层（视觉上也更干净）。
 }

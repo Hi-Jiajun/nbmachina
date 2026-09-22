@@ -90,33 +90,13 @@ w('redo/go.mcfunction', [
   '# 清掉旧版残留（红石块/旧回退快照）→ 摆音符盒 → 全量核对',
   'scoreboard objectives add styx.flag dummy',
   'scoreboard players add #fix styx.flag 1',
-  'function styx:redo/clean',
   'function styx:apply_notes_v3',
   'function styx:redo/check',
 ]);
 
-// 旧版（红石块触发时代）可能在世界里留下没来得及拆掉的红石块——机器那条带里一次性过滤掉；
-// 另外清掉历代 redo 放在机器上方的**回退快照**：M3-74 之前的在 +40 格（用户抬头看到"上面还有一排音符盒"），
-// M3-74 的在 +900 格。M3-75 起**回退功能整体移除**，这两个高度的残留都当垃圾清掉。
-const SNAP_DYS = [40, 900];
-const cleanCmds = [];
-const snapBands = SNAP_DYS.map((dy) => [prof[0].y - 1 + dy, prof[0].y + 2 + dy]);
-for (const [a, b] of WIN) {
-  for (let x = a; x <= b; x += 16) {
-    const x2 = Math.min(x + 15, b);
-    cleanCmds.push(`fill ${x} ${NY - 1} ${ZB} ${x2} ${NY + 1} ${ZE} minecraft:air replace minecraft:redstone_block`);
-    cleanCmds.push(`fill ${x} ${NY - 1} ${ZB} ${x2} ${NY + 1} ${ZE} minecraft:air replace minecraft:redstone_lamp`);
-    for (const [ly0, ly1] of snapBands) {
-      for (const blk of ['minecraft:note_block', 'minecraft:redstone_block', 'minecraft:redstone_lamp']) {
-        cleanCmds.push(`fill ${x} ${ly0} ${ZB} ${x2} ${ly1} ${ZE} minecraft:air replace ${blk}`);
-      }
-    }
-  }
-}
-w('redo/clean.mcfunction', [
-  '# 机器带内清掉红石块/红石灯残留；并清掉旧版留在机器上方 +40 格的回退快照（每 16 格宽一条，体积 ≪ 32768）',
-  ...cleanCmds,
-]);
+// M3-84：清场从这里**整体移出**。redo 只负责"强加载 → 等就绪 → 摆音符盒 → 全量核对"，
+// 清旧方块/清残留/清快照一律交给 wipe 侧（`src/scan/wipe-machine-region.mjs` 按真实存档扫描生成），
+// 避免"重做"顺手改世界、也避免 redo 在没有清场授权的情况下把别的东西铲掉。
 
 /* ---------- ③ 全量核对：3044 格逐格查，缺一格都算不合格 ---------- */
 w('redo/check.mcfunction', [
@@ -165,4 +145,4 @@ w('undo.mcfunction', [
   'tellraw @a {"text":"[Styx] 回退功能已在 M3-75 移除：清空机器用 /function styx:wipe，重新铺用 /function styx:redo","color":"gold"}',
 ]);
 
-console.log('已生成: styx:redo、styx:redo_hi、styx:redo/{wait,go,clean,check,done,patch,monitor}；undo 功能已移除（只留提示入口）');
+console.log('已生成: styx:redo、styx:redo_hi、styx:redo/{wait,go,check,done,patch,monitor}；undo 功能已移除（只留提示入口）');
