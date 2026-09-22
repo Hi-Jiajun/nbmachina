@@ -19,6 +19,10 @@ $prefixes = @(
     "com/moulberry/flashback/exporting/AsyncFFmpegVideoWriter",
     "com/moulberry/flashback/exporting/ExportJob",
     "com/moulberry/flashback/exporting/ExportSettings",
+    "com/moulberry/flashback/exporting/HdrExportBridge",
+    "com/moulberry/flashback/exporting/PixelFormatHelper",
+    "com/moulberry/flashback/exporting/SaveableFramebuffer",
+    "com/moulberry/flashback/exporting/SaveableFramebufferQueue",
     "com/moulberry/flashback/mixin/audio/MixinAudioLibrary"
 )
 
@@ -53,6 +57,16 @@ $job = (& "$jdk\javap.exe" -p -c -classpath $OutputJar com.moulberry.flashback.e
 if ($job -notmatch "ExportSettings.sampleRate:\(\)") { throw "ExportJob does not use the export sample rate" }
 $mixin = (& "$jdk\javap.exe" -p -c -classpath $OutputJar com.moulberry.flashback.mixin.audio.MixinAudioLibrary) -join "`n"
 if ($mixin -notmatch "SampleRate.rate:\(\)I") { throw "MixinAudioLibrary does not use the export sample rate" }
+$bridge = (& "$jdk\javap.exe" -p -classpath $OutputJar com.moulberry.flashback.exporting.HdrExportBridge) -join "`n"
+if ($bridge -notmatch "ColorTransform") { throw "HdrExportBridge missing from patched jar" }
+$writerDump = (& "$jdk\javap.exe" -p -c -classpath $OutputJar com.moulberry.flashback.exporting.AsyncFFmpegVideoWriter) -join "`n"
+if ($writerDump -notmatch "encodeHdr") { throw "writer has no encodeHdr (16-bit RGBA64) path" }
+$pfh = (& "$jdk\javap.exe" -p -classpath $OutputJar com.moulberry.flashback.exporting.PixelFormatHelper) -join "`n"
+if ($pfh -notmatch "supportsPixelFormat") { throw "PixelFormatHelper has no supportsPixelFormat (10-bit probe)" }
+$fb = (& "$jdk\javap.exe" -p -c -classpath $OutputJar com.moulberry.flashback.exporting.SaveableFramebuffer) -join "`n"
+if ($fb -notmatch "finishDownloadHdr") { throw "SaveableFramebuffer has no 16-bit readback" }
+$q = (& "$jdk\javap.exe" -p -classpath $OutputJar 'com.moulberry.flashback.exporting.SaveableFramebufferQueue$DownloadedFrame') -join "`n"
+if ($q -notmatch "hdrPointer") { throw "DownloadedFrame does not carry the HDR pointer" }
 
 $sha = (Get-FileHash -LiteralPath $OutputJar -Algorithm SHA256).Hash
 Write-Host "patched jar : $OutputJar"
