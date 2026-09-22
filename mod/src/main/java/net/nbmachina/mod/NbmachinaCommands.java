@@ -184,8 +184,12 @@ public final class NbmachinaCommands {
 			return 0;
 		}
 		source.sendFeedback(() -> Text.literal(String.format(
-			"[nbmachina] 机器驱动：开始（从 %.1fs 起，全局偏移 %+.0fms，速率 %.5f，共 %d 颗音；真实时间调度，刻率只影响精度不影响速度）",
-			fromSec, offsetMs, rate, net.nbmachina.mod.machine.NbmachinaMachine.size())), true);
+			// M3-72：把**当前提前量**也印出来 —— 用户曾因为这里只印"整曲偏移 +0ms"而以为 lead 没生效
+			// （两者是完全不同的东西：offsetMs 是整曲时间轴对齐量，lead 是载荷提前多久发）。
+			"[nbmachina] 机器驱动：开始（从 %.1fs 起，整曲偏移 %+.0fms，速率 %.5f，触发提前量 %d 刻=%.0fms，共 %d 颗音；真实时间调度，刻率只影响精度不影响速度）",
+			fromSec, offsetMs, rate, net.nbmachina.mod.machine.NbmachinaMachine.leadTicks(),
+			net.nbmachina.mod.machine.NbmachinaMachine.leadTicks() * 50.0,
+			net.nbmachina.mod.machine.NbmachinaMachine.size())), true);
 		return 1;
 	}
 
@@ -223,11 +227,12 @@ public final class NbmachinaCommands {
 
 	private static int machineStatus(ServerCommandSource source) {
 		source.sendFeedback(() -> Text.literal(String.format(
-			"[nbmachina] 机器驱动：%s；谱面 %d 颗 / 已触发 %d 颗 / 走过 %d 刻%s",
+			"[nbmachina] 机器驱动：%s；谱面 %d 颗 / 已触发 %d 颗 / 走过 %d 刻 / 当前提前量 %d 刻%s",
 			net.nbmachina.mod.machine.NbmachinaMachine.running() ? "运行中" : "空闲",
 			net.nbmachina.mod.machine.NbmachinaMachine.size(),
 			net.nbmachina.mod.machine.NbmachinaMachine.fired(),
 			net.nbmachina.mod.machine.NbmachinaMachine.ticks(),
+			net.nbmachina.mod.machine.NbmachinaMachine.leadTicks(),
 			net.nbmachina.mod.machine.NbmachinaMachine.running()
 				? String.format("（谱面时间 %.1fs）", net.nbmachina.mod.machine.NbmachinaMachine.elapsedSec()) : "")), false);
 		return 1;

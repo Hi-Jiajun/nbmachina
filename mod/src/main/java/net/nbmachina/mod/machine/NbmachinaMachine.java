@@ -196,8 +196,9 @@ public final class NbmachinaMachine {
 		} catch (Exception e) {
 			NbmachinaMod.LOGGER.warn("[nbmachina] 同步包发送失败（不影响机器）：{}", e.toString());
 		}
-		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动开始：从 {}s 起，全局偏移 {}ms，速率 {}（谱面 {} 颗音，第 {} 颗）",
-			fromSec, leadMs, rate, NOTES.size(), cursor);
+		// M3-72：日志里同时印**整曲偏移**与**触发提前量**——两者不是一个东西，只印偏移会让用户以为 lead 没生效
+		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动开始：从 {}s 起，整曲偏移 {}ms，速率 {}，触发提前量 {} 刻={}ms（谱面 {} 颗音，第 {} 颗）",
+			fromSec, leadMs, rate, leadTicks, leadTicks * 50, NOTES.size(), cursor);
 		return null;
 	}
 
@@ -246,6 +247,14 @@ public final class NbmachinaMachine {
 				// 音符盒本体不在（还没铺 / 被挖掉）→ 退回引擎直接派发（力度/时值/音高都来自谱面）
 				NbmachinaNoteBlocks.playAt(world, notePos,
 					new NbmachinaNoteBlocks.Mapped(n.instrument(), n.voice(), n.midi(), n.velocity(), n.durMs()));
+			}
+			// M3-72：前 8 颗把"实际提前了多少毫秒发出"打出来 —— 用户要能**当场验证触发提前量生效**
+			// （它不影响听感，只影响载荷早到多少；打印的这个数应≈提前量×50ms）
+			if (firedCount + 1 <= 8) {
+				NbmachinaMod.LOGGER.info(String.format(
+					"[nbmachina] 派发 #%d pos=%s 谱面 %.3fs / 现在 %.3fs → 提前 %.0fms（触发提前量 %d 刻）",
+					firedCount + 1, notePos.toShortString(), n.timeSec(), now,
+					(n.timeSec() - now) * 1000.0, leadTicks));
 			}
 			// 粒子：真实音高 → 0..1（钢琴 A0=21 .. C8=108）
 			// 但**视觉要延到该音真正到点**才做（提前 3 刻只是为了让载荷先到客户端；
