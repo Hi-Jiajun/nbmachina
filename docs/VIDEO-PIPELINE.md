@@ -69,3 +69,52 @@ node tools/mux-video.mjs --video D:/render/styx.mp4 --offset 3.2 --out build/fin
 * **视觉升级**（更绚丽的灯/粒子）：已记录为**另一个独立 mod**，不在 nbmachina 里做。
 * **游戏内直录音频**：不做——离线母版就是机器该有的声音，且无损、可复现。
 * 20 tps 下灯/粒子的视觉误差是 ±25ms；`/tick rate 100` 后 ±5ms。想更准只能客户端画假灯（未做）。
+
+## 7. 音轨怎么进回放导出（M3-75 实测结论）
+
+用户问："怎么把我们这个 mod 的无损音频接入 replay mod，在导出时能选音频轨道？" 查了两个 mod 的 jar（不是猜）：
+
+| mod | 音频能力 | 结论 |
+|---|---|---|
+| **ReplayMod** `1.21.10-2.6.27` | 整个 jar **没有任何音频类**，`en_US.lang` 里也**没有一条音频选项**；渲染设置只有渲染方式/分辨率/码率/编码预设/FFmpeg 参数 | **纯画面渲染器**，导出时选不了音轨 → 走"后期合" |
+| **Flashback** `0.39.9`（已下载，当前 `.disabled`） | 有完整音频系统：`AudioKeyframe`（带**文件选择器**，字段是 `java.nio.file.Path`，用 FFmpeg 解码）、`Audio Options`（Record Audio / Stereo / **Audio Codec**）、`Set Audio Source: Camera/Entity` | **有你要的"音轨选项"**，但输出编码只有 AAC/MP3/OPUS/VORBIS（**没有 FLAC/PCM**） |
+
+### 路线 A · 真无损（推荐给 B 站 hi-res）
+
+1. ReplayMod 渲染时把 **Encoding Preset 选成 `MKV - Lossless`**（它内置了这个预设），分辨率/帧率按你要的填，导出得到**纯画面** MKV。
+2. 用本仓库的工具把母版音轨合进去：
+
+```bash
+# 默认音轨 = build/master_v2/styx_master_v2_48k24bit.wav（自动挑最新母版，会跳过 stem_ 分轨）
+node tools/mux-video.mjs --video D:/render/styx_lossless.mkv --offset 0 --out build/final/styx_final.mkv
+# --flac 用 FLAC 音轨（同样无损，体积约 1/4）；不加则用 PCM 48k/24bit
+```
+
+视频流是 `-c:v copy`（无损画面原样搬过去），音轨是 **PCM 48k/24bit 或 FLAC 48k/24bit** → 整条链无损。
+实测校验（ffprobe）：`pcm_s24le 48000 2ch 24bit` / `flac 48000 2ch 24bit`。
+
+### 路线 B · 一步到位（音轨有损，但省事）
+
+把 `Flashback-0.39.9-for-MC1.21.10.jar.disabled` 改名去掉 `.disabled` → 进回放编辑器 → 新建 **Audio Track** → 加一个 keyframe（会弹出文件选择器）→ 选母版：
+
+```
+build/master_v2/styx_master_v2_48k24bit.wav    # 原始母版 48k/24bit
+build/master_v2/styx_master_v2_48k24bit.flac   # 无损、22MB，导入更轻（M3-75 新增）
+build/master_v2/styx_master_v2_opus256k.ogg    # 有损 256k，兜底用（M3-75 新增）
+```
+
+导出时 `Audio Options → Audio Codec` 选 **OPUS**（四个里最好），音源可选 Camera/Entity。
+
+### ⚠️ 为什么不能让回放 mod"自己录到"我们的声音
+
+Flashback 的 `MixinSoundEngine` 只 hook **原版 `SoundEngine.play`**；而 nbmachina 的音源引擎是 **自己的 OpenAL 设备/上下文**
+（`NbmachinaAudio`，M3-16 特意绕开原版 SoundManager 才能把 48k/24bit 采样原样喂进声卡）→
+**`Record Audio` 抓不到我们的钢琴声**。所以只有两条正路：导入母版文件（路线 B）或后期合（路线 A）。
+（旧的 OBS 桌面音频捕获依然可用：它抓的是系统输出，与 mod 实现无关，但那样录到的是浮点混音而不是母版自身。）
+
+### 对齐（offset 怎么定）
+
+* 母版 t=0 = 机器的**谱面 0 秒**（谱面整体 +3.917 与 Animenz 视频同轴），**第一个音在母版 3.917s**。
+* 录制起点正好等于机器启动 → `--offset 0`；早录了 N 秒 → `--offset N`。
+* 不确定就打个可见标记：机器启动那一刻执行 `/nbmc click`（3kHz 脉冲 + 脚下 END_ROD 粒子），
+  或对 OBS 录音用 `node tools/compare-ingame-vs-master.mjs --record ...` 量出偏移。
