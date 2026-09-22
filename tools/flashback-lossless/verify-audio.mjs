@@ -10,14 +10,13 @@ if (!dir) {
     process.exit(2);
 }
 
-const SAMPLE_RATE = 48000;
 const SECONDS = 2;
 const CHANNELS = 2;
 
 // The harness feeds Java floats, so the reference has to be the float32 rounding of the ideal
 // signal - comparing against the double would measure float32 rounding instead of the codec.
-function signal(sampleIndex) {
-    const t = sampleIndex / SAMPLE_RATE;
+function signal(sampleIndex, sampleRate) {
+    const t = sampleIndex / sampleRate;
     return Math.fround((0.5 * (Math.sin(2 * Math.PI * 440 * t) + 0.5 * Math.sin(2 * Math.PI * 661 * t))) / 1.5);
 }
 
@@ -46,10 +45,10 @@ function probe(file) {
     return info;
 }
 
-function decode(file) {
+function decode(file, sampleRate) {
     const buf = execFileSync("ffmpeg", [
         "-v", "error", "-i", file, "-f", "f32le", "-acodec", "pcm_f32le",
-        "-ar", String(SAMPLE_RATE), "-ac", String(CHANNELS), "-"
+        "-ar", String(sampleRate), "-ac", String(CHANNELS), "-"
     ], { maxBuffer: 1 << 30 });
     const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
     const samples = new Float32Array(buf.byteLength / 4);
@@ -63,27 +62,36 @@ let failures = 0;
 
 for (const name of files) {
     const file = join(dir, name);
+    // A codec that refused to encode leaves a zero-byte/stub file behind - report it instead of
+    // crashing, so the table itself documents which combination failed.
+    if (statSync(file).size < 1024) {
+        rows.push({ file: name, codec: "-", fmt: "-", bits: "-", ch: "-", rate: "-", seconds: "-",
+                    maxErr: "-", rms: "-", verdict: "ENCODE-FAILED" });
+        failures++;
+        continue;
+    }
     const info = probe(file);
-    const samples = decode(file);
+    const sampleRate = Number(info.sample_rate);
+    const samples = decode(file, sampleRate);
     const frames = samples.length / CHANNELS;
     let maxErr = 0;
     let rms = 0;
-    for (let i = 0; i < Math.min(frames, SAMPLE_RATE * SECONDS); i++) {
-        const expected = signal(i);
+    for (let i = 0; i < Math.min(frames, sampleRate * SECONDS); i++) {
+        const expected = signal(i, sampleRate);
         for (let c = 0; c < CHANNELS; c++) {
             const got = samples[i * CHANNELS + c];
             maxErr = Math.max(maxErr, Math.abs(got - expected));
             rms += got * got;
         }
     }
-    rms = Math.sqrt(rms / Math.min(samples.length, SAMPLE_RATE * SECONDS * CHANNELS));
-    const duration = frames / SAMPLE_RATE;
+    rms = Math.sqrt(rms / Math.min(samples.length, sampleRate * SECONDS * CHANNELS));
+    const duration = frames / sampleRate;
     const depth = BIT_DEPTH[info.codec_name] !== undefined ? BIT_DEPTH[info.codec_name] : (Number(info.bits_per_raw_sample) || 16);
     const expectedBound = depth ? Math.pow(2, -(depth - 1)) : 1e-9;
     const bits = depth ?? "f32";
     const sampleAccurate = Math.abs(duration - SECONDS) < 0.02;
     const lossless = maxErr <= expectedBound * 1.5 && rms > 0.1;
-    if (!lossless || !sampleAccurate || info.sample_rate !== String(SAMPLE_RATE) || info.channels !== String(CHANNELS)) {
+    if (!lossless || !sampleAccurate || info.channels !== String(CHANNELS)) {
         failures++;
     }
     rows.push({

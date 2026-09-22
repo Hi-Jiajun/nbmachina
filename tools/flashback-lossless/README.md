@@ -90,3 +90,46 @@ WebM             Opus, Vorbis
 
 改动只有两个文件、一个新增方法，正是作者当年注释掉 FLAC 时缺的那一步，适合回馈上游。
 **尚未提交**：需要先由 Jiajun Liang 拍板（提交后仓库里也只有我们自己的补丁内容）。
+
+## 采样率选项（48 / 96 / 192 kHz）与 Gradle 版构建
+
+`AudioCodec.sampleFormat()` 之外，导出窗口还补了**采样率**档位：新建
+`combo_options/SampleRate`，配置字段 `internalExport.exportSampleRate`，导出侧三处跟着走 ——
+`ExportJob`（每视频帧抓的样本数）、`AsyncFFmpegVideoWriter.setSampleRate`、以及
+`MixinAudioLibrary` 里 OpenAL loopback 设备的 `ALC_FREQUENCY`（导出时整个混音就是按这个采样率跑的，
+不是后期重采样）。
+
+这条链改到了 MC 相关类（`ExportJob` / `StartExportWindow` / mixin），所以改用 **Gradle 真编译**：
+
+```powershell
+# 1. 克隆对应分支的源码，并把 bytedeco/imgui/nfd 换成本地文件（省掉 ~2GB 的 javacv-platform）
+git clone https://github.com/Moulberry/Flashback.git; cd Flashback; git checkout 1.21.10
+node <本目录>/prep-fb-build.mjs .
+jar xf <官方 jar> org && jar cf deps/bytedeco-shaded.jar org    # 只取编译用的类
+
+# 2. 打补丁 + 编译（Loom 会输出 intermediary 名字的类，可直接注入官方 jar）
+node <本目录>/apply-fb-lossless.mjs .
+node <本目录>/apply-fb-samplerate.mjs .
+pwsh <本目录>/patch-fb-flac-guard.mjs .      # 可选：FLAC@192k 的快速失败
+./gradlew --no-daemon remapJar
+
+# 3. 注入 + 自检
+pwsh <本目录>/assemble-fb-jar.ps1
+```
+
+**工具链等价性证据**：用这套 Gradle 构建出的**未修改**类（`SaveableFramebufferQueue` /
+`PixelFormatHelper` / `VideoWriter` / `FlashbackAudioManager` / `MixinFFmpegFrameRecorder` /
+`PNGSequenceVideoWriter`）与官方 jar 里的同类用 `diff-bytecode.mjs` 对比 → **全部字节码等价**，
+所以本仓库构建的修改类可以安全注入。
+
+**实测矩阵**（离线：每档编一个 2 秒已知信号 → ffmpeg 解回 f32le 逐样本比对）：
+
+| 采样率 | FLAC | ALAC | PCM 16 | PCM 24 | PCM 32 | PCM f32 |
+|---|---|---|---|---|---|---|
+| 48 kHz | ✔ 24bit | ✔ 24bit | ✔ | ✔ | ✔ | ✔ 逐位一致 |
+| 96 kHz | ✔ 24bit | ✔ 24bit | ✔ | ✔ | ✔ | ✔ 逐位一致 |
+| 192 kHz | ✘ JavaCV 限制 | ✔ 24bit | ✔ | ✔ | ✔ | ✔ 逐位一致 |
+
+`FLAC@192k` 的失败来自 **JavaCV 1.5.10 的 `recordSamples`**（`swr_convert() -5984`，与分块大小无关；
+官方 ffmpeg CLI 在 192k/s32 下正常），因此补丁在 writer 构造时**提前抛错并说明**，
+而不是导出到一半崩掉。192k 请用 PCM 24-bit / ALAC / PCM float32。
