@@ -23,6 +23,9 @@ public final class NbmachinaScheduler {
 	private static volatile int ran = 0;
 	private static volatile double lastErrorMs = 0;
 
+	/** M3-86：暂停（ESC / 失焦）期间冻住时间轴，见 {@link #setPaused(boolean)}。 */
+	private static volatile boolean paused = false;
+
 	private NbmachinaScheduler() {
 	}
 
@@ -48,6 +51,35 @@ public final class NbmachinaScheduler {
 		return lastErrorMs;
 	}
 
+	/**
+	 * M3-86：单人游戏暂停时把调度器冻住。否则调度线程仍按真实时间派发，而游戏的音频设备在暂停期间
+	 * 被挂起 → 这些声源在设备里排队，取消暂停时一次性倾泻（用户实测：ESC 恢复后"刚才的声音全放出来"）。
+	 */
+	public static void setPaused(boolean value) {
+		paused = value;
+		synchronized (QUEUE) {
+			QUEUE.notifyAll();
+		}
+	}
+
+	public static boolean isPaused() {
+		return paused;
+	}
+
+	/** 恢复时调用：把还没跑的任务整体后移一个暂停时长 → 音乐从暂停处继续，不产生积压。 */
+	public static void shiftBy(long deltaNanos) {
+		if (deltaNanos <= 0) {
+			return;
+		}
+		synchronized (QUEUE) {
+			java.util.List<Job> pending = new java.util.ArrayList<>(QUEUE);
+			QUEUE.clear();
+			for (Job job : pending) {
+				QUEUE.add(new Job(job.atNanos() + deltaNanos, job.task()));
+			}
+		}
+	}
+
 	private static void ensureStarted() {
 		if (!STARTED.compareAndSet(false, true)) return;
 		Thread t = new Thread(() -> {
@@ -62,6 +94,14 @@ public final class NbmachinaScheduler {
 						}
 					}
 					job = QUEUE.peek();
+					if (paused) {
+						try {
+							QUEUE.wait(50);
+						} catch (InterruptedException e) {
+							return;
+						}
+						continue;
+					}
 					long waitMs = (job.atNanos - System.nanoTime()) / 1_000_000L;
 					if (waitMs > 1) {
 						// ⚠ Windows 上 Object.wait(ms) 的粒度 ≈15.6ms，会造成"睡过头"抖动 ——

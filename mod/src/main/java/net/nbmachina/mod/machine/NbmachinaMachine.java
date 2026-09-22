@@ -65,6 +65,12 @@ public final class NbmachinaMachine {
 	// 而 6 刻两次测出 24.6ms / 57.2ms（噪声主导）；用户判断"0 还是不太好"，取更大的安全余量。
 	private static volatile int leadTicks = 8;
 
+	/** M3-91：载荷余量窗口统计（每 200 颗一报）——提前量 0 vs 8 的客观依据。 */
+	private static double minMarginMs = Double.MAX_VALUE;
+	private static int marginBelow50 = 0;
+	private static int expiredCount = 0;
+	private static int marginSamples = 0;
+
 	public static int leadTicks() {
 		return leadTicks;
 	}
@@ -255,6 +261,20 @@ public final class NbmachinaMachine {
 					"[nbmachina] 派发 #%d pos=%s 谱面 %.3fs / 现在 %.3fs → 提前 %.0fms（触发提前量 %d 刻）",
 					firedCount + 1, notePos.toShortString(), n.timeSec(), now,
 					(n.timeSec() - now) * 1000.0, leadTicks));
+			}
+			// M3-91：把**每一颗**的"载荷余量"（派发时刻离目标还有多少毫秒）做窗口统计。
+			// 这是判断提前量取值的唯一硬指标：余量为负 = 载荷已经过期 → 客户端只能立即播（晚一整格）。
+			double marginMs = (n.timeSec() - now) * 1000.0;
+			if (marginMs < minMarginMs) minMarginMs = marginMs;
+			if (marginMs < 0) expiredCount++;
+			if (marginMs < 50) marginBelow50++;
+			marginSamples++;
+			if (marginSamples % 200 == 0) {
+				NbmachinaMod.LOGGER.info("[nbmachina] 载荷余量统计（最近 {} 颗）：最小 {} ms / <50ms {} 颗 / 已过期(负) {} 颗（当前提前量 {} 刻）",
+					marginSamples, String.format("%.0f", minMarginMs), marginBelow50, expiredCount, leadTicks);
+				minMarginMs = Double.MAX_VALUE;
+				marginBelow50 = 0;
+				expiredCount = 0;
 			}
 			// 粒子：真实音高 → 0..1（钢琴 A0=21 .. C8=108）
 			// 但**视觉要延到该音真正到点**才做（提前 3 刻只是为了让载荷先到客户端；

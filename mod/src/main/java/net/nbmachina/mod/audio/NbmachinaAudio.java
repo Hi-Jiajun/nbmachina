@@ -48,6 +48,32 @@ public final class NbmachinaAudio {
 	public static final int MAX_SOURCES = 192;
 	/** 采样缓存**按字节**上限（不是按个数）：Salamander 单个采样最长 25.7s，float 立体声 ≈ 9.9MB */
 	public static final long MAX_CACHE_BYTES = 512L * 1024 * 1024;
+
+	/**
+	 * M3-89：解码结果的"半成品"缓存（已按 MAX_SECONDS 截断的 PCM）。音频线程最怕的不是 alBufferData，
+	 * 而是 **WAV 解码 + 截断**（一次几十毫秒）——它会把整条任务队列堵住（实测执行延迟最坏 145ms）。
+	 * 客户端收到载荷时就提前调 prewarmNote()，在客户端线程把这里填好，音频线程只做一次上传。
+	 */
+	private record Decoded(float[] samples, int channels, int sampleRate) {
+	}
+
+	private static final java.util.concurrent.ConcurrentHashMap<String, Decoded> PCM_CACHE = new java.util.concurrent.ConcurrentHashMap<>();
+
+	/** M3-90：已解码、等音频线程"空闲时"上传的文件名（上传按 MB 算，放在发声那一刻做就会有几十毫秒尖峰）。 */
+	private static final java.util.concurrent.ConcurrentLinkedQueue<String> PENDING_UPLOADS = new java.util.concurrent.ConcurrentLinkedQueue<>();
+
+	/** M3-90：上传复用的 direct 缓冲——每个采样都 allocateDirect 几 MB 会带来分配 + GC 抖动。 */
+	private static ByteBuffer uploadScratch = null;
+
+	private static ByteBuffer ensureScratch(int bytes) {
+		ByteBuffer current = uploadScratch;
+		if (current == null || current.capacity() < bytes) {
+			current = ByteBuffer.allocateDirect(Math.max(bytes, 1 << 20)).order(ByteOrder.nativeOrder());
+			uploadScratch = current;
+		}
+		current.clear();
+		return current;
+	}
 	/** 采样截断长度：钢琴 10s 之后只剩极轻的尾音，截断直接决定"能同时响多少音"与内存占用 */
 	public static final double MAX_SECONDS = 10.0;
 
@@ -138,6 +164,13 @@ public final class NbmachinaAudio {
 	private static volatile int restartCount = 0;
 	private static volatile int stolenCount = 0;
 	private static volatile int foldedCount = 0;
+	/** M3-87：起音延迟统计（每 25 颗一报），用于定位"偶发卡顿"。 */
+	private static final java.util.concurrent.atomic.AtomicInteger latencySamples = new java.util.concurrent.atomic.AtomicInteger();
+	private static volatile double windowWorstLatencyMs = 0;
+	/** M3-88：同一窗口内调度器"自旋派发误差"的最大值（任务真正该响的时刻 vs 实际派发时刻）。 */
+	private static volatile double windowWorstDispatchMs = 0;
+	private static volatile int windowLateCount = 0;
+	private static final double LATE_THRESHOLD_MS = 25.0;
 	/** 被"放音"规则提前放掉的声部数（低音单音线 + 同键重击）——M3-19 的低音"糊"就是靠它解决 */
 	private static volatile int dampedCount = 0;
 	/** 因为**谱面时值到点**而放音的声部数（M3-22：手指松开 / 踏板抬起） */
@@ -267,6 +300,31 @@ public final class NbmachinaAudio {
 			// 一次把已到的都跑掉（密集段落不排队），但每轮限量，避免饿死 recycle/错误检测
 			for (int drained = 0; task != null && drained < 64; drained++) {
 				lastTaskLatencyMs = (System.nanoTime() - task.enqueuedNanos) / 1e6;
+				// M3-88：把调度器自旋那一段的误差也纳入同一个窗口——上一次只统计了"入队之后"，
+				// 自旋被系统抢走的情况看不到。两个数一起看才能分清：
+				//   派发误差大、执行延迟小 → 调度线程被抢（GC/系统调度）→ 音频侧无辜
+				//   派发误差小、执行延迟大 → 音频任务队列/混音侧堵住
+				double dispatchErrorMs = NbmachinaScheduler.lastErrorMs();
+				if (dispatchErrorMs > windowWorstDispatchMs) {
+					windowWorstDispatchMs = dispatchErrorMs;
+				}
+				// M3-87：把每颗音的"入队→执行"延迟做成窗口统计，用于区分卡顿来源：
+				// 迟到集中在 30~100ms 且伴随 GC → 调度线程被抢；与和弦密度正相关 → 声源/混音争用；
+				// 与掉帧同现 → 渲染抢占（光影/nbaurora 粒子）。
+				if (lastTaskLatencyMs > windowWorstLatencyMs) {
+					windowWorstLatencyMs = lastTaskLatencyMs;
+				}
+				if (lastTaskLatencyMs > LATE_THRESHOLD_MS) {
+					windowLateCount++;
+				}
+				if (latencySamples.incrementAndGet() % 25 == 0) {
+					NbmachinaMod.LOGGER.info("[nbmachina] 起音延迟统计（本窗口 25 颗）：最迟 {} ms / 迟到(>{}ms) {} 颗",
+						String.format("派发误差 %.1f ms / 执行延迟 %.1f ms", windowWorstDispatchMs, windowWorstLatencyMs),
+						(int) LATE_THRESHOLD_MS, windowLateCount);
+					windowWorstLatencyMs = 0;
+					windowWorstDispatchMs = 0;
+					windowLateCount = 0;
+				}
 				try {
 					task.runnable.run();
 				} catch (Throwable t) {
@@ -275,6 +333,15 @@ public final class NbmachinaAudio {
 					NbmachinaMod.LOGGER.warn("[nbmachina] 音频任务异常（将重建上下文）：{}", lastError);
 				}
 				task = TASKS.poll();
+			}
+			// M3-90：空闲时把"已解码待上传"的采样一次一个地传上去（上限 2 个/轮，避免这一轮过久）。
+			// 这样到该音发声时 buffer 已经存在，发声任务里只剩 alSourcePlay（亚毫秒）。
+			for (int upl = 0; upl < 2; upl++) {
+				String pending = PENDING_UPLOADS.poll();
+				if (pending == null) {
+					break;
+				}
+				bufferFor(pending);
 			}
 			int err = AL10.alGetError();
 			if (err != AL10.AL_NO_ERROR) {
@@ -533,6 +600,59 @@ public final class NbmachinaAudio {
 	}
 
 	/** 取（或解码并缓存）某个采样文件的 AL buffer；失败返回 0 */
+	/**
+	 * M3-89：把一次发声要用的采样在**当前线程**先解码好（只读文件 + 数组，不碰 OpenAL，
+	 * 所以可以安全地从客户端线程调用）。
+	 */
+	public static void prewarmNote(String instrument, String voice, int midi, int velocity, int durMs) {
+		try {
+			NbmachinaInstruments.Instrument inst = NbmachinaInstruments.get(NbmachinaInstruments.resolve(instrument, voice));
+			if (inst == null) {
+				return;
+			}
+			int playMidi = inst.isPitched() ? inst.foldKey(midi) : midi;
+			NbmachinaInstruments.Region region = inst.pick(playMidi, velocity, durMs);
+			if (region == null || region.file == null) {
+				return;
+			}
+			java.nio.file.Path resolved = NbmachinaSamples.resolve(region.file);
+			if (resolved == null) {
+				return;
+			}
+			String key = resolved.toString();
+			if (PCM_CACHE.containsKey(key) || BUFFERS.containsKey(key)) {
+				return;
+			}
+			NbmachinaWav.Pcm pcm = NbmachinaWav.read(Path.of(key));
+			PCM_CACHE.putIfAbsent(key, new Decoded(truncate(pcm.samples(), pcm.channels(), pcm.sampleRate()),
+				pcm.channels(), pcm.sampleRate()));
+			// 解码完成 → 交给音频线程在空闲时上传（到真正发声时 buffer 已就绪）
+			PENDING_UPLOADS.offer(key);
+		} catch (Throwable ignored) {
+			// 预热失败不影响正常路径（音频线程会照旧自己解码）
+		}
+	}
+
+	/** M3-92：预热专用线程（解码绝不再占用客户端回调线程 / 派发路径）。 */
+	private static final java.util.concurrent.ExecutorService PREWARM_POOL =
+		java.util.concurrent.Executors.newSingleThreadExecutor(r -> {
+			Thread t = new Thread(r, "nbmachina-prewarm");
+			t.setDaemon(true);
+			t.setPriority(Thread.MIN_PRIORITY + 1);
+			return t;
+		});
+
+	/**
+	 * M3-92：异步预热。上一版把 prewarmNote 放在客户端回调里、还排在排程之前 → 解码的 10~50ms
+	 * 直接加在派发路径上（lead 3 实测 138/142 颗载荷过期）。现在改成：**先排程，再丢进这个线程**。
+	 */
+	public static void prewarmNoteAsync(String instrument, String voice, int midi, int velocity, int durMs) {
+		try {
+			PREWARM_POOL.submit(() -> prewarmNote(instrument, voice, midi, velocity, durMs));
+		} catch (Throwable ignored) {
+		}
+	}
+
 	private static int bufferFor(String file) {
 		// M3-36：索引里存的是**相对采样根**的路径（换机器/换目录都能用），这里解析成实际文件
 		java.nio.file.Path resolved = NbmachinaSamples.resolve(file);
@@ -541,31 +661,46 @@ public final class NbmachinaAudio {
 		Integer cached = BUFFERS.get(file);
 		if (cached != null) return cached;
 		try {
-			NbmachinaWav.Pcm pcm = NbmachinaWav.read(Path.of(file));
-			float[] samples = truncate(pcm.samples(), pcm.channels(), pcm.sampleRate());
+			// M3-89：命中预热缓存就不必再解码/截断（这一段就是 145ms 尖峰的来源）
+			Decoded decoded = PCM_CACHE.get(file);
+			float[] samples;
+			int channels;
+			int sampleRate;
+			if (decoded != null) {
+				samples = decoded.samples();
+				channels = decoded.channels();
+				sampleRate = decoded.sampleRate();
+			} else {
+				NbmachinaWav.Pcm pcm = NbmachinaWav.read(Path.of(file));
+				samples = truncate(pcm.samples(), pcm.channels(), pcm.sampleRate());
+				channels = pcm.channels();
+				sampleRate = pcm.sampleRate();
+			}
 			int format;
 			ByteBuffer data;
 			// 优先 float32（无损）；不支持时退 16bit（只在这一步有损）
 			boolean floatOk = FLOAT_OK;
-			if (pcm.channels() == 1) {
+			if (channels == 1) {
 				format = floatOk ? EXTFloat32.AL_FORMAT_MONO_FLOAT32 : AL10.AL_FORMAT_MONO16;
 			} else {
 				format = floatOk ? EXTFloat32.AL_FORMAT_STEREO_FLOAT32 : AL10.AL_FORMAT_STEREO16;
 			}
+			// M3-90：复用同一块 direct 缓冲（AL 会把它拷进混音器，所以用完即可复用），避免逐采样分配
+			long uploadBytes = (long) samples.length * (floatOk ? 4 : 2);
+			ByteBuffer scratch = ensureScratch((int) uploadBytes);
 			if (floatOk) {
-				data = ByteBuffer.allocateDirect(samples.length * 4).order(ByteOrder.nativeOrder());
-				for (float s : samples) data.putFloat(s);
+				for (float s : samples) scratch.putFloat(s);
 			} else {
-				data = ByteBuffer.allocateDirect(samples.length * 2).order(ByteOrder.nativeOrder());
 				for (float s : samples) {
 					int v = Math.round(Math.max(-1f, Math.min(1f, s)) * 32767f);
-					data.putShort((short) v);
+					scratch.putShort((short) v);
 				}
 			}
+			data = scratch;
 			data.flip();
 			int buffer = AL10.alGenBuffers();
 			if (buffer == 0) return 0;
-			AL10.alBufferData(buffer, format, data, pcm.sampleRate());
+			AL10.alBufferData(buffer, format, data, sampleRate);
 			int err = AL10.alGetError();
 			if (err != AL10.AL_NO_ERROR) {
 				lastError = "alBufferData 错误码 " + err + "（" + file + "）";
@@ -573,8 +708,8 @@ public final class NbmachinaAudio {
 				return 0;
 			}
 			BUFFERS.put(file, buffer);
-			BUFFER_BYTES.put(buffer, (long) data.capacity());
-			cachedBytes += data.capacity();
+			BUFFER_BYTES.put(buffer, uploadBytes);
+			cachedBytes += uploadBytes;
 			trimBuffers();
 			return buffer;
 		} catch (IOException | RuntimeException e) {

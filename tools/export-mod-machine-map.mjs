@@ -91,6 +91,10 @@ allRows.forEach((row, i) => {
   if (!cell || !cell.strict) trigMissing++;
   // 没有严格触发位的那几颗音，触发位写成"音符盒上方"（mod 驱动时会改用引擎兜底，见 NbmachinaMachine）
   const t = cell && cell.strict ? cell : { x: p.x, y: p.y + 2, z: p.z };
+  // M3-85（回退 M3-83）：machine_map 的 x,y,z 列**就是甲板层**，和 layout-pos 的 4 层规则一致
+  // （y-1 灯 / y 甲板 / y+1 音符盒 / y+2 触发位）。mod 侧 `NbmachinaMachine` 自己会算 notePos = (x, y+1, z)，
+  // 触发位判定也用 `ty - (y + 1)`。所以这里**不能**再 +1，否则 mod 会去点音符盒上方那一格（空气）→
+  // 音符盒不被触发（没有 powered 闪，挂在其上的视觉/粒子也就没反应）。
   out.push(`${p.x},${p.y},${p.z},${target},${voice},${midi},${velocity},${durMs},`
     + `${timeSec.toFixed(3)},${t.x},${t.y},${t.z}`);
   written++;

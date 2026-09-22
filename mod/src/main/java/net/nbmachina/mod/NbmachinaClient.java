@@ -14,6 +14,7 @@ import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
 import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
 import net.fabricmc.fabric.api.client.command.v2.FabricClientCommandSource;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.nbmachina.mod.audio.NbmachinaScheduler;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayNetworking;
 import net.minecraft.client.MinecraftClient;
@@ -105,9 +106,14 @@ public final class NbmachinaClient implements ClientModInitializer {
 				if (target > System.nanoTime()) {
 					net.nbmachina.mod.audio.NbmachinaScheduler.at(target, play);
 					scheduledCount++;
+					// M3-92：**排程之后**才预热，而且丢给专用预热线程（解码不再加在派发路径上）
+					NbmachinaAudio.prewarmNoteAsync(payload.instrument(), payload.voice(), payload.midi(),
+						payload.velocity(), payload.durMs());
 					return;
 				}
 			}
+			NbmachinaAudio.prewarmNoteAsync(payload.instrument(), payload.voice(), payload.midi(),
+				payload.velocity(), payload.durMs());
 			play.run();
 		});
 
@@ -228,9 +234,31 @@ public final class NbmachinaClient implements ClientModInitializer {
 							}))))));
 	}
 
+	/** M3-86：暂停状态（ESC / 失焦）与暂停起点，用于冻结/后移时间轴。 */
+	private static boolean musicPaused = false;
+	private static long musicPausedAtNanos = 0;
+
 	/** 每刻：把相机位置/朝向同步给音频线程，并把原版主音量接过来 */
 	private static void tick(MinecraftClient client) {
 		clientTick++;
+		// M3-86：单人游戏按 ESC（或窗口失焦）时冻住时间轴。不处理的话：调度线程继续按真实时间派发、
+		// 而游戏在暂停期间挂起音频设备 → 声源在设备里排队，取消暂停时一次性全放出来（用户实测的 bug）。
+		// 恢复策略（用户选定）：时间轴后移一个暂停时长 → 音乐**从暂停处继续**，不倾泻积压。
+		boolean nowPaused = client.isPaused();
+		if (nowPaused != musicPaused) {
+			musicPaused = nowPaused;
+			if (nowPaused) {
+				musicPausedAtNanos = System.nanoTime();
+				NbmachinaScheduler.setPaused(true);
+				NbmachinaMod.LOGGER.info("[nbmachina] 暂停：时间轴已冻结（恢复后从暂停处继续）");
+			} else {
+				long pauseNanos = System.nanoTime() - musicPausedAtNanos;
+				anchorNanos += pauseNanos;
+				NbmachinaScheduler.setPaused(false);
+				NbmachinaScheduler.shiftBy(pauseNanos);
+				NbmachinaMod.LOGGER.info("[nbmachina] 恢复：时间轴后移 {} ms（从暂停处继续）", pauseNanos / 1_000_000L);
+			}
+		}
 		ClientPlayerEntity player = client.player;
 		if (player == null) return;
 		double yaw = Math.toRadians(player.getYaw());
