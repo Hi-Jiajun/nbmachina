@@ -1,13 +1,15 @@
 // 生成「一条命令跑完全部」的链式函数：/function styx:redo（精确模式 styx:redo_hi）
 //
-// 链的设计（M3-70 重写）：**每个窗口都要等区块真正加载好，再摆音符盒，摆完还要抽查、不合格就补一遍**。
+// 链的设计（M3-73 重写）：**先把整台机器的区块全部强加载 + 密集等待就绪 → 一次铺完 → 全量核对 3044 格 →
+// 有缺口就自动补（最多 3 次）→ 只有当 3044/3044 都对上时才报"完成"**。
 //
-// 为什么必须这样：`setblock` 只对**已加载**的区块生效，而 `forceload` 之后区块是**异步**加载的
-// （虚空存档开了世界高度 mod 之后每个区块 250+ 个 section，加载更慢）。2026-09-22 实测：
-// 旧链在 forceload 后 6~10 秒就 `apply_notes_v3`，第三个窗口（x1783..2566）整段没铺上——
-// 用户看到的就是"提示重做完成，世界里半台机器（甚至一台都没有）"。
+// 为什么改（2026-09-22 用户："后面这一段的音符盒怎么没有渲染出来呢？"）：
+// 上一版是"分 3 个窗口，每窗口抽查 3 个点，通过就切下一个窗口"。实测用户存档扫出来 **2157/3044**：
+// 缺的 887 个全部集中在窗口 2 的中段（chunk x65..108，共 100 个 chunk 整块为空）——
+// `forceload` 之后区块是**异步**加载的，抽查的 3 个点恰好落在已经就绪的 chunk 上，于是"抽查通过 ✔"，
+// 而中段 100 个 chunk 还没加载好 → `setblock` 静默失败。抽查 3 点分辨不出这种"整段缺失"。
 //
-// 两个入口只差一个 #hiwant：0 = 20 tps 表（默认，开箱即用），1 = 100 tps 表（需先 /tick rate 100）。
+// 两个入口只差一个 #hiwant：0 = 20 tps 表（默认），1 = 100 tps 表（需先 /tick rate 100）。
 // 为什么不直接在函数里写 tick rate：函数权限等级 2 < `/tick` 需要的 3，写了整文件加载失败（实测）。
 import fs from 'node:fs';
 import { resolvePaths } from '../core/paths.mjs';
@@ -17,7 +19,7 @@ const DP = P.functionsDir;
 const prof = JSON.parse(fs.readFileSync(P.profile, 'utf8'));
 const X0 = prof[0].x0, X1 = prof[prof.length - 1].x0 + 47;
 const ZB = prof[0].z0 ?? -172, ZE = ZB + 24 + 3;
-/** 音符盒所在的那一层（甲板 y 的上一格）——`if loaded` / `if block` 抽查都用它 */
+/** 音符盒所在的那一层（甲板 y 的上一格）——`if loaded` / `if block` 核对都用它 */
 const NY = prof[0].y + 1;
 const STEP = Math.ceil((X1 - X0 + 1) / 3);
 const WIN = [
@@ -25,37 +27,33 @@ const WIN = [
   [X0 + STEP, X0 + 2 * STEP - 1],
   [X0 + 2 * STEP, X1],
 ];
-// forceload 单次上限 256 区块：顺手断言一次，免得又出现"命令静默失败 → 方块没铺上"
+// forceload 单次上限 256 区块：逐个窗口断言（三个窗口可以分别 add，总量没有上限）
 for (const [a, b] of WIN) {
   const cx = Math.floor(b / 16) - Math.floor(a / 16) + 1;
   const cz = Math.floor(ZE / 16) - Math.floor(ZB / 16) + 1;
   if (cx * cz > 256) throw new Error(`forceload 窗口 x${a}..${b} 需要 ${cx}×${cz}=${cx * cz} 个区块，超过 256 上限`);
 }
-/** `forceload add`：窗口 + 机器那条 z 带（x/z 都是方块坐标，命令内部自己折算区块） */
-const fl = (win) => `forceload add ${win[0]} ${ZB} ${win[1]} ${ZE}`;
+const flLines = WIN.map((w) => `forceload add ${w[0]} ${ZB} ${w[1]} ${ZE}`);
 
-// 抽查点：直接读刚生成的 `apply_notes_v3.mcfunction`，每个窗口取它真正摆过的 3 格（首/中/末）——
-// 这样抽查点一定是"本该有音符盒"的位置，不会因为谱面空格误报。
+// 期望坐标：直接读刚生成的 `apply_notes_v3.mcfunction`（摆块与核对同源，绝不各说各话）
 const applyFn = `${DP}/apply_notes_v3.mcfunction`;
 const placed = fs.existsSync(applyFn)
   ? [...fs.readFileSync(applyFn, 'utf8').matchAll(/^setblock (-?\d+) (-?\d+) (-?\d+) minecraft:note_block/gm)]
     .map((m) => [+m[1], +m[2], +m[3]])
   : [];
 if (placed.length < 30) throw new Error(`从 ${applyFn} 里读到的音符盒太少（${placed.length}）——先跑 note-blocks.mjs 再跑本脚本`);
-const samples = WIN.map(([a, b]) => {
-  const inWin = placed.filter(([x]) => x >= a && x <= b);
-  if (inWin.length < 3) throw new Error(`窗口 x${a}..${b} 里只有 ${inWin.length} 个音符盒，无法抽查`);
-  return [inWin[0], inWin[Math.floor(inWin.length / 2)], inWin[inWin.length - 1]];
-});
 
-console.log(`redo forceload 窗口（按剖面推导）：${WIN.map((w) => `${w[0]}..${w[1]} z${ZB}..${ZE}`).join(' / ')}`);
-console.log(`  抽查点：${samples.map((s, i) => `#${i + 1}[${s.map(([x, , z]) => `x${x}z${z}`).join(' ')}]`).join(' ')}`);
+// 等待就绪的抽样点：**每 32 格一个**铺满整台机器（~74 点）——上一版 3 个点分辨不出"整段未加载"
+const waitPts = [];
+for (let x = X0; x <= X1; x += 32) waitPts.push([x, NY, ZB + 13]);
+
+console.log(`redo forceload 窗口：${WIN.map((w) => `${w[0]}..${w[1]} z${ZB}..${ZE}`).join(' / ')}`);
+console.log(`  等待就绪抽样点 ${waitPts.length} 个（每 32 格一个）；全量核对 ${placed.length} 格`);
 
 fs.mkdirSync(`${DP}/redo`, { recursive: true });
-// M3-70：清掉旧版链留下的分段函数（s2..s4），免得有人手滑直接跑旧段
-for (const stale of ['s2', 's3', 's4']) {
-  const p = `${DP}/redo/${stale}.mcfunction`;
-  if (fs.existsSync(p) && !WIN.some((_, i) => `w${i + 1}` === stale)) fs.rmSync(p);
+// 清掉旧版链留下的分段函数（w1/w1go/…/s1..s4），免得有人手滑直接跑旧段
+for (const f of fs.readdirSync(`${DP}/redo`)) {
+  if (/^(w\d+(go|next)?|s\d+)\.mcfunction$/.test(f)) fs.rmSync(`${DP}/redo/${f}`);
 }
 const w = (name, lines) => fs.writeFileSync(`${DP}/${name}`, lines.join('\n') + '\n', 'utf8');
 
@@ -63,80 +61,89 @@ const w = (name, lines) => fs.writeFileSync(`${DP}/${name}`, lines.join('\n') + 
 const entry = (name, hiwant, title) => w(name, [
   'scoreboard objectives add styx.flag dummy',
   `scoreboard players set #hiwant styx.flag ${hiwant}`,
-  'scoreboard players set #w1 styx.flag 0',
-  'scoreboard players set #t1 styx.flag 0',
-  'scoreboard players set #t2 styx.flag 0',
-  'scoreboard players set #t3 styx.flag 0',
-  `tellraw @a {"text":"[Styx] ${title}：① 修地形 → ② 分段等区块加载 + 摆音符盒（全程 1~3 分钟，请勿离开太远）","color":"gold"}`,
+  'scoreboard players set #try styx.flag 0',
+  'scoreboard players set #fix styx.flag 0',
+  'scoreboard players set #miss styx.flag 0',
+  `tellraw @a {"text":"[Styx] ${title}：① 强加载整台机器 → ② 等区块就绪 → ③ 铺音符盒 + 全量核对（1~4 分钟，请勿离开太远）","color":"gold"}`,
   'forceload remove all',
-  fl(WIN[0]),
-  'schedule function styx:redo/s1 40t',
+  ...flLines,
+  'schedule function styx:redo/wait 40t',
 ]);
 entry('redo.mcfunction', 0, '开始重做（20 tps 模式）');
 entry('redo_hi.mcfunction', 1, '开始重做（100 tps 精确模式，需已执行 /tick rate 100）');
 
-/* ---------- ① 修地形（虚空世界下是空操作，保留给带地形的存档） ---------- */
-w('redo/s1.mcfunction', [
-  'function styx:flat_build_v2c',
-  'forceload remove all',
-  fl(WIN[0]),
-  'scoreboard players set #w1 styx.flag 0',
-  'schedule function styx:redo/w1 40t',
+/* ---------- ① 等整台机器的区块都就绪 ---------- */
+w('redo/wait.mcfunction', [
+  '# 等就绪：每 32 格一个抽样点，全部 `if loaded` 为真才动手（最多 40 次 × 1 秒）',
+  'scoreboard objectives add styx.flag dummy',
+  'scoreboard players add #try styx.flag 1',
+  'scoreboard players set #rdy styx.flag 1',
+  ...waitPts.map(([x, y, z]) => `execute unless loaded ${x} ${y} ${z} run scoreboard players set #rdy styx.flag 0`),
+  'execute if score #rdy styx.flag matches 1 run function styx:redo/go',
+  'execute if score #rdy styx.flag matches 0 if score #try styx.flag matches ..40 run schedule function styx:redo/wait 20t',
+  'execute if score #rdy styx.flag matches 0 if score #try styx.flag matches 41.. run tellraw @a {"text":"[Styx] ⚠ 区块加载超时（40s），仍然尝试铺设（后面会全量核对并自动补）","color":"yellow"}',
+  'execute if score #rdy styx.flag matches 0 if score #try styx.flag matches 41.. run function styx:redo/go',
 ]);
 
-/* ---------- ② 每个窗口：等加载 → 存快照 → 摆音符盒 → 抽查（不合格补一遍）→ 下一段 ---------- */
-WIN.forEach(([a, b], i) => {
-  const n = i + 1;
-  const pt = samples[i];
-  w(`redo/w${n}.mcfunction`, [
-    `# 窗口 ${n}（x ${a}..${b}）：等这一步涉及的区块真的加载好（最多 40 次 × 1 秒）`,
-    'scoreboard objectives add styx.flag dummy',
-    `scoreboard players add #w${n} styx.flag 1`,
-    'scoreboard players set #rdy styx.flag 1',
-    ...pt.map(([x, , z]) => `execute unless loaded ${x} ${NY} ${z} run scoreboard players set #rdy styx.flag 0`),
-    `execute if score #rdy styx.flag matches 1 run schedule function styx:redo/w${n}go 20t`,
-    `execute if score #rdy styx.flag matches 0 if score #w${n} styx.flag matches ..40 run schedule function styx:redo/w${n} 20t`,
-    `execute if score #rdy styx.flag matches 0 if score #w${n} styx.flag matches 41.. run tellraw @a {"text":"[Styx] ⚠ 窗口 ${n} 区块加载超时（40s），仍然尝试铺设","color":"yellow"}`,
-    `execute if score #rdy styx.flag matches 0 if score #w${n} styx.flag matches 41.. run schedule function styx:redo/w${n}go 20t`,
-  ]);
-  w(`redo/w${n}go.mcfunction`, [
-    `# 窗口 ${n}：存回退快照 → 摆音符盒 → 抽查 3 点；不合格最多补 2 次`,
-    `scoreboard players add #t${n} styx.flag 1`,
-    `function styx:undo/backup${n}`,
-    'function styx:apply_notes_v3',
-    'scoreboard players set #ok styx.flag 1',
-    ...pt.map(([x, , z]) => `execute unless block ${x} ${NY} ${z} minecraft:note_block run scoreboard players set #ok styx.flag 0`),
-    `execute if score #ok styx.flag matches 0 if score #t${n} styx.flag matches ..2 run tellraw @a {"text":"[Styx] 窗口 ${n} 抽查有缺口 → 再补一遍","color":"yellow"}`,
-    `execute if score #ok styx.flag matches 0 if score #t${n} styx.flag matches ..2 run schedule function styx:redo/w${n}go 60t`,
-    `execute if score #ok styx.flag matches 1 run function styx:redo/w${n}next`,
-    `execute if score #ok styx.flag matches 0 if score #t${n} styx.flag matches 3.. run tellraw @a {"text":"[Styx] ⚠ 窗口 ${n} 补了两遍仍有缺口（区块加载太慢），先往下走","color":"red"}`,
-    `execute if score #ok styx.flag matches 0 if score #t${n} styx.flag matches 3.. run function styx:redo/w${n}next`,
-  ]);
-  if (i + 1 < WIN.length) {
-    w(`redo/w${n}next.mcfunction`, [
-      `# 窗口 ${n} 完成 → 切到窗口 ${n + 1}`,
-      'forceload remove all',
-      fl(WIN[n]),
-      `scoreboard players set #w${n + 1} styx.flag 0`,
-      `schedule function styx:redo/w${n + 1} 40t`,
-    ]);
-  } else {
-    w(`redo/w${n}next.mcfunction`, [
-      '# 最后一个窗口完成：撤掉强加载、关掉数据包播放链路，机器交给 /nbm machine start',
-      'forceload remove all',
-      'scoreboard objectives add styx.flag dummy',
-      // M3-69：redo 不再开监听、也不再自动播放（历史教训见 AUTONOMOUS_LOG M3-38：这里曾残留改名前的
-      // `nbmachina listen on`，导致整个 s4 加载失败）。演奏由 mod 驱动，手动 `/nbm machine start`。
-      'scoreboard players set #mon styx.flag 0',
-      'tellraw @a {"text":"[Styx] 重做完成：音符盒已就位（抽查通过 ✔）—— 用 /nbm machine start 开始演奏","color":"gold"}',
-    ]);
-  }
-});
+/* ---------- ② 备份 → 清旧红石块 → 铺 → 全量核对 ---------- */
+w('redo/go.mcfunction', [
+  '# 备份三条轨道的回退快照 → 清掉旧版本可能残留的红石块 → 摆音符盒 → 全量核对',
+  'scoreboard objectives add styx.flag dummy',
+  'scoreboard players add #fix styx.flag 1',
+  'function styx:undo/backup1',
+  'function styx:undo/backup2',
+  'function styx:undo/backup3',
+  'function styx:redo/clean',
+  'function styx:apply_notes_v3',
+  'function styx:redo/check',
+]);
 
-/* ---------- 单独一个「只开监听」的入口，方便手动试听 ---------- */
+// 旧版（红石块触发时代）可能在世界里留下没来得及拆掉的红石块——机器那条带里一次性过滤掉
+const cleanCmds = [];
+for (const [a, b] of WIN) {
+  for (let x = a; x <= b; x += 16) {
+    const x2 = Math.min(x + 15, b);
+    cleanCmds.push(`fill ${x} ${NY - 1} ${ZB} ${x2} ${NY + 1} ${ZE} minecraft:air replace minecraft:redstone_block`);
+    cleanCmds.push(`fill ${x} ${NY - 1} ${ZB} ${x2} ${NY + 1} ${ZE} minecraft:air replace minecraft:redstone_lamp`);
+  }
+}
+w('redo/clean.mcfunction', ['# 机器带内清掉红石块/红石灯残留（每 16 格宽一条，体积 16×3×28=1344 ≪ 32768）', ...cleanCmds]);
+
+/* ---------- ③ 全量核对：3044 格逐格查，缺一格都算不合格 ---------- */
+w('redo/check.mcfunction', [
+  `# 全量核对 ${placed.length} 格（缺一格就 +1 #miss）——抽样会漏，这里一格不放过`,
+  'scoreboard objectives add styx.flag dummy',
+  'scoreboard players set #miss styx.flag 0',
+  ...placed.map(([x, y, z]) => `execute unless block ${x} ${y} ${z} minecraft:note_block run scoreboard players add #miss styx.flag 1`),
+  'execute if score #miss styx.flag matches 0 run function styx:redo/done',
+  'execute if score #miss styx.flag matches 1.. if score #fix styx.flag matches ..3 run tellraw @a {"text":"[Styx] 全量核对发现缺口（第 ","color":"yellow","extra":[{"score":{"name":"#fix","objective":"styx.flag"}},{"text":" 次铺设）：仍缺 "},{"score":{"name":"#miss","objective":"styx.flag"}},{"text":" 格 → 40 秒后再铺一遍"}]}',
+  'execute if score #miss styx.flag matches 1.. if score #fix styx.flag matches ..3 run schedule function styx:redo/go 40t',
+  'execute if score #miss styx.flag matches 1.. if score #fix styx.flag matches 4.. run tellraw @a {"text":"[Styx] ⚠ 铺了 3 遍仍有缺口：仍缺 ","color":"red","extra":[{"score":{"name":"#miss","objective":"styx.flag"}},{"text":" 格。请跑 /function styx:redo/patch 再补（或把这段截图发给 Codex）"}]}',
+  'execute if score #miss styx.flag matches 1.. if score #fix styx.flag matches 4.. run scoreboard players set #mon styx.flag 0',
+]);
+
+/* ---------- ④ 完成 / 手动补铺入口 / 只开监听 ---------- */
+w('redo/done.mcfunction', [
+  '# 全量核对通过：撤强加载、关掉数据包播放链路，机器交给 /nbm machine start',
+  'forceload remove all',
+  'scoreboard objectives add styx.flag dummy',
+  // M3-69：redo 不再开监听、也不再自动播放（历史教训见 AUTONOMOUS_LOG M3-38）。
+  'scoreboard players set #mon styx.flag 0',
+  `tellraw @a {"text":"[Styx] 重做完成：音符盒全量核对通过（${placed.length}/${placed.length}）—— 用 /nbm machine start 开始演奏","color":"gold"}`,
+]);
+w('redo/patch.mcfunction', [
+  '# 手动补铺：重新强加载整台机器 → 等就绪 → 铺 + 全量核对（缺格时用这个，或直接再跑 styx:redo）',
+  'scoreboard objectives add styx.flag dummy',
+  'scoreboard players set #try styx.flag 0',
+  'scoreboard players set #fix styx.flag 0',
+  'forceload remove all',
+  ...flLines,
+  'tellraw @a {"text":"[Styx] 开始补铺：重新加载整台机器并全量核对…","color":"gold"}',
+  'schedule function styx:redo/wait 40t',
+]);
 w('redo/monitor.mcfunction', [
   'scoreboard objectives add styx.flag dummy',
   'function styx:play/monitor_on',
 ]);
 
-console.log(`已生成: styx:redo、styx:redo_hi、styx:redo/s1、styx:redo/w1..w${WIN.length}（含 go/next）、styx:redo/monitor`);
+console.log('已生成: styx:redo、styx:redo_hi、styx:redo/{wait,go,clean,check,done,patch,monitor}');
