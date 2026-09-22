@@ -1,6 +1,10 @@
-// 一键回退（不依赖任何外部扫描）：用 /clone 把每条轨道"改之前的样子"复制到该轨道正上方 +40 格。
+// 一键回退（不依赖任何外部扫描）：用 /clone 把每条轨道"改之前的样子"复制到该轨道**正上方 +900 格**。
 // 为什么这样最好：clone 在游戏内完成，任何存档都适用（包括用户的 1.65GB 世界），
 // 也不用把前像存成 1 万条 setblock；每条轨道 48×4×25 = 4800 格（< /clone 上限 32768），49 条共 49 条指令。
+//
+// M3-74（用户："重做怎么做到上面去了"）：快照原先放在 **+40 格**——就在机器正上方 40 格，
+// 玩家抬头就能看到"又一排音符盒"，被误当成 redo 建错位置了。现在挪到 **+900 格**：
+// 渲染距离（默认 32 区块 = 512 格）之外看不到，但**还是同一批区块列**（x/z 不变）→ 不需要多强加载任何区块。
 // 产出 styx:backup（改之前跑）与 styx:undo（要回退时跑）。
 import fs from 'node:fs';
 import { resolvePaths } from '../core/paths.mjs';
@@ -8,8 +12,10 @@ import { resolvePaths } from '../core/paths.mjs';
 const P = resolvePaths();
 const DP = P.functionsDir;
 const profile = JSON.parse(fs.readFileSync(P.profile, 'utf8'));
+/** 回退快照与机器的垂直距离（格）：必须 ≥ 客户端渲染距离，否则抬头就又看见一排 */
+const SNAP_DY = 900;
 
-const backup = ['# 由 src/emit/undo-clone.mjs 生成：改轨道之前先跑，把每条轨道当前的样子存到轨道上方 +40 格'];
+const backup = [`# 由 src/emit/undo-clone.mjs 生成：改轨道之前先跑，把每条轨道当前的样子存到轨道上方 +${SNAP_DY} 格`];
 const undo = ['# 由 src/emit/undo-clone.mjs 生成：把每条轨道逐格还原成 styx:backup 时的样子'];
 // 必须分窗口！redo 链是"一段强加载 → 改这一段"，一次 clone 全部 49 条会因区块未加载而静默失败。
 // M3-70：窗口**按剖面推导**（原来写死 480..2880，换到 215,-82,58 之后 clone 源区是空的 → 快照没用）。
@@ -35,10 +41,10 @@ parts.forEach((list, i) => {
   const u = [`# 窗口 ${i + 1}：回退 ${list.length} 条轨道`, 'forceload remove all',
     `forceload add ${WINDOWS[i][0]} ${ZB} ${WINDOWS[i][1]} ${ZB + 28}`];
   for (const t of list) {
-    b.push(`clone ${t.x0} ${t.y0} ${t.z0} ${t.x1} ${t.y1} ${t.z1} ${t.x0} ${t.y0 + 40} ${t.z0}`);
-    u.push(`clone ${t.x0} ${t.y0 + 40} ${t.z0} ${t.x1} ${t.y1 + 40} ${t.z1} ${t.x0} ${t.y0} ${t.z0}`);
+    b.push(`clone ${t.x0} ${t.y0} ${t.z0} ${t.x1} ${t.y1} ${t.z1} ${t.x0} ${t.y0 + SNAP_DY} ${t.z0}`);
+    u.push(`clone ${t.x0} ${t.y0 + SNAP_DY} ${t.z0} ${t.x1} ${t.y1 + SNAP_DY} ${t.z1} ${t.x0} ${t.y0} ${t.z0}`);
   }
-  b.push(`tellraw @a {"text":"[Styx] 已保存回退快照（窗口 ${i + 1}，${list.length} 条轨道）","color":"gray"}`);
+  b.push(`tellraw @a {"text":"[Styx] 已保存回退快照（窗口 ${i + 1}，${list.length} 条轨道；存在机器上方 ${SNAP_DY} 格，平时看不见）","color":"gray"}`);
   u.push(`tellraw @a {"text":"[Styx] 已回退窗口 ${i + 1}（${list.length} 条轨道逐格还原）","color":"gold"}`);
   fs.writeFileSync(`${DP}/undo/backup${i + 1}.mcfunction`, b.join('\n') + '\n', 'utf8');
   fs.writeFileSync(`${DP}/undo/restore${i + 1}.mcfunction`, u.join('\n') + '\n', 'utf8');
@@ -50,4 +56,4 @@ fs.writeFileSync(`${DP}/undo.mcfunction`, [
   'schedule function styx:undo/restore2 80t',
   'schedule function styx:undo/restore3 140t',
 ].join('\n') + '\n', 'utf8');
-console.log(`undo/{backup,restore}{1,2,3}.mcfunction：${n} 条轨道（每窗口 ${parts.map((p) => p.length).join('/')} 条，每条 4800 格）+ styx:undo 入口`);
+console.log(`undo/{backup,restore}{1,2,3}.mcfunction：${n} 条轨道（每窗口 ${parts.map((p) => p.length).join('/')} 条，每条 4800 格，快照在 +${SNAP_DY} 格）+ styx:undo 入口`);

@@ -98,16 +98,26 @@ w('redo/go.mcfunction', [
   'function styx:redo/check',
 ]);
 
-// 旧版（红石块触发时代）可能在世界里留下没来得及拆掉的红石块——机器那条带里一次性过滤掉
+// 旧版（红石块触发时代）可能在世界里留下没来得及拆掉的红石块——机器那条带里一次性过滤掉；
+// 另外清掉旧版 redo 放在**机器上方 +40 格**的回退快照（M3-74：用户抬头看到"上面还有一排音符盒"就是它，
+// 新版快照已经挪到 +900 格，渲染距离外看不见）
+const LEGACY_SNAP_DY = 40;
 const cleanCmds = [];
+const LY0 = prof[0].y - 1 + LEGACY_SNAP_DY, LY1 = prof[0].y + 2 + LEGACY_SNAP_DY;
 for (const [a, b] of WIN) {
   for (let x = a; x <= b; x += 16) {
     const x2 = Math.min(x + 15, b);
     cleanCmds.push(`fill ${x} ${NY - 1} ${ZB} ${x2} ${NY + 1} ${ZE} minecraft:air replace minecraft:redstone_block`);
     cleanCmds.push(`fill ${x} ${NY - 1} ${ZB} ${x2} ${NY + 1} ${ZE} minecraft:air replace minecraft:redstone_lamp`);
+    for (const blk of ['minecraft:note_block', 'minecraft:redstone_block', 'minecraft:redstone_lamp']) {
+      cleanCmds.push(`fill ${x} ${LY0} ${ZB} ${x2} ${LY1} ${ZE} minecraft:air replace ${blk}`);
+    }
   }
 }
-w('redo/clean.mcfunction', ['# 机器带内清掉红石块/红石灯残留（每 16 格宽一条，体积 16×3×28=1344 ≪ 32768）', ...cleanCmds]);
+w('redo/clean.mcfunction', [
+  '# 机器带内清掉红石块/红石灯残留；并清掉旧版留在机器上方 +40 格的回退快照（每 16 格宽一条，体积 ≪ 32768）',
+  ...cleanCmds,
+]);
 
 /* ---------- ③ 全量核对：3044 格逐格查，缺一格都算不合格 ---------- */
 w('redo/check.mcfunction', [
