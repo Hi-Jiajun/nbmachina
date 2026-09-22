@@ -162,3 +162,36 @@ Flashback 的编辑器里新建 **Audio Track** → 加 keyframe（文件选择�
 * 单文件最长 90 分钟（约 1.5GB）；录音中若游戏卡顿，混音线程会自动补上（它按**起播时刻**记账，不是按处理时刻）。
 * 录音的 t=0 是"引擎起播那一刻"，不含声卡输出延迟（约几十毫秒）——**对视频同步反而更准**，
   因为画面也是同一条命令链路出来的。
+
+## 9. Flashback 无损导出（M3-78：`tools/flashback-lossless/`）
+
+Flashback 的导出界面原本只有 **AAC / MP3 / Opus / Vorbis** 四档，全是有损的——也就是说
+上面那条 48k/24bit 的 WAV 挂成回放音轨之后，**成片里还会被再丢一次精度**。原因在
+`exporting/AsyncFFmpegVideoWriter.java`：它对所有音频编码器都写死 `AV_SAMPLE_FMT_FLTP`，
+而 ffmpeg 的 FLAC / ALAC / PCM 编码器都不接受 fltp（上游源码里 FLAC 那行注释就是同一个坑）。
+
+`tools/flashback-lossless/build-patch.ps1` 用你自己的上游 clone + 官方 jar，在本地生成一个
+补丁版 jar，给导出窗口补上 **FLAC / ALAC / PCM 16 / 24 / 32 / float32** 六档：
+
+```powershell
+git clone https://github.com/Moulberry/Flashback.git; cd Flashback; git checkout 1.21.10
+pwsh -File tools/flashback-lossless/build-patch.ps1 `
+     -UpstreamSource <clone 目录> -FlashbackJar "<游戏目录>\mods\Flashback-0.39.9-for-MC1.21.10.jar" -Verify
+```
+
+出片流程（与前面的录音/音轨注入是同一条链）：
+
+1. 回放录完 → `tools/flashback-attach-audio.mjs` 把 `nbm-XXXX.wav` 挂成 t=0 的音频轨；
+2. Flashback 回放中心 → 导出：**容器 MKV**、勾 **Record Audio** 与 **Stereo**、
+   编码器选 **FLAC**（或 `PCM 24-bit`，体积大但零编码）；
+3. 成片音轨校验：`ffprobe -select_streams a:0 -show_entries stream=codec_name,sample_fmt,bits_per_raw_sample`。
+
+为什么这条路是无损的（`FlashbackAudioManager.playAt(... soundEngine.channelAccess ...)` ⇒
+回放音轨走**原版 SoundEngine 设备**播放，导出侧 `ExportJob` 抓的是同一台 device 的
+`SOFTLoopback` 环回）：24bit 整数样本在 float32 混音里**精确可表示**，所以只要编码器选无损档，
+我们那份 24bit 母版就原样进成片。前提是勾"立体声"——不勾的话 `MixinAudioLibrary` 会把设备
+切成单声道。
+
+注意：Flashback 的许可是 *Do not redistribute / All rights reserved*，所以仓库里**只有我们自己的
+补丁脚本**（`build-patch.ps1`、`diff-bytecode.mjs`、`verify-audio.mjs`、`AudioCodecHarness.java`、
+intermediary stub 与 README），没有任何 Flashback 源码或 jar。
