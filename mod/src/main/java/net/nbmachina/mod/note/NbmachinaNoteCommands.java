@@ -1,17 +1,60 @@
 package net.nbmachina.mod.note;
 
+import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.IntegerArgumentType;
+import com.mojang.brigadier.tree.CommandNode;
+import net.minecraft.command.argument.BlockPosArgumentType;
+import net.minecraft.command.argument.IdentifierArgumentType;
+import net.minecraft.server.command.CommandManager;
 import net.minecraft.server.command.ServerCommandSource;
 import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 
 /**
- * M3-98a · `/nbm notes get|set`：直接读写音符盒的方块实体数据（机器自描述）。
+ * M3-98a · `/nbmnotes get|set`：读写音符盒方块实体里的音符数据（机器自描述）。
  *
- * <p>有了它就不必手打 `/data get block …`，也方便现场微调某一颗音（音色/音高/力度/时值）。
+ * <p>故意**不**挂进 `/nbm` 那棵巨型命令树：独立注册一条根命令，并用中间变量拼装
+ * （上一版直接往树里塞嵌套、括号数错了一次，故改写成一眼能数括号的形式）。
  */
 public final class NbmachinaNoteCommands {
 
 	private NbmachinaNoteCommands() {
+	}
+
+	public static void register(CommandDispatcher<ServerCommandSource> dispatcher) {
+		// /nbmnotes get <pos>
+		CommandNode<ServerCommandSource> get = CommandManager.literal("get")
+			.then(CommandManager.argument("pos", BlockPosArgumentType.blockPos())
+				.executes(ctx -> get(ctx.getSource(), BlockPosArgumentType.getBlockPos(ctx, "pos"))))
+			.build();
+
+		// /nbmnotes set <pos> <instrument> <midi> <velocity> <durMs>
+		CommandNode<ServerCommandSource> durMs = CommandManager.argument("durMs", IntegerArgumentType.integer(0, 60000))
+			.executes(ctx -> set(ctx.getSource(),
+				BlockPosArgumentType.getBlockPos(ctx, "pos"),
+				IdentifierArgumentType.getIdentifier(ctx, "instrument").toString(),
+				IntegerArgumentType.getInteger(ctx, "midi"),
+				IntegerArgumentType.getInteger(ctx, "velocity"),
+				IntegerArgumentType.getInteger(ctx, "durMs")))
+			.build();
+		CommandNode<ServerCommandSource> velocity = CommandManager.argument("velocity", IntegerArgumentType.integer(1, 127))
+			.then(durMs)
+			.build();
+		CommandNode<ServerCommandSource> midi = CommandManager.argument("midi", IntegerArgumentType.integer(0, 127))
+			.then(velocity)
+			.build();
+		CommandNode<ServerCommandSource> instrument = CommandManager.argument("instrument", IdentifierArgumentType.identifier())
+			.then(midi)
+			.build();
+		CommandNode<ServerCommandSource> set = CommandManager.literal("set")
+			.then(CommandManager.argument("pos", BlockPosArgumentType.blockPos()).then(instrument))
+			.build();
+
+		CommandNode<ServerCommandSource> root = CommandManager.literal("nbmnotes")
+			.then(get)
+			.then(set)
+			.build();
+		dispatcher.getRoot().addChild(root);
 	}
 
 	public static int get(ServerCommandSource source, BlockPos pos) {

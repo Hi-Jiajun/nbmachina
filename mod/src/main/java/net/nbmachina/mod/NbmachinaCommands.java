@@ -51,6 +51,8 @@ public final class NbmachinaCommands {
 	}
 
 	private static void register(CommandDispatcher<ServerCommandSource> dispatcher) {
+		// M3-98a：音符盒自带数据的读写（独立根命令 /nbmnotes，见该类注释）
+		net.nbmachina.mod.note.NbmachinaNoteCommands.register(dispatcher);
 		dispatcher.register(CommandManager.literal("nbm")
 			.then(CommandManager.literal("info")
 				.executes(NbmachinaCommands::info))
