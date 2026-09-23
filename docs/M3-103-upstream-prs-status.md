@@ -10,6 +10,23 @@
 * 补丁本体：`tools/upstream-pr/flashback-lossless-audio-0.43.6.patch`；
 * 风险提示：上游 README 写着 "Flashback currently does not accept outside contributions"，但它历史上合并过外部 PR（#67）；被关掉不影响本地补丁继续用。
 
+**PR 3 · HDR 桥（两边一对）**
+
+| | 仓库 | base / head | 规模 | 状态 |
+|---|---|---|---|---|
+| 3a | [Moulberry/Flashback#72](https://github.com/Moulberry/Flashback/pull/72) | `1.21.10` ← `Hi-Jiajun:hdr-export-bridge` | 10 文件 +242/-9 | OPEN / MERGEABLE / CLEAN |
+| 3b | [rrtt217/Minecraft-HDR-Mod#87](https://github.com/rrtt217/Minecraft-HDR-Mod/pull/87) | `1.21.10` ← `Hi-Jiajun:hdr-flashback-bridge` | 2 文件 +76/-1 | OPEN / MERGEABLE / UNSTABLE（`checks: []`，仓库没配 CI 的必选状态导致，非冲突） |
+
+* 3a 的树在 `_scratch-m3-78/fb-bridge`（worktree，base = 上游 `1.21.10` / `0f1c297b`），**bridge-only**：
+  已剔除采样率补丁（`SampleRate` / `flashback.sample_rate` 键 / `ExportSettings.sampleRate` 组件）、无损音频补丁、以及本地 `build.gradle` 取 deps 的黑客改动；
+  色彩元数据也不再依赖注入式 javacv 补丁，改成在 HDR 分支调 `recorder.setVideoOption("color_primaries"/"color_trc"/"colorspace"/"color_range")`。
+* 3a 验证：`.\gradlew.bat --no-daemon build`（Loom + remapJar）**BUILD SUCCESSFUL**（31s），产物 `build/libs/flashback-0.39.9.jar`
+  里 `javap` 能查到 `HdrExportBridge`、`encodeHdr`、`supportsPixelFormat`、`startDownloadHdr/finishDownloadHdr`、5 字段 `DownloadedFrame`。
+* 3b 的树在 `_scratch-m3-78/hdr-bridge`（worktree），验证：`.\gradlew.bat --no-daemon :common:compileJava` **BUILD SUCCESSFUL**（1m57s）；
+  日志打印换成 `HDRMod.LOGGER`、去掉 nbmachina 前缀，注册仍是纯反射（没装/未打补丁的 Flashback 什么都不做）。
+* 本地装机版本**未动**：仍是打过全部补丁的 `Flashback-0.39.9-for-MC1.21.10.jar`（`BD929CE2…`）+ `hdr_mod-fabric-2.5.1-1.21.10.jar`（`81F4EB7D…`）。
+* 待办：**PR 1b（导出采样率 48/96/192 kHz）**已就绪但先压着不提——和 PR 1 动同一片音频代码，等 #71 有回应再说。
+
 ## 作废：PR 2 · JavaCV `setColorInfo` —— 不需要提
 
 2026-09-24 实测推翻原判断（原因：**原来只数了 `FFmpegFrameRecorder` 自己声明的方法，漏了父类 `FrameRecorder`**）。
