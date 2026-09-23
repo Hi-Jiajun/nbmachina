@@ -82,8 +82,9 @@ public final class NbmachinaMachine {
 	private static int firedCount = 0;
 	private static int tickCount = 0;
 	private static String lastError = null;
-	/** 待放的粒子：触发位提前放（提前量），但视觉必须等这颗音真正到点 */
-	private record PendingVisual(int x, int y, int z, int midi, double dueSec) {
+	/** 待放的视觉：触发位提前放（提前量），但视觉必须等这颗音真正到点。
+	 *  M5：带上力度与声部，好让视效层按"力度→火花 / 低音→螺旋紫"出画（见 StyxShow.noteFlare）。 */
+	private record PendingVisual(int x, int y, int z, int midi, int velocity, boolean bass, double dueSec) {
 	}
 	/** M3-71：收尾用——最后一颗音排进"方块事件队列"后要多跑一刻，等事件被处理完再撤强加载 */
 	private static int endTicks = 0;
@@ -326,6 +327,8 @@ public final class NbmachinaMachine {
 		running = true;
 		maintainForceload(world);
 		silenceDataPack(world);
+		// M5 方案 A：视效层和演奏同一条真实时间轴（/nbm machine start 一条命令即出画面）
+		net.nbmachina.mod.show.StyxShow.start(world, fromSec);
 		// M3-51：广播"从这一秒开始"给所有客户端 —— 静音模式下由客户端 nanoTime 调度出声（1ms 级）
 		try {
 			for (var player : world.getServer().getPlayerManager().getPlayerList()) {
@@ -345,6 +348,7 @@ public final class NbmachinaMachine {
 		if (!running) return;
 		running = false;
 		releaseForceload(world);
+		net.nbmachina.mod.show.StyxShow.stop(world);
 		NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动停止：已触发 {} 颗 / 走过 {} 刻 / 用时 {}s", firedCount, tickCount, String.format("%.1f", elapsedSec()));
 	}
 
@@ -357,6 +361,8 @@ public final class NbmachinaMachine {
 		// ① 真实时间到了哪些音就触发哪些（方块事件下一 tick 开头才被处理，所以留 leadTicks 的提前量）
 		final double now = songTimeSec();
 		final double tickSec = server.getTickManager().getNanosPerTick() / 1e9;
+		// M5：重音冲击环 + 逐字歌词（"到点才发"，与音符同一根时间轴）
+		net.nbmachina.mod.show.StyxShow.tick(world, now);
 		// 到点的视觉：点灯 + 出粒子（真实音高上色），下一刻熄灭
 		for (var it = pendingVisual.iterator(); it.hasNext(); ) {
 			PendingVisual v = it.next();
@@ -364,6 +370,8 @@ public final class NbmachinaMachine {
 			float pitch01 = (float) Math.max(0.0, Math.min(1.0, (v.midi() - 21) / 87.0));
 			world.spawnParticles(ParticleTypes.NOTE, v.x() + 0.5, v.y() + 1.2, v.z() + 0.5,
 				1, pitch01, 0.0, 0.0, 1.0);
+			// M5：逐音心跳（描边方块 + 表面涟漪 + 火花）——和上面那颗原版 NOTE 粒子同一时刻、同一位置
+			net.nbmachina.mod.show.StyxShow.noteFlare(world, v.x(), v.y(), v.z(), v.midi(), v.velocity(), v.bass());
 			// M3-70：机器已经**没有红石灯那一层**了（用户："取消音符盒下面的红石灯"），
 			// 所以这里只出粒子——旧代码往 y-1 塞红石灯，会在这台新机器下面凭空刷出一排灯。
 			it.remove();
@@ -413,7 +421,8 @@ public final class NbmachinaMachine {
 			// 但**视觉要延到该音真正到点**才做（提前 3 刻只是为了让载荷先到客户端；
 			// 灯/粒子提前亮会看得出发光在声音之前）→ 排进 pendingVisual，到点再放。
 			final Note fn = n;
-			pendingVisual.add(new PendingVisual(fn.x(), fn.y(), fn.z(), fn.midi(), fn.timeSec() - offsetMs / 1000.0));
+			pendingVisual.add(new PendingVisual(fn.x(), fn.y(), fn.z(), fn.midi(), fn.velocity(),
+				"bass".equals(fn.voice()), fn.timeSec() - offsetMs / 1000.0));
 			cursor++;
 			firedCount++;
 			firedThisTick++;
@@ -428,6 +437,7 @@ public final class NbmachinaMachine {
 			NbmachinaMod.LOGGER.info("[nbmachina] 机器驱动：全曲结束（{} 颗 / {} 刻）", firedCount, tickCount);
 			running = false;
 			releaseForceload(world);
+			net.nbmachina.mod.show.StyxShow.stop(world);
 		}
 	}
 

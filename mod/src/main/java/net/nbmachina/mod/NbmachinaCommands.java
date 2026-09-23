@@ -237,6 +237,7 @@ public final class NbmachinaCommands {
 			net.nbmachina.mod.machine.NbmachinaMachine.leadTicks(),
 			net.nbmachina.mod.machine.NbmachinaMachine.running()
 				? String.format("（谱面时间 %.1fs）", net.nbmachina.mod.machine.NbmachinaMachine.elapsedSec()) : "")), false);
+		source.sendFeedback(() -> Text.literal("[nbmachina] " + net.nbmachina.mod.show.StyxShow.status()), false);
 		return 1;
 	}
 
