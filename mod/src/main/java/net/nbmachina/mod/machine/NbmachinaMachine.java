@@ -200,6 +200,7 @@ public final class NbmachinaMachine {
 				lastError = null;
 				NbmachinaMod.LOGGER.info("[nbmachina] 谱面来自**方块实体**（机器自描述）：{} 颗音，origin=({},{},{}) 段数={}",
 					NOTES.size(), ox, oy, oz, segments);
+				crossCheckWithCsv(gameDir);
 				return NOTES.size();
 			}
 			NbmachinaMod.LOGGER.warn("[nbmachina] 方块实体建表不完整（找到 {} 颗，缺 time_sec {} 颗）→ 回落 machine_map.csv",
@@ -208,6 +209,61 @@ public final class NbmachinaMachine {
 		} catch (Exception e) {
 			lastError = "读 machine.json 失败：" + e.getMessage();
 			return 0;
+		}
+	}
+
+	/**
+	 * M3-98b 自检：若 `machine_map.csv` 还在，就把它当作"参考谱面"和扫描结果对一遍，
+	 * 把"世界里有、谱面里没有"（多出来的方块，例如 /clone 出来的测试残留）与"谱面里有、世界里没有"
+	 * 各自报出来 —— 这一次用户遇到的"3045 颗音、同音高同一刻弹两遍"就是这类问题。
+	 */
+	private static void crossCheckWithCsv(Path gameDir) {
+		try {
+			Path csv = gameDir.resolve("nbmachina").resolve("machine_map.csv");
+			if (!Files.exists(csv)) {
+				return;
+			}
+			java.util.Set<Long> scanned = new java.util.HashSet<>();
+			for (Note n : NOTES) {
+				scanned.add(net.minecraft.util.math.BlockPos.asLong(n.x(), n.y() + 1, n.z()));
+			}
+			java.util.Set<Long> csvPos = new java.util.HashSet<>();
+			for (String line : Files.readAllLines(csv, StandardCharsets.UTF_8)) {
+				String[] c = line.split(",");
+				if (c.length < 12 || c[0].trim().equals("x")) {
+					continue;
+				}
+				try {
+					csvPos.add(net.minecraft.util.math.BlockPos.asLong(
+						Integer.parseInt(c[0].trim()), Integer.parseInt(c[1].trim()) + 1, Integer.parseInt(c[2].trim())));
+				} catch (RuntimeException ignored) {
+					// 坏行跳过
+				}
+			}
+			java.util.List<Long> extra = new java.util.ArrayList<>();
+			for (Long k : scanned) {
+				if (!csvPos.contains(k)) extra.add(k);
+			}
+			java.util.List<Long> missing = new java.util.ArrayList<>();
+			for (Long k : csvPos) {
+				if (!scanned.contains(k)) missing.add(k);
+			}
+			if (extra.isEmpty() && missing.isEmpty()) {
+				NbmachinaMod.LOGGER.info("[nbmachina] 自检：扫描结果与 machine_map.csv 逐格一致（{} 格）", scanned.size());
+			} else {
+				NbmachinaMod.LOGGER.warn("[nbmachina] 自检：扫描与 machine_map.csv 不一致 —— 世界里多出 {} 格、缺失 {} 格",
+					extra.size(), missing.size());
+				for (int i = 0; i < Math.min(8, extra.size()); i++) {
+					NbmachinaMod.LOGGER.warn("[nbmachina]   多出：{}（世界里有音符盒，谱面里没有 —— 例如 /clone 的测试残留，用 /setblock … air 清掉）",
+						net.minecraft.util.math.BlockPos.fromLong(extra.get(i)).toShortString());
+				}
+				for (int i = 0; i < Math.min(8, missing.size()); i++) {
+					NbmachinaMod.LOGGER.warn("[nbmachina]   缺失：{}（谱面里有，世界里没有方块）",
+						net.minecraft.util.math.BlockPos.fromLong(missing.get(i)).toShortString());
+				}
+			}
+		} catch (Exception e) {
+			NbmachinaMod.LOGGER.warn("[nbmachina] 自检失败（不影响播放）：{}", e.getMessage());
 		}
 	}
 
