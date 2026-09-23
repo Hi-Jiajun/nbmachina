@@ -58,6 +58,19 @@ public final class NbmachinaNoteCommands {
 			.then(set)
 			.build();
 		dispatcher.getRoot().addChild(root);
+
+		// M3-98b 第一步：/nbmscan <from> <to> —— 扫包围盒里的音符盒 BE（机器自描述诊断）
+		CommandNode<ServerCommandSource> scan = CommandManager.literal("nbmscan")
+			.then(CommandManager.argument("from", BlockPosArgumentType.blockPos())
+				.then(CommandManager.argument("to", BlockPosArgumentType.blockPos())
+					.executes(ctx -> {
+						net.nbmachina.mod.machine.NbmachinaNoteScan.run(ctx.getSource(),
+							BlockPosArgumentType.getBlockPos(ctx, "from"),
+							BlockPosArgumentType.getBlockPos(ctx, "to"));
+						return 1;
+					})))
+			.build();
+		dispatcher.getRoot().addChild(scan);
 	}
 
 	public static int get(ServerCommandSource source, BlockPos pos) {
