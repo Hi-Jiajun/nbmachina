@@ -33,21 +33,24 @@ const push = (tick, line) => { if (tick < 0) return; if (!byTick.has(tick)) byTi
 const esc = (s) => s.replace(/"/g, '\\\\"');
 
 // ① 河：一条恒速光流（前沿 = cpt×step = 0.4167 格/客户端刻 = 播放头速度）
-push(0, `particlex tick-parameter end_rod 2 110.2 2.5 0.15,0.86,0.80,0.30 0,0,0 0 2400 "x,y,z=t,0.15*sin(t/4),sin(t/9)*1.2" 0.0833 5 26`);
+// ⚠ 语法坑（2026-09-24 实测）：color4 / speed3 / range3 是**空格分隔**（源码 examples: "0 0 0 1" / "0 0 0" / "1 1 0"）；
+//   写成逗号会被 Brigadier 拒掉，而且 silent source 会把它吞掉（日志看着"失败 0 条"却一个粒子都没有）。
+//   表达式内部的元组（cr,cg,cb=...）仍然是逗号。
+push(0, `particlex tick-parameter end_rod 2 110.2 2.5 0.15 0.86 0.80 0.30 0 0 0 0 2400 "x,y,z=t,0.15*sin(t/4),sin(t/9)*1.2" 0.0833 5 26`);
 // ② 螺旋：两条反向缠绕的光带（绕机器轴，半径 5.5，轴高 117）
 for (const ph of [0, 3.1416]) {
-  push(0, `particlex tick-polar-parameter end_rod 2 117 2.5 0.47,0.36,1.0,0.45 0,0,0 0 2400 "s1=t*0.62+${ph}; s2=1.5708; dis=5.5" 0.12 3 40`);
+  push(0, `particlex tick-polar-parameter end_rod 2 117 2.5 0.47 0.36 1.0 0.45 0 0 0 0 2400 "s1=t*0.62+${ph}; s2=1.5708; dis=5.5" 0.12 3 40`);
 }
 // ③ 开场标题 + 下划线（3.917s 之前）
-push(0, `particlex text end_rod 14 116.5 2.5 "STYX HELIX" 5.0 "(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)" 8.0 0,0,0 120`);
-push(T(1.0), `particlex text end_rod 20 115.2 2.0 "MYTH & ROID" 3.0 "(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)" 8.0 0,0,0 110`);
+push(0, `particlex text end_rod 14 116.5 2.5 "STYX HELIX" 5.0 "(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)" 8.0 0 0 0 120`);
+push(T(1.0), `particlex text end_rod 20 115.2 2.0 "MYTH & ROID" 3.0 "(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)" 8.0 0 0 0 110`);
 
 // ④ 逐音心跳：描边方块（12 棱，等比放大）+ 表面涟漪 + 火花（力度 ≥ 90）
 for (const n of NOTE) {
   const t = T(n.t), cx = n.x + 0.5, cy = n.y + 1.5, cz = n.z + 0.5, c = col(n);
-  push(t, `particlex custom-conditional end_rod ${cx} ${cy} ${cz} "size=6; cr,cg,cb=${c}; alpha=0.92; age=28; light=1.0" 0.5,0.5,0.5 "abs(x)==0.5&abs(y)==0.5|abs(x)==0.5&abs(z)==0.5|abs(y)==0.5&abs(z)==0.5" 0.25 "(vx,vy,vz)=(dx,dy,dz)*0.11/(1+t/9); alpha=0.92*(1-t/27)" 1.0 nbs`);
+  push(t, `particlex custom-conditional end_rod ${cx} ${cy} ${cz} "size=6; cr,cg,cb=${c}; alpha=0.92; age=28; light=1.0" 0.5 0.5 0.5 "abs(abs(x)-0.5)<0.01&abs(abs(y)-0.5)<0.01|abs(abs(x)-0.5)<0.01&abs(abs(z)-0.5)<0.01|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01" 0.25 "(vx,vy,vz)=(dx,dy,dz)*0.11/(1+t/9); alpha=0.92*(1-t/27)" 1.0 nbs`);
   push(t, `particlex custom-polar-parameter end_rod ${cx} ${cy - 0.5} ${cz} 0 6.2832 "s1=t; s2=0; dis=0.5; size=5; cr,cg,cb=0.15,0.86,0.80; alpha=0.9; age=30; light=1.0" 0.1 "(vx,vy,vz)=(dx,dy,dz)*0.12/(1+t/10); alpha=0.9*(1-t/29)" 1.0 nbs`);
-  if (n.vel >= 90) push(t, `particlex custom-normal end_rod ${cx} ${cy} ${cz} "size=2.5; cr,cg,cb=0.92,0.96,1.0; alpha=0.95; age=26; light=1.0; vx=(random()-0.5)*0.16; vy=random()*0.22; vz=(random()-0.5)*0.16; gravity=0.06; friction=0.96" 0.15,0.15,0.15 14`);
+  if (n.vel >= 90) push(t, `particlex custom-normal end_rod ${cx} ${cy} ${cz} "size=2.5; cr,cg,cb=0.92,0.96,1.0; alpha=0.95; age=26; light=1.0; vx=(random()-0.5)*0.16; vy=random()*0.22; vz=(random()-0.5)*0.16; gravity=0.06; friction=0.96" 0.15 0.15 0.15 14`);
 }
 // ⑤ 重音冲击环（横向铺开）
 for (const a of SHOW.accents) {
@@ -63,7 +66,7 @@ for (const l of LY) {
     const dur = Math.max(0.12, ch.e - ch.s), age = Math.ceil((l.end - ch.s + 0.7) * 20);
     const dz = `${(z).toFixed(2)}`;
     jchars.push({ t: +ch.s.toFixed(3), c: ch.c, z: +z.toFixed(2), age, dur: +dur.toFixed(3), scale: isA ? 2.6 : 3.4 });
-    push(T(ch.s), `particlex text end_rod ${(PH(ch.s) + 6).toFixed(2)} 118.5 ${dz} "${esc(ch.c)}" 2.6 "(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)*scale(${isA ? 1 : 1.6},${isA ? 1 : 1.6},1)" 8.0 0,0,0 ${age} "vx=0.4167; cr,cg,cb=lerp(clamp(t/${Math.round(dur * 20)},0,1),0.30,1.0),lerp(clamp(t/${Math.round(dur * 20)},0,1),0.45,0.96),lerp(clamp(t/${Math.round(dur * 20)},0,1),0.50,1.0); alpha=0.5+0.5*clamp(t/${Math.round(dur * 20)},0,1)" 1.0 nblyr`);
+    push(T(ch.s), `particlex text end_rod ${(PH(ch.s) + 6).toFixed(2)} 118.5 ${dz} "${esc(ch.c)}" 2.6 "(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)*scale(${isA ? 1 : 1.6},${isA ? 1 : 1.6},1)" 8.0 0 0 0 ${age} "vx=0.4167; cr,cg,cb=lerp(clamp(t/${Math.round(dur * 20)},0,1),0.30,1.0),lerp(clamp(t/${Math.round(dur * 20)},0,1),0.45,0.96),lerp(clamp(t/${Math.round(dur * 20)},0,1),0.50,1.0); alpha=0.5+0.5*clamp(t/${Math.round(dur * 20)},0,1)" 1.0 nblyr`);
     z -= (isA ? 0.62 : 1.0) * 1.9;
   }
 }
@@ -113,9 +116,9 @@ fs.writeFileSync(path.join(D, 'stop.mcfunction'), [
   'tellraw @a {"text":"[StyxShow] 已停止","color":"aqua"}',
 ].join('\n') + '\n', 'utf8');
 fs.writeFileSync(path.join(D, 'demo.mcfunction'), [
-  'particlex custom-conditional end_rod ~ ~2 ~ "size=6; cr,cg,cb=0.9,0.95,1.0; alpha=0.92; age=28; light=1.0" 0.5,0.5,0.5 "abs(x)==0.5&abs(y)==0.5|abs(x)==0.5&abs(z)==0.5|abs(y)==0.5&abs(z)==0.5" 0.25 "(vx,vy,vz)=(dx,dy,dz)*0.11/(1+t/9); alpha=0.92*(1-t/27)" 1.0 nbs',
+  'particlex custom-conditional end_rod ~ ~2 ~ "size=6; cr,cg,cb=0.9,0.95,1.0; alpha=0.92; age=28; light=1.0" 0.5 0.5 0.5 "abs(abs(x)-0.5)<0.01&abs(abs(y)-0.5)<0.01|abs(abs(x)-0.5)<0.01&abs(abs(z)-0.5)<0.01|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01" 0.25 "(vx,vy,vz)=(dx,dy,dz)*0.11/(1+t/9); alpha=0.92*(1-t/27)" 1.0 nbs',
   'particlex custom-polar-parameter end_rod ~ ~2 ~ 0 6.2832 "s1=t; s2=0; dis=0.5; size=5; cr,cg,cb=0.15,0.86,0.80; alpha=0.9; age=30; light=1.0" 0.1 "(vx,vy,vz)=(dx,dy,dz)*0.12/(1+t/10); alpha=0.9*(1-t/29)" 1.0 nbs',
-  'particlex text end_rod ~ ~4 ~ "字形测试 AB要" 3.0 "(x,y,z)=(x,y,z,1)*scale(1,1,1)" 8.0 0,0,0 100',
+  'particlex text end_rod ~ ~4 ~ "字形测试 AB要" 3.0 "(x,y,z)=(x,y,z,1)*scale(1,1,1)" 8.0 0 0 0 100',
   'tellraw @a {"text":"[StyxShow] 自检：三段粒子（描边方块/涟漪/文字）","color":"gold"}',
 ].join('\n') + '\n', 'utf8');
 fs.writeFileSync(path.join(TAG, 'tick.json'), JSON.stringify({ values: ['styxshow:tick'] }), 'utf8');

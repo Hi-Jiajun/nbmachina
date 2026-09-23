@@ -63,6 +63,11 @@ public final class NbmachinaCommands {
 			.then(CommandManager.literal("machine")
 				.executes(ctx -> machineStatus(ctx.getSource()))
 				.then(CommandManager.literal("status").executes(ctx -> machineStatus(ctx.getSource())))
+				.then(CommandManager.literal("showcheck").executes(ctx -> {
+					ctx.getSource().sendFeedback(() -> Text.literal("[nbmachina] "
+						+ net.nbmachina.mod.show.StyxShow.selfCheck(ctx.getSource())), false);
+					return 1;
+				}))
 				.then(CommandManager.literal("start")
 					.executes(ctx -> machineStart(ctx.getSource(), 0.0F, 0.0F))
 					.then(CommandManager.argument("fromSec", FloatArgumentType.floatArg(0.0F, 1000.0F))

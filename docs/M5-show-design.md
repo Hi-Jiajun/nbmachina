@@ -306,23 +306,28 @@
   这是"从方块大小等比例放大"能一句话写出来的原因。
 * 生成器参数顺序：`<粒子> <坐标> <颜色 r,g,b,a> <初速 x,y,z> <begin> <end> <表达式> [<step> <cpt> <age> [<每刻表达式> <速度步长> <组名>]]]`；
   `custom-*` 把"颜色"换成 `attr`（逐粒子属性表达式）。
+* ⚠ **`color4` / `speed3` / `range3` 是空格分隔**（源码 examples：`"0 0 0 1"` / `"0 0 0"` / `"1 1 0"`），写成 `0,0,0` 会被 Brigadier 拒掉；
+  **表达式内部的元组仍然是逗号**（`cr,cg,cb=1,1,1`，`(vx,vy,vz)=…`）。
+  这条是 2026-09-24 实测踩出来的：整套命令被**静默**拒掉（source 是 silent，`parseAndExecute` 把错误吞了），
+  日志里显示"失败 0 条"却一个粒子都没有。现在 `StyxShow.exec()` 改成**先 `dispatcher.parse` 再 `execute`**，
+  并加了 `/nbm machine showcheck` 一键自检（把每一类模板各拿一条真去解析，失败就打印原文与原因）。
 
 ```mcfunction
 # ① 描边方块：12 棱 44 点（体素格 0.25，只留棱）= 一条命令
 #    等比放大 (vx,vy,vz)=(dx,dy,dz)*k/(1+t/8)；同一条曲线淡出
-particlex custom-conditional end_rod ~ ~ ~ "size=6; cr,cg,cb,alpha=0.90,0.94,1.0,1.0; age=28; light=1.0" 0.5,0.5,0.5 "abs(x)==0.5&abs(y)==0.5|abs(x)==0.5&abs(z)==0.5|abs(y)==0.5&abs(z)==0.5" 0.25 "(vx,vy,vz)=(dx,dy,dz)*0.11/(1+t/9); alpha=1-t/27" 1.0 nb_flare
+particlex custom-conditional end_rod ~ ~ ~ "size=6; cr,cg,cb,alpha=0.90,0.94,1.0,1.0; age=28; light=1.0" 0.5 0.5 0.5 "abs(abs(x)-0.5)<0.01&abs(abs(y)-0.5)<0.01|abs(abs(x)-0.5)<0.01&abs(abs(z)-0.5)<0.01|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01" 0.25 "(vx,vy,vz)=(dx,dy,dz)*0.11/(1+t/9); alpha=1-t/27" 1.0 nb_flare
 
 # ② 表面涟漪：水平单环（s2=0），半径由 dis 给、方向由 dx/dz 决定 → 天然"连贯"
 particlex custom-polar-parameter end_rod ~ ~ ~ 0 6.2832 "s1=t; s2=0; dis=0.5; size=5; cr,cg,cb=0.15,0.86,0.80; alpha=0.9; age=30; light=1.0" 0.1 "(vx,vy,vz)=(dx,dy,dz)*0.12/(1+t/10); alpha=0.9*(1-t/29)" 1.0 nb_ripple
 
 # ③ 火花：照搬烟花口径（随机方向 + 轻重力 + 摩擦）
-particlex custom-normal end_rod ~ ~ ~ "size=2.5; cr,cg,cb=0.92,0.96,1.0; alpha=0.95; age=26; light=1.0; vx=(random()-0.5)*0.16; vy=random()*0.22; vz=(random()-0.5)*0.16; gravity=0.06; friction=0.96" 0.15,0.15,0.15 14
+particlex custom-normal end_rod ~ ~ ~ "size=2.5; cr,cg,cb=0.92,0.96,1.0; alpha=0.95; age=26; light=1.0; vx=(random()-0.5)*0.16; vy=random()*0.22; vz=(random()-0.5)*0.16; gravity=0.06; friction=0.96" 0.15 0.15 0.15 14
 
 # ④ 河：恒速光流。前沿速度 = cpt × step = 5 × 0.0833 = 0.4167 格/刻 = 播放头速度（同一条河永不飘）
-particlex tick-parameter end_rod -40 110.1 2.5 0.15,0.86,0.80,0.28 0,0,0 0 2400 "x,y,z=t,0.1*sin(t/4),sin(t/9)*1.2" 0.0833 5 26
+particlex tick-parameter end_rod -40 110.1 2.5 0.15 0.86 0.80 0.28 0 0 0 0 2400 "x,y,z=t,0.1*sin(t/4),sin(t/9)*1.2" 0.0833 5 26
 
 # ⑤ 螺旋：一条反向缠绕的光带（相位差 π 的另一条换 dis/s1 的符号即可）
-particlex tick-polar-parameter end_rod -40 116.5 2.5 0.47,0.36,1.0,0.5 0,0,0 0 2400 "s1=t*0.62; s2=1.5708; dis=6" 0.12 3 40
+particlex tick-polar-parameter end_rod -40 116.5 2.5 0.47 0.36 1.0 0.5 0 0 0 0 2400 "s1=t*0.62; s2=1.5708; dis=6" 0.12 3 40
 
 # ⑥ 段落切换：收掉旧螺旋、清掉脏粒子
 particlex group remove helix

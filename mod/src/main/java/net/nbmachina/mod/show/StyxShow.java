@@ -54,6 +54,102 @@ public final class StyxShow {
 		return active;
 	}
 
+	// ───────────────────────── 命令模板（唯一来源：start/tick/noteFlare/selfCheck 都用它们） ─────────────────────────
+	// ⚠ 语法口径（2026-09-24 踩过的坑）：color4 / speed3 / range3 这三个参数类型是**空格分隔**的
+	// （源码 examples: "0 0 0 1" / "0 0 0" / "1 1 0"），写成逗号会被 Brigadier 拒掉；
+	// 而**表达式内部**的元组（cr,cg,cb=...）仍然是逗号。
+
+	private static String river() {
+		return "particlex tick-parameter end_rod 2 110.2 2.5 0.15 0.86 0.80 0.30 0 0 0 0 2400 "
+			+ "\"x,y,z=t,0.15*sin(t/4),sin(t/9)*1.2\" 0.0833 5 26";
+	}
+
+	private static String helix(double phase) {
+		return "particlex tick-polar-parameter end_rod 2 117 2.5 0.47 0.36 1.0 0.45 0 0 0 0 2400 "
+			+ "\"s1=t*0.62+" + phase + "; s2=1.5708; dis=5.5\" 0.12 3 40";
+	}
+
+	private static String title() {
+		return "particlex text end_rod 14 116.5 2.5 \"STYX HELIX\" 5.0 "
+			+ "\"(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)\" 8.0 0 0 0 120";
+	}
+
+	private static String subtitle() {
+		return "particlex text end_rod 20 115.2 2.0 \"MYTH & ROID\" 3.0 "
+			+ "\"(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)\" 8.0 0 0 0 110";
+	}
+
+	/** 逐音心跳①：12 棱描边方块（体素格 0.25 + 棱条件），从音符盒大小起等比例放大 */
+	private static String flareEdges(double cx, double cy, double cz, String col) {
+		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
+			+ " \"size=6; cr,cg,cb=" + col + "; alpha=0.92; age=28; light=1.0\" 0.5 0.5 0.5 "
+			+ "\"abs(abs(x)-0.5)<0.01&abs(abs(y)-0.5)<0.01|abs(abs(x)-0.5)<0.01&abs(abs(z)-0.5)<0.01"
+			+ "|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01\" 0.25 "
+			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.11/(1+t/9); alpha=0.92*(1-t/27)\" 1.0";
+	}
+
+	/** 逐音心跳②：表面连贯涟漪（先快后慢） */
+	private static String flareRipple(double cx, double cy, double cz) {
+		return "particlex custom-polar-parameter end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
+			+ " 0 6.2832 \"s1=t; s2=0; dis=0.5; size=5; cr,cg,cb=0.15,0.86,0.80; alpha=0.9; age=30; light=1.0\" 0.1 "
+			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.12/(1+t/10); alpha=0.9*(1-t/29)\" 1.0";
+	}
+
+	/** 逐音心跳③：火花（照搬烟花口径：随机方向 + 轻重力 + 摩擦） */
+	private static String flareSparks(double cx, double cy, double cz) {
+		return "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
+			+ " \"size=2.5; cr,cg,cb=0.92,0.96,1.0; alpha=0.95; age=26; light=1.0; vx=(random()-0.5)*0.16; "
+			+ "vy=random()*0.22; vz=(random()-0.5)*0.16; gravity=0.06; friction=0.96\" 0.15 0.15 0.15 14";
+	}
+
+	/** 重音冲击环：横向铺开 */
+	private static String accentRing(double t) {
+		double x = 8.3341 * t - 32.784 + 0.5;
+		return "particlex custom-polar-parameter end_rod " + fmt(x) + " 110.05 2.5 0 6.2832 "
+			+ "\"s1=t; s2=0; dis=0.6; size=4; cr,cg,cb=0.15,0.86,0.80; alpha=0.5; age=32; light=1.0\" 0.08 "
+			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.42/(1+t/6); alpha=0.5*(1-t/31)\" 1.0";
+	}
+
+	/** 逐字歌词：骑流（vx = 播放头速度 0.4167 格/刻）+ 唱到哪亮到哪（AMLL 的填充） */
+	private static String lyricChar(LyricChar c) {
+		int d = Math.max(1, (int) Math.round(c.dur() * 20));
+		double x = 8.3341 * c.t() - 32.784 + 6.0;
+		return "particlex text end_rod " + fmt(x) + " 118.5 " + fmt(c.z()) + " \"" + escape(c.c())
+			+ "\" " + fmt(c.scale()) + " \"(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)\" 8.0 0 0 0 " + c.age()
+			+ " \"vx=0.4167; cr,cg,cb=lerp(clamp(t/" + d + ",0,1),0.30,1.0),lerp(clamp(t/" + d
+			+ ",0,1),0.45,0.96),lerp(clamp(t/" + d + ",0,1),0.50,1.0); alpha=0.5+0.5*clamp(t/" + d + ",0,1)\" 1.0";
+	}
+
+	/**
+	 * 命令自检：把上面每一类模板各拿一条真去 Brigadier 解析一遍。
+	 * 用途：2026-09-24 那次"失败 0 条但一个粒子都没有"就是被 silent source 吞了语法错误，
+	 * 这个自检把语法问题的**原文+原因**直接摆到聊天栏，别再靠猜。游戏内入口：`/nbm showcheck`。
+	 */
+	public static String selfCheck(net.minecraft.server.command.ServerCommandSource src) {
+		List<String> cmds = new ArrayList<>();
+		cmds.add(river());
+		cmds.add(helix(0.0));
+		cmds.add(title());
+		cmds.add(subtitle());
+		cmds.add(flareEdges(0.5, 111.5, -5.5, "0.90,0.95,1.00"));
+		cmds.add(flareRipple(0.5, 111.0, -5.5));
+		cmds.add(flareSparks(0.5, 111.5, -5.5));
+		cmds.add(accentRing(3.917));
+		cmds.add(lyricChar(new LyricChar(22.934, "O", 5.5, 120, 2.206, 2.6)));
+		int ok = 0;
+		String firstErr = null;
+		for (String c : cmds) {
+			try {
+				src.getServer().getCommandManager().getDispatcher().parse(c, src.withMaxLevel(4));
+				ok++;
+			} catch (Throwable e) {
+				if (firstErr == null) firstErr = e.toString() + "  ←  " + c;
+			}
+		}
+		if (firstErr == null) return String.format("命令自检：%d/%d 条全部通过 ✓", ok, cmds.size());
+		return String.format("命令自检：%d/%d 条通过；第一条失败：%s", ok, cmds.size(), firstErr);
+	}
+
 	public static String status() {
 		return String.format("视效 %s；已发 %d 条命令，失败 %d 条（命令失败的前 8 条会打日志）",
 			active ? "**运行中**" : "停", sent, failed);
@@ -94,20 +190,13 @@ public final class StyxShow {
 		charCursor = 0;
 		while (charCursor < doc.chars.size() && doc.chars.get(charCursor).t() < fromSec) charCursor++;
 
-		// ① 河：一条恒速光流（前沿 = cpt×step = 0.4167 格/客户端刻 = 播放头速度）
-		exec(world, "particlex tick-parameter end_rod 2 110.2 2.5 0.15,0.86,0.80,0.30 0,0,0 0 2400 "
-			+ "\"x,y,z=t,0.15*sin(t/4),sin(t/9)*1.2\" 0.0833 5 26");
-		// ② 螺旋：两条反向缠绕的光带
-		for (double ph : new double[]{0.0, 3.1416}) {
-			exec(world, "particlex tick-polar-parameter end_rod 2 117 2.5 0.47,0.36,1.0,0.45 0,0,0 0 2400 "
-				+ "\"s1=t*0.62+" + ph + "; s2=1.5708; dis=5.5\" 0.12 3 40");
-		}
-		// ③ 开场标题（只在音乐起来之前发；从中间起播就不发了）
+		// ① 河 + ② 螺旋两条光带 + ③ 开场标题（只在音乐起来之前发；从中间起播就不发了）
+		exec(world, river());
+		exec(world, helix(0.0));
+		exec(world, helix(3.1416));
 		if (fromSec < 3.5) {
-			exec(world, "particlex text end_rod 14 116.5 2.5 \"STYX HELIX\" 5.0 "
-				+ "\"(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)\" 8.0 0,0,0 120");
-			exec(world, "particlex text end_rod 20 115.2 2.0 \"MYTH & ROID\" 3.0 "
-				+ "\"(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)\" 8.0 0,0,0 110");
+			exec(world, title());
+			exec(world, subtitle());
 		}
 		NbmachinaMod.LOGGER.info("[styxshow] 视效层启动：从 {}s 起（重音剩 {} / 歌词剩 {}）",
 			fromSec, doc.accents.length - accCursor, doc.chars.size() - charCursor);
@@ -124,20 +213,12 @@ public final class StyxShow {
 	public static void tick(ServerWorld world, double now) {
 		if (!active || doc == null) return;
 		while (accCursor < doc.accents.length && doc.accents[accCursor] <= now) {
-			double x = 8.3341 * doc.accents[accCursor] - 32.784 + 0.5;
-			exec(world, "particlex custom-polar-parameter end_rod " + fmt(x) + " 110.05 2.5 0 6.2832 "
-				+ "\"s1=t; s2=0; dis=0.6; size=4; cr,cg,cb=0.15,0.86,0.80; alpha=0.5; age=32; light=1.0\" 0.08 "
-				+ "\"(vx,vy,vz)=(dx,dy,dz)*0.42/(1+t/6); alpha=0.5*(1-t/31)\" 1.0");
+			exec(world, accentRing(doc.accents[accCursor]));
 			accCursor++;
 		}
 		while (charCursor < doc.chars.size() && doc.chars.get(charCursor).t() <= now) {
 			LyricChar c = doc.chars.get(charCursor++);
-			int d = Math.max(1, (int) Math.round(c.dur() * 20));
-			double x = 8.3341 * c.t() - 32.784 + 6.0;
-			exec(world, "particlex text end_rod " + fmt(x) + " 118.5 " + fmt(c.z()) + " \"" + escape(c.c())
-				+ "\" " + fmt(c.scale()) + " \"(x,y,z)=(x,y,z,1)*rotate(0,PI/2,0)\" 8.0 0,0,0 " + c.age()
-				+ " \"vx=0.4167; cr,cg,cb=lerp(clamp(t/" + d + ",0,1),0.30,1.0),lerp(clamp(t/" + d
-				+ ",0,1),0.45,0.96),lerp(clamp(t/" + d + ",0,1),0.50,1.0); alpha=0.5+0.5*clamp(t/" + d + ",0,1)\" 1.0");
+			exec(world, lyricChar(c));
 		}
 	}
 
@@ -149,17 +230,10 @@ public final class StyxShow {
 		if (!active) return;
 		double cx = x + 0.5, cy = y + 1.5, cz = z + 0.5;
 		String col = bass ? "0.47,0.36,1.00" : (midi > 78 ? "0.90,0.95,1.00" : "0.55,0.90,0.92");
-		exec(world, "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
-			+ " \"size=6; cr,cg,cb=" + col + "; alpha=0.92; age=28; light=1.0\" 0.5,0.5,0.5 "
-			+ "\"abs(x)==0.5&abs(y)==0.5|abs(x)==0.5&abs(z)==0.5|abs(y)==0.5&abs(z)==0.5\" 0.25 "
-			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.11/(1+t/9); alpha=0.92*(1-t/27)\" 1.0");
-		exec(world, "particlex custom-polar-parameter end_rod " + fmt(cx) + " " + fmt(cy - 0.5) + " " + fmt(cz)
-			+ " 0 6.2832 \"s1=t; s2=0; dis=0.5; size=5; cr,cg,cb=0.15,0.86,0.80; alpha=0.9; age=30; light=1.0\" 0.1 "
-			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.12/(1+t/10); alpha=0.9*(1-t/29)\" 1.0");
+		exec(world, flareEdges(cx, cy, cz, col));
+		exec(world, flareRipple(cx, cy - 0.5, cz));
 		if (velocity >= 90) {
-			exec(world, "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
-				+ " \"size=2.5; cr,cg,cb=0.92,0.96,1.0; alpha=0.95; age=26; light=1.0; vx=(random()-0.5)*0.16; "
-				+ "vy=random()*0.22; vz=(random()-0.5)*0.16; gravity=0.06; friction=0.96\" 0.15,0.15,0.15 14");
+			exec(world, flareSparks(cx, cy, cz));
 		}
 	}
 
@@ -168,7 +242,11 @@ public final class StyxShow {
 		try {
 			MinecraftServer server = world.getServer();
 			var src = server.getCommandSource().withSilent().withMaxLevel(4);
-			server.getCommandManager().parseAndExecute(src, cmd);
+			// 先 parse 再 execute：语法错误在 parse 抛出 → 一定会被下面的 catch 记下来。
+			// （别用 parseAndExecute：它把错误交给 source，而我们的 source 是 silent 的，
+			//   2026-09-24 就是这样把 color4/speed3 写成逗号分隔的语法错误全吞了 —— 日志显示"失败 0 条"却一个粒子都没有。）
+			var parsed = server.getCommandManager().getDispatcher().parse(cmd, src);
+			server.getCommandManager().getDispatcher().execute(parsed);
 			sent++;
 		} catch (Throwable e) {
 			failed++;
