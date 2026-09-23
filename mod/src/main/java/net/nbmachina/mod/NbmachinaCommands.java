@@ -68,6 +68,25 @@ public final class NbmachinaCommands {
 						+ net.nbmachina.mod.show.StyxShow.selfCheck(ctx.getSource())), false);
 					return 1;
 				}))
+				.then(CommandManager.literal("textprobe").executes(ctx -> {
+					net.nbmachina.mod.show.StyxShow.textProbe(ctx.getSource().getWorld());
+					ctx.getSource().sendFeedback(() -> Text.literal(
+						"[nbmachina] 朝向探针：前方 6 份「序号 ABC 序号」，回报哪一份读起来是正的（1=默认E4 2=平铺 3=平铺镜像 4/5=竖立 6=平铺反向）"), false);
+					return 1;
+				}))
+				.then(CommandManager.literal("lyricoff")
+					.executes(ctx -> {
+						ctx.getSource().sendFeedback(() -> Text.literal(String.format(
+							"[nbmachina] 歌词平移 = %+.2fs（正数 = 更晚出现）", net.nbmachina.mod.show.StyxShow.lyricOffset())), false);
+						return 1;
+					})
+					.then(CommandManager.argument("sec", FloatArgumentType.floatArg(-10.0F, 10.0F)).executes(ctx -> {
+						float v = FloatArgumentType.getFloat(ctx, "sec");
+						net.nbmachina.mod.show.StyxShow.setLyricOffset(v);
+						ctx.getSource().sendFeedback(() -> Text.literal(String.format(
+							"[nbmachina] 歌词平移已设为 %+.2fs（下一次 /nbm machine start 生效）", v)), true);
+						return 1;
+					})))
 				.then(CommandManager.literal("start")
 					.executes(ctx -> machineStart(ctx.getSource(), 0.0F, 0.0F))
 					.then(CommandManager.argument("fromSec", FloatArgumentType.floatArg(0.0F, 1000.0F))

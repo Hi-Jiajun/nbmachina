@@ -367,10 +367,9 @@ public final class NbmachinaMachine {
 		for (var it = pendingVisual.iterator(); it.hasNext(); ) {
 			PendingVisual v = it.next();
 			if (v.dueSec() > now) continue;
-			float pitch01 = (float) Math.max(0.0, Math.min(1.0, (v.midi() - 21) / 87.0));
-			world.spawnParticles(ParticleTypes.NOTE, v.x() + 0.5, v.y() + 1.2, v.z() + 0.5,
-				1, pitch01, 0.0, 0.0, 1.0);
-			// M5：逐音心跳（描边方块 + 表面涟漪 + 火花）——和上面那颗原版 NOTE 粒子同一时刻、同一位置
+			// M5：逐音心跳（描边方块 + 表面涟漪 + 火花）。
+			// M5-2（2026-09-24 用户反馈"音符盒动效不太对"）：原版 NOTE 粒子拿掉了 —— 它是颗随音高变色的球，
+			// 会和描边方块糊在一起，看起来就是一个"花斑"，盖住了我们自己的形状。
 			net.nbmachina.mod.show.StyxShow.noteFlare(world, v.x(), v.y(), v.z(), v.midi(), v.velocity(), v.bass());
 			// M3-70：机器已经**没有红石灯那一层**了（用户："取消音符盒下面的红石灯"），
 			// 所以这里只出粒子——旧代码往 y-1 塞红石灯，会在这台新机器下面凭空刷出一排灯。

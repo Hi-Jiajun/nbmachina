@@ -15,6 +15,10 @@ const arg = (n, d) => { const i = argv.indexOf('--' + n); return i >= 0 ? argv[i
 const TPS = +arg('tps', '100');
 const OUT = arg('out', path.join(ROOT, 'nbmachina', 'build', 'styxshow'));
 const JSON_OUT = arg('json', null);          // 只写 mod 用的 show.json（方案 A：/nbm machine start 一条命令）
+const TTML_DATA = arg('ttml', path.join(ROOT, '_scratch-m3-80', 'styx_ttml_master.json'));   // TTML 基座（对齐后的逐字）
+const TEXT_MATRIX = '(0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)';   // 平铺在水面：读向=+x、字上=−z（与预演里验证过的朝向一致）
+const DPB = 8;        // text 的 dpb = 每格几个字体像素
+const LINE_W = 20;    // 一行最多占几格（机器那条水面宽 25 格）
 const D = path.join(OUT, 'data', 'styxshow', 'function');
 const TAG = path.join(OUT, 'data', 'minecraft', 'tags', 'function');
 const MODE = TPS >= 50 ? 'hi' : 'lo';
@@ -71,18 +75,38 @@ for (const l of LY) {
   }
 }
 
-// mod 侧（方案 A）用：重音时间 + 逐字歌词 + 开场标题参数
+// mod 侧（方案 A）用：重音时间 + 逐字歌词（v2：TTML 基座 + 每行翻译 + 平铺矩阵）
 if (JSON_OUT) {
+  const ttml = JSON.parse(fs.readFileSync(TTML_DATA, 'utf8'));
+  const lines = ttml.lines.map((l) => {
+    // 一行最多占 LINE_W 格：用字体像素宽度估总宽，超了就整体缩小
+    const wpx = l.chars.reduce((a, c) => a + (c.c.codePointAt(0) > 0x7e ? 5.2 : 3.0) * 3.0, 0);
+    const scale = Math.min(3.0, (LINE_W * DPB) / Math.max(1, wpx) * 3.0);
+    let z = 0;
+    const chars = l.chars.map((c) => {
+      const advPx = (c.c.codePointAt(0) > 0x7e ? 5.2 : 3.0) * scale;
+      const w = +((advPx + (c.c.codePointAt(0) > 0x7e ? 3.5 : 2.5)) / DPB).toFixed(3);   // 字宽 + 字距
+      const o = { t: +c.s.toFixed(3), c: c.c, w, dur: +Math.max(0.12, c.e - c.s).toFixed(3), z: +z.toFixed(3) };
+      z += w;
+      return o;
+    });
+    return { t: +l.start.toFixed(3), end: +l.end.toFixed(3), scale: +scale.toFixed(2), tr: l.translation ?? null, w: +z.toFixed(2), chars };
+  });
   const doc = {
-    version: 1,
-    note: '由 nbmachina/tools/show-pack.mjs --json 生成；配合 /nbm machine start 使用（mod 直接发 particlex 命令）',
+    version: 2,
+    note: 'v2：逐字时间来自官方 TTML（span）+ 整体平移；含每行中文翻译；文字平铺在水面上（matrix 见 textMatrix）。由 tools/show-pack.mjs --json 生成',
+    shiftSec: ttml.shiftSec,
+    textMatrix: TEXT_MATRIX,
+    dpb: DPB,
+    lineWidthBlocks: LINE_W,
     accents: SHOW.accents.map((a) => +a.t.toFixed(3)),
-    chars: jchars,
+    lines,
     title: { text: 'STYX HELIX', sub: 'MYTH & ROID', x: 14, y: 116.5, z: 2.5, scale: 5.0 },
   };
   fs.mkdirSync(path.dirname(JSON_OUT), { recursive: true });
   fs.writeFileSync(JSON_OUT, JSON.stringify(doc), 'utf8');
-  console.log(`show.json -> ${JSON_OUT}（重音 ${doc.accents.length} / 字 ${doc.chars.length}，${(fs.statSync(JSON_OUT).size / 1024).toFixed(0)} KB）`);
+  const nChars = lines.reduce((a, l) => a + l.chars.length, 0);
+  console.log(`show.json v2 -> ${JSON_OUT}（重音 ${doc.accents.length} / 行 ${lines.length} / 字 ${nChars} / 平移 ${ttml.shiftSec}s，${(fs.statSync(JSON_OUT).size / 1024).toFixed(0)} KB）`);
   if (argv.includes('--json-only')) process.exit(0);
 }
 
