@@ -123,19 +123,19 @@ public final class StyxShow {
 	}
 
 	private static String title() {
-		return "particlex image-matrix end_rod 8 " + fmt(LYRIC_Y + 3.0) + " " + fmt(ZC) + " title.png 1.0 \""
-			+ MATRICES[matrixIndex] + "\" 48.0 0 0 0 150";
+		return "particlex image-matrix end_rod 8 " + fmt(LYRIC_Y + 3.0) + " " + fmt(ZC) + " title2x.png 1.0 \""
+			+ MATRICES[matrixIndex] + "\" 96.0 0 0 0 150";
 	}
 
 	private static String subtitle() {
-		return "particlex image-matrix end_rod 11 " + fmt(LYRIC_Y + 3.0) + " " + fmt(ZC) + " subtitle.png 1.0 \""
-			+ MATRICES[matrixIndex] + "\" 40.0 0 0 0 140";
+		return "particlex image-matrix end_rod 11 " + fmt(LYRIC_Y + 3.0) + " " + fmt(ZC) + " subtitle2x.png 1.0 \""
+			+ MATRICES[matrixIndex] + "\" 80.0 0 0 0 140";
 	}
 
 	/** 开场：专辑封面平铺（素材 = `<游戏目录>/particleImages/styx-cover-64.png`，64×64） */
 	private static String cover() {
 		return "particlex image-matrix end_rod -10 " + fmt(LYRIC_Y + 3.5) + " " + fmt(ZC)
-			+ " styx-cover-64.png 1.0 \"" + MATRICES[matrixIndex] + "\" 8.0 0 0 0 80";
+			+ " styx-cover-128.png 1.0 \"" + MATRICES[matrixIndex] + "\" 16.0 0 0 0 80";
 	}
 
 	/** 逐字格宽（格）：48px 的字形图 ÷ dpb(24) = 2 格 + 0.25 字距 */
