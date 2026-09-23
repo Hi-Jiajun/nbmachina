@@ -34,14 +34,14 @@ public final class StyxShow {
 	 * 平铺（俯视才成立）只在从上方俯视时才对。
 	 */
 	private static final String[] MATRICES = {
-		"(0,0,0,0,,0,-1,0,0,,1,0,0,0,,0,0,0,1)",    // 1 竖立·正对 −x（相机朝 +x 飞）★默认
-		"(0,0,0,0,,0,-1,0,0,,-1,0,0,0,,0,0,0,1)",   // 2 竖立·正对 +x（相机朝 −x 飞）
-		"(0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)",    // 3 平铺（读向 +x、字上 −z）——俯视用
-		"(0,-1,0,0,,0,0,0,0,,1,0,0,0,,0,0,0,1)",    // 4 平铺·反向
-		"E4",                                       // 5 标准平面（朝 ±z）
-		"(-1,0,0,0,,0,0,0,0,,0,1,0,0,,0,0,0,1)",    // 6 竖直平面·绕 Y 转 90°
+		"(0,0,0,0,,0,-1,0,0,,-1,0,0,0,,0,0,0,1)",   // 1 竖立·正对 −x·**镜像读向**（修"标题/歌词是反的"）★默认
+		"(0,0,0,0,,0,-1,0,0,,1,0,0,0,,0,0,0,1)",    // 2 竖立·正对 −x（上一版默认）
+		"(0,0,0,0,,0,-1,0,0,,1,0,0,0,,0,0,0,1)",    // 3 同 2（占位，便于现场对照）
+		"(0,0,0,0,,0,-1,0,0,,-1,0,0,0,,0,0,0,1)",   // 4 同 1（占位）
+		"(0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)",    // 5 平铺（读向 +x、字上 −z）——俯视用
+		"E4",                                       // 6 标准平面（朝 ±z）
 	};
-	private static final String FLAT_MATRIX = MATRICES[2];
+	private static final String FLAT_MATRIX = MATRICES[4];
 	/** 文字是否平铺（决定"屏幕下方"是 +x 还是 −y）：默认竖立 */
 	private static int matrixIndex = 0;
 	private static final double ZC = 2.5;                    // 机器音轨轴（河心）
@@ -143,24 +143,39 @@ public final class StyxShow {
 
 	private static String flareEdges(double cx, double cy, double cz, String col) {
 		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
-			+ " \"size=0.9; cr,cg,cb=" + col + "; alpha=0.92; age=28; light=1.0\" 0.5 0.5 0.5 "
+			// step 必须能整除 1.0：0.05 → 采样点正好落在 ±0.5 上，12 条棱全中；
+			// 0.06 会让 ±0.5 只被部分命中（2026-09-24 用户实测"只有 3 条棱"就是这个）
+			+ " \"size=0.9; cr,cg,cb=" + col + "; alpha=0.92; age=26; light=1.0\" 0.5 0.5 0.5 "
 			+ "\"abs(abs(x)-0.5)<0.01&abs(abs(y)-0.5)<0.01|abs(abs(x)-0.5)<0.01&abs(abs(z)-0.5)<0.01"
-			+ "|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01\" 0.06 "
-			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.035/(1+t/10); alpha=0.92*(1-t/27)\" 1.0";
+			+ "|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01\" 0.05 "
+			// 扩散节奏跟"音符盒响"对齐：约 12 刻放到 1.4×，之后只淡出
+			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.034; alpha=0.92*(1-t/25)\" 1.0";
 	}
 
-	/** 柔和发光：大尺寸 + 低透明度 + 慢淡出（粒子 alpha 是可调的，这就是"柔光"该用的做法） */
+	/**
+	 * 柔光 = **音符盒顶面亮一下再消退**（用户口径）：在顶面铺一层大尺寸低透明的点，
+	 * 边亮边淡（粒子 alpha 完全可控，这就是柔光该用的做法；不用另加光斑/雾球）。
+	 */
 	private static String flareGlow(double cx, double cy, double cz, String col) {
-		return "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
-			+ " \"size=20; cr,cg,cb=" + col + "; alpha=0.16; age=22; light=1.0\" 0.01 0.01 0.01 5 "
-			+ "\"alpha=0.16*(1-t/21); size=20+14*t/22\" 1.0";
+		double y = DECK_TOP + 1.03;
+		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(y) + " " + fmt(cz)
+			+ " \"size=9; cr,cg,cb=" + col + "; alpha=0.30; age=16; light=1.0\" 0.5 0.02 0.5 \"1\" 0.25 "
+			+ "\"alpha=0.30*(1-t/15); size=9+16*t/16\" 1.0";
+	}
+
+	/** 余辉：弹过的音留一小块低透明色斑（2.5s），让"颜色沿着河往下传"看起来是流动的 */
+	private static String flareTrail(double cx, double cz, String col) {
+		return "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(DECK_TOP + 1.02) + " " + fmt(cz)
+			+ " \"size=7; cr,cg,cb=" + col + "; alpha=0.13; age=50; light=1.0\" 0.05 0.01 0.05 3 "
+			+ "\"alpha=0.13*(1-t/49)\" 1.0";
 	}
 
 	/** 涟漪：`custom-parameter` 只有**一个**字面量，极坐标要写成 `... <模式> ...`（normal|polar|tick|tick-polar） */
-	private static String flareRipple(double cx, double cz) {
+	private static String flareRipple(double cx, double cz, String col) {
 		// y = 音符盒**顶面**（音符盒占 111..112）：涟漪就该在表面荡开，埋在方块里是看不见的
-		return "particlex custom-parameter end_rod " + fmt(cx) + " " + fmt(DECK_TOP + 1.02) + " " + fmt(cz)
-			+ " polar 0 6.2832 \"s1=t; s2=0; dis=0.5; size=2.6; cr,cg,cb=0.15,0.86,0.80; alpha=0.9; age=30; light=1.0\" 0.1 "
+		// ⚠ 模式在**名字之前**：`custom-parameter <mode> <粒子> <坐标> …`（2026-09-24 第 27 字符处报错就是这个）
+		return "particlex custom-parameter polar end_rod " + fmt(cx) + " " + fmt(DECK_TOP + 1.02) + " " + fmt(cz)
+			+ " 0 6.2832 \"s1=t; s2=0; dis=0.5; size=2.6; cr,cg,cb=" + col + "; alpha=0.9; age=30; light=1.0\" 0.1 "
 			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.12/(1+t/10); alpha=0.9*(1-t/29)\" 1.0";
 	}
 
@@ -171,8 +186,8 @@ public final class StyxShow {
 	}
 
 	private static String accentRing(double t) {
-		return "particlex custom-parameter end_rod " + fmt(PLAYHEAD_A * t + PLAYHEAD_B + 0.5) + " "
-			+ fmt(DECK_TOP + 0.18) + " " + fmt(ZC) + " polar 0 6.2832 "
+		return "particlex custom-parameter polar end_rod " + fmt(PLAYHEAD_A * t + PLAYHEAD_B + 0.5) + " "
+			+ fmt(DECK_TOP + 0.18) + " " + fmt(ZC) + " 0 6.2832 "
 			+ "\"s1=t; s2=0; dis=0.6; size=3.0; cr,cg,cb=0.15,0.86,0.80; alpha=0.5; age=32; light=1.0\" 0.08 "
 			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.42/(1+t/6); alpha=0.5*(1-t/31)\" 1.0";
 	}
@@ -313,8 +328,9 @@ public final class StyxShow {
 		double cx = x + 0.5, cy = y + 1.5, cz = z + 0.5;
 		String col = hueColor(midi, bass);
 		exec(world, flareEdges(cx, cy, cz, col));
-		exec(world, flareRipple(cx, cz));
+		exec(world, flareRipple(cx, cz, col));
 		exec(world, flareGlow(cx, cy, cz, col));
+		exec(world, flareTrail(cx, cz, col));
 		if (velocity >= 90) exec(world, flareSparks(cx, cy, cz));
 	}
 
@@ -358,7 +374,7 @@ public final class StyxShow {
 		cmds.add(title());
 		cmds.add(subtitle());
 		cmds.add(flareEdges(0.5, 111.5, -5.5, "0.90,0.95,1.00"));
-		cmds.add(flareRipple(0.5, -5.5));
+		cmds.add(flareRipple(0.5, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.5, -5.5));
 		cmds.add(accentRing(3.917));
 		LyricLine demo = new LyricLine(22.407, 24.457, 3.0, 10.0, "请不要让我就此死亡",
