@@ -49,6 +49,8 @@ public final class StyxShow {
 	/** 文字基准高度：竖立时是行顶（行向下延伸到 −y）；音符盒顶层在 112.0，所以压在 113.4 上方一点 */
 	private static final double LYRIC_Y = DECK_TOP + 2.4;
 	private static final double PLAYHEAD_A = 8.3341, PLAYHEAD_B = -32.784;
+	/** M5-4：河/螺旋暂缓（用户："其他地方先别做了，等后面一起设计"），只留音符盒 + 文字 */
+	private static final boolean AMBIENT_ON = false;
 
 	private record LyricChar(double t, String c, double z, double w, double dur) {
 	}
@@ -140,13 +142,21 @@ public final class StyxShow {
 		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
 			+ " \"size=0.9; cr,cg,cb=" + col + "; alpha=0.92; age=28; light=1.0\" 0.5 0.5 0.5 "
 			+ "\"abs(abs(x)-0.5)<0.01&abs(abs(y)-0.5)<0.01|abs(abs(x)-0.5)<0.01&abs(abs(z)-0.5)<0.01"
-			+ "|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01\" 0.1 "
-			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.11/(1+t/9); alpha=0.92*(1-t/27)\" 1.0";
+			+ "|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01\" 0.06 "
+			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.035/(1+t/10); alpha=0.92*(1-t/27)\" 1.0";
+	}
+
+	/** 柔和发光：大尺寸 + 低透明度 + 慢淡出（粒子 alpha 是可调的，这就是"柔光"该用的做法） */
+	private static String flareGlow(double cx, double cy, double cz, String col) {
+		return "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
+			+ " \"size=20; cr,cg,cb=" + col + "; alpha=0.16; age=22; light=1.0\" 0.01 0.01 0.01 5 "
+			+ "\"alpha=0.16*(1-t/21); size=20+14*t/22\" 1.0";
 	}
 
 	/** 涟漪：`custom-parameter` 只有**一个**字面量，极坐标要写成 `... <模式> ...`（normal|polar|tick|tick-polar） */
 	private static String flareRipple(double cx, double cz) {
-		return "particlex custom-parameter end_rod " + fmt(cx) + " " + fmt(DECK_TOP + 0.15) + " " + fmt(cz)
+		// y = 音符盒**顶面**（音符盒占 111..112）：涟漪就该在表面荡开，埋在方块里是看不见的
+		return "particlex custom-parameter end_rod " + fmt(cx) + " " + fmt(DECK_TOP + 1.02) + " " + fmt(cz)
 			+ " polar 0 6.2832 \"s1=t; s2=0; dis=0.5; size=2.6; cr,cg,cb=0.15,0.86,0.80; alpha=0.9; age=30; light=1.0\" 0.1 "
 			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.12/(1+t/10); alpha=0.9*(1-t/29)\" 1.0";
 	}
@@ -250,10 +260,12 @@ public final class StyxShow {
 		while (lineCursor < doc.lines.size() && doc.lines.get(lineCursor).t() + lyricOffset < fromSec) lineCursor++;
 
 		exec(world, river());
-		exec(world, riverLane(-8.0));
-		exec(world, riverLane(8.0));
-		exec(world, helix(0.0));
-		exec(world, helix(3.1416));
+		if (AMBIENT_ON) {
+			exec(world, riverLane(-8.0));
+			exec(world, riverLane(8.0));
+			exec(world, helix(0.0));
+			exec(world, helix(3.1416));
+		}
 		if (fromSec < 3.5) {
 			exec(world, cover());
 			exec(world, title());
@@ -288,10 +300,34 @@ public final class StyxShow {
 	public static void noteFlare(ServerWorld world, int x, int y, int z, int midi, int velocity, boolean bass) {
 		if (!active) return;
 		double cx = x + 0.5, cy = y + 1.5, cz = z + 0.5;
-		String col = bass ? "0.47,0.36,1.00" : (midi > 78 ? "0.90,0.95,1.00" : "0.55,0.90,0.92");
+		String col = hueColor(midi, bass);
 		exec(world, flareEdges(cx, cy, cz, col));
 		exec(world, flareRipple(cx, cz));
+		exec(world, flareGlow(cx, cy, cz, col));
 		if (velocity >= 90) exec(world, flareSparks(cx, cy, cz));
+	}
+
+	/**
+	 * 音高 → 颜色：12 音级色环（C=红 → B=紫），八度越高越亮；低音声部整体偏紫。
+	 * 这样"每个音高有它独立的颜色、颜色顺着音高变化"（用户 2026-09-24 要求）。
+	 */
+	private static String hueColor(int midi, boolean bass) {
+		double pc = ((midi % 12) + 12) % 12;
+		double hue = pc / 12.0 + (bass ? 0.58 : 0.0);
+		hue -= Math.floor(hue);
+		double sat = bass ? 0.85 : 0.62, val = 0.75 + 0.25 * Math.min(1.0, (midi - 40) / 60.0);
+		double c = val * sat, x = c * (1 - Math.abs((hue * 6) % 2 - 1)), m = val - c;
+		double r, g, b;
+		int k = (int) (hue * 6);
+		switch (k) {
+			case 0 -> { r = c; g = x; b = 0; }
+			case 1 -> { r = x; g = c; b = 0; }
+			case 2 -> { r = 0; g = c; b = x; }
+			case 3 -> { r = 0; g = x; b = c; }
+			case 4 -> { r = x; g = 0; b = c; }
+			default -> { r = c; g = 0; b = x; }
+		}
+		return fmt(r + m) + "," + fmt(g + m) + "," + fmt(b + m);
 	}
 
 	/** 朝向探针（`/nbm machine textprobe`） */
