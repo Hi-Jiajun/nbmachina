@@ -90,6 +90,14 @@ public class NbmachinaMod implements ModInitializer {
 	/** 重新读入 `nbmachina/machine_map.csv`（服务端启动、`/reload`、`/nbmachina reloadmap` 都走这里） */
 	public static void reloadMachineMap(net.minecraft.server.MinecraftServer server) {
 		java.nio.file.Path map = server.getRunDirectory().resolve("nbmachina").resolve("machine_map.csv");
+		// M3-98b：**优先用方块实体建表**（机器自描述，machine.json 给原点+段数）；
+		// 不可用（没有描述符/扫不到/缺 time_sec）才回落 machine_map.csv。
+		int fromWorld = net.nbmachina.mod.machine.NbmachinaMachine.loadFromWorld(
+			server.getOverworld(), server.getRunDirectory());
+		if (fromWorld > 0) {
+			LOGGER.info("[nbmachina] 机器驱动谱面已加载：{} 颗音（来源：音符盒方块实体）", fromWorld);
+			return;
+		}
 		try {
 			int n = net.nbmachina.mod.note.NbmachinaNoteBlocks.loadMap(map);
 			LOGGER.info("[nbmachina] 机器映射已加载：{} 个音符盒位置 ← {}", n, map);

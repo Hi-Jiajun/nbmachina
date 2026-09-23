@@ -134,6 +134,83 @@ public final class NbmachinaMachine {
 		return NOTES.size();
 	}
 
+	/**
+	 * M3-98b · **从方块实体建表**（机器自描述，不依赖 machine_map.csv）。
+	 *
+	 * <p>描述符：`<游戏目录>/nbmachina/machine.json` = `{"origin":[0,110,-9],"segments":49}`
+	 * （origin = 甲板层坐标；每段的 x0 = origin.x + 48*k、z0 = origin.z - 3，与 layout-pos.mjs 同一套规则）。
+	 *
+	 * <p>返回条数；**返回 0 表示不可用**（没有描述符 / 扫不到音符盒 / 有音符缺 time_sec）→ 调用方回落 CSV，
+	 * 避免拿"半张表"去放音。缺 time_sec 的方块说明它是旧数据包铺的（那时还没写 nbm_time_sec）。
+	 */
+	public static synchronized int loadFromWorld(net.minecraft.server.world.ServerWorld world, Path gameDir) {
+		Path desc = gameDir.resolve("nbmachina").resolve("machine.json");
+		if (!Files.exists(desc)) {
+			return 0;
+		}
+		try {
+			String text = Files.readString(desc, StandardCharsets.UTF_8);
+			java.util.regex.Matcher o = java.util.regex.Pattern
+				.compile("\"origin\"\\s*:\\s*\\[\\s*(-?\\d+)\\s*,\\s*(-?\\d+)\\s*,\\s*(-?\\d+)\\s*]").matcher(text);
+			if (!o.find()) {
+				return 0;
+			}
+			int ox = Integer.parseInt(o.group(1)), oy = Integer.parseInt(o.group(2)), oz = Integer.parseInt(o.group(3));
+			java.util.regex.Matcher s = java.util.regex.Pattern.compile("\"segments\"\\s*:\\s*(\\d+)").matcher(text);
+			int segments = s.find() ? Integer.parseInt(s.group(1)) : 49;
+			int z0 = oz - 3;
+
+			// 先把机器所在的区块加载起来（扫描读的是方块实体；未加载的区块读不到 → 会被误判成"没有"）
+			int minChunkX = ox >> 4, maxChunkX = (ox + 48 * segments - 1) >> 4;
+			int minChunkZ = z0 >> 4, maxChunkZ = (z0 + 27) >> 4;
+			for (int cx = minChunkX; cx <= maxChunkX; cx++) {
+				for (int cz = minChunkZ; cz <= maxChunkZ; cz++) {
+					world.getChunk(cx, cz);
+				}
+			}
+
+			List<Note> found = new ArrayList<>();
+			int missingTime = 0;
+			for (int seg = 0; seg < segments; seg++) {
+				int segX = ox + 48 * seg;
+				for (int lx = 0; lx < 48; lx++) {
+					for (int z = z0; z <= z0 + 27; z++) {
+						net.minecraft.util.math.BlockPos p = new net.minecraft.util.math.BlockPos(segX + lx, oy + 1, z);
+						if (!(world.getBlockEntity(p) instanceof net.nbmachina.mod.note.NoteDataBlockEntity d) || !d.hasData()) {
+							continue;
+						}
+						if (d.timeSec() < 0) {
+							missingTime++;
+							continue;
+						}
+						found.add(new Note(p.getX(), oy, p.getZ(), d.instrument(),
+							d.voice() == null ? "harp" : d.voice(), d.midi(), d.velocity(), d.durMs(), d.timeSec(),
+							p.getX(), oy, p.getZ(), false));
+					}
+				}
+			}
+			if (!found.isEmpty() && missingTime == 0) {
+				NOTES.clear();
+				NOTES.addAll(found);
+				NOTES.sort((a, b) -> Double.compare(a.timeSec, b.timeSec));
+				TIME_BY_POS.clear();
+				for (Note n : NOTES) {
+					TIME_BY_POS.put(net.minecraft.util.math.BlockPos.asLong(n.x(), n.y() + 1, n.z()), n.timeSec());
+				}
+				lastError = null;
+				NbmachinaMod.LOGGER.info("[nbmachina] 谱面来自**方块实体**（机器自描述）：{} 颗音，origin=({},{},{}) 段数={}",
+					NOTES.size(), ox, oy, oz, segments);
+				return NOTES.size();
+			}
+			NbmachinaMod.LOGGER.warn("[nbmachina] 方块实体建表不完整（找到 {} 颗，缺 time_sec {} 颗）→ 回落 machine_map.csv",
+				found.size(), missingTime);
+			return 0;
+		} catch (Exception e) {
+			lastError = "读 machine.json 失败：" + e.getMessage();
+			return 0;
+		}
+	}
+
 	/** 某个音符盒（方块坐标 packed）对应的谱面时间；没有就返回 0（= 立即播） */
 	public static double scoreTimeAt(long packedPos) {
 		Double v = TIME_BY_POS.get(packedPos);
