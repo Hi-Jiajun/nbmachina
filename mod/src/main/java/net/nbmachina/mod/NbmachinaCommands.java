@@ -77,14 +77,28 @@ public final class NbmachinaCommands {
 				.then(CommandManager.literal("lyricoff")
 					.executes(ctx -> {
 						ctx.getSource().sendFeedback(() -> Text.literal(String.format(
-							"[nbmachina] 歌词平移 = %+.2fs（正数 = 更晚出现）", net.nbmachina.mod.show.StyxShow.lyricOffset())), false);
+							"[nbmachina] 歌词平移 = %+.2fs", net.nbmachina.mod.show.StyxShow.lyricOffset())), false);
 						return 1;
 					})
 					.then(CommandManager.argument("sec", FloatArgumentType.floatArg(-10.0F, 10.0F)).executes(ctx -> {
 						float v = FloatArgumentType.getFloat(ctx, "sec");
 						net.nbmachina.mod.show.StyxShow.setLyricOffset(v);
 						ctx.getSource().sendFeedback(() -> Text.literal(String.format(
-							"[nbmachina] 歌词平移已设为 %+.2fs（下一次 /nbm machine start 生效）", v)), true);
+							"[nbmachina] 歌词平移已设为 %+.2fs（下次 /nbm machine start 生效）", v)), true);
+						return 1;
+					})))
+				.then(CommandManager.literal("textmatrix")
+					.executes(ctx -> {
+						ctx.getSource().sendFeedback(() -> Text.literal(String.format(
+							"[nbmachina] 当前文字矩阵 = %s", net.nbmachina.mod.show.StyxShow.matrixName())), false);
+						return 1;
+					})
+					.then(CommandManager.argument("n", IntegerArgumentType.integer(1, 6)).executes(ctx -> {
+						int n = IntegerArgumentType.getInteger(ctx, "n");
+						net.nbmachina.mod.show.StyxShow.setMatrixIndex(n - 1);
+						ctx.getSource().sendFeedback(() -> Text.literal(String.format(
+							"[nbmachina] 文字矩阵 = %d（%s）——1 竖立朝 −x / 2 竖立朝 +x / 3 平铺 / 5 标准 / 6 绕Y90°",
+							n, net.nbmachina.mod.show.StyxShow.matrixName())), true);
 						return 1;
 					})))
 				.then(CommandManager.literal("start")

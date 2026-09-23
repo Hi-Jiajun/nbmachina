@@ -28,11 +28,26 @@ import net.nbmachina.mod.NbmachinaMod;
  */
 public final class StyxShow {
 	private static final Gson GSON = new Gson();
-	/** 平铺在水面上：读向 = +x、字上 = −z（预演里已按同一朝向验证过） */
-	private static final String FLAT_MATRIX = "(0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)";
+	/**
+	 * 文字朝向的候选矩阵（`/nbm machine textmatrix <序号>` 现场切）。
+	 * 2026-09-24 实测口径：用户机位是**与海平面平行**、沿机器飞——所以默认要用「竖立、正对相机」那一版，
+	 * 平铺（俯视才成立）只在从上方俯视时才对。
+	 */
+	private static final String[] MATRICES = {
+		"(0,0,0,0,,0,-1,0,0,,1,0,0,0,,0,0,0,1)",    // 1 竖立·正对 −x（相机朝 +x 飞）★默认
+		"(0,0,0,0,,0,-1,0,0,,-1,0,0,0,,0,0,0,1)",   // 2 竖立·正对 +x（相机朝 −x 飞）
+		"(0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)",    // 3 平铺（读向 +x、字上 −z）——俯视用
+		"(0,-1,0,0,,0,0,0,0,,1,0,0,0,,0,0,0,1)",    // 4 平铺·反向
+		"E4",                                       // 5 标准平面（朝 ±z）
+		"(-1,0,0,0,,0,0,0,0,,0,1,0,0,,0,0,0,1)",    // 6 竖直平面·绕 Y 转 90°
+	};
+	private static final String FLAT_MATRIX = MATRICES[2];
+	/** 文字是否平铺（决定"屏幕下方"是 +x 还是 −y）：默认竖立 */
+	private static int matrixIndex = 0;
 	private static final double ZC = 2.5;                    // 机器音轨轴（河心）
 	private static final double DECK_TOP = 111.0;            // 甲板顶面（machine_map 的 y=110 是甲板方块）
-	private static final double LYRIC_Y = DECK_TOP + 1.25;   // 标签/歌词的平铺高度（音符盒顶层在 112.0）
+	/** 文字基准高度：竖立时是行顶（行向下延伸到 −y）；音符盒顶层在 112.0，所以压在 113.4 上方一点 */
+	private static final double LYRIC_Y = DECK_TOP + 2.4;
 	private static final double PLAYHEAD_A = 8.3341, PLAYHEAD_B = -32.784;
 
 	private record LyricChar(double t, String c, double z, double w, double dur) {
@@ -68,6 +83,14 @@ public final class StyxShow {
 
 	public static void setLyricOffset(double sec) {
 		lyricOffset = sec;
+	}
+
+	public static void setMatrixIndex(int i) {
+		matrixIndex = Math.max(0, Math.min(MATRICES.length - 1, i));
+	}
+
+	public static String matrixName() {
+		return MATRICES[matrixIndex];
 	}
 
 	public static double lyricOffset() {
@@ -115,15 +138,16 @@ public final class StyxShow {
 
 	private static String flareEdges(double cx, double cy, double cz, String col) {
 		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
-			+ " \"size=3.2; cr,cg,cb=" + col + "; alpha=0.92; age=28; light=1.0\" 0.5 0.5 0.5 "
+			+ " \"size=0.9; cr,cg,cb=" + col + "; alpha=0.92; age=28; light=1.0\" 0.5 0.5 0.5 "
 			+ "\"abs(abs(x)-0.5)<0.01&abs(abs(y)-0.5)<0.01|abs(abs(x)-0.5)<0.01&abs(abs(z)-0.5)<0.01"
-			+ "|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01\" 0.25 "
+			+ "|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01\" 0.1 "
 			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.11/(1+t/9); alpha=0.92*(1-t/27)\" 1.0";
 	}
 
+	/** 涟漪：`custom-parameter` 只有**一个**字面量，极坐标要写成 `... <模式> ...`（normal|polar|tick|tick-polar） */
 	private static String flareRipple(double cx, double cz) {
-		return "particlex custom-polar-parameter end_rod " + fmt(cx) + " " + fmt(DECK_TOP + 0.15) + " " + fmt(cz)
-			+ " 0 6.2832 \"s1=t; s2=0; dis=0.5; size=2.6; cr,cg,cb=0.15,0.86,0.80; alpha=0.9; age=30; light=1.0\" 0.1 "
+		return "particlex custom-parameter end_rod " + fmt(cx) + " " + fmt(DECK_TOP + 0.15) + " " + fmt(cz)
+			+ " polar 0 6.2832 \"s1=t; s2=0; dis=0.5; size=2.6; cr,cg,cb=0.15,0.86,0.80; alpha=0.9; age=30; light=1.0\" 0.1 "
 			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.12/(1+t/10); alpha=0.9*(1-t/29)\" 1.0";
 	}
 
@@ -134,8 +158,8 @@ public final class StyxShow {
 	}
 
 	private static String accentRing(double t) {
-		return "particlex custom-polar-parameter end_rod " + fmt(PLAYHEAD_A * t + PLAYHEAD_B + 0.5) + " "
-			+ fmt(DECK_TOP + 0.18) + " " + fmt(ZC) + " 0 6.2832 "
+		return "particlex custom-parameter end_rod " + fmt(PLAYHEAD_A * t + PLAYHEAD_B + 0.5) + " "
+			+ fmt(DECK_TOP + 0.18) + " " + fmt(ZC) + " polar 0 6.2832 "
 			+ "\"s1=t; s2=0; dis=0.6; size=3.0; cr,cg,cb=0.15,0.86,0.80; alpha=0.5; age=32; light=1.0\" 0.08 "
 			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.42/(1+t/6); alpha=0.5*(1-t/31)\" 1.0";
 	}
@@ -146,9 +170,9 @@ public final class StyxShow {
 		double x = PLAYHEAD_A * c.t() + PLAYHEAD_B + 5.0;
 		double z = ZC + line.w() / 2 - c.z();
 		return "particlex text end_rod " + fmt(x) + " " + fmt(LYRIC_Y) + " " + fmt(z) + " \"" + escape(c.c())
-			+ "\" " + fmt(line.scale()) + " \"" + FLAT_MATRIX + "\" " + fmt(dpb()) + " 0 0 0 "
+			+ "\" " + fmt(line.scale()) + " \"" + MATRICES[matrixIndex] + "\" " + fmt(dpb()) + " 0 0 0 "
 			+ Math.max(1, (int) Math.round((line.end() - c.t() + 0.8) * 20))
-			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; size=1+0.9*exp(-t/5); "
+			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; size=1+1.6*exp(-t/4); "
 			+ "cr,cg,cb=lerp(clamp(t/" + d + ",0,1),0.32,1.0),lerp(clamp(t/" + d + ",0,1),0.46,0.98),"
 			+ "lerp(clamp(t/" + d + ",0,1),0.52,1.0); alpha=0.42+0.58*clamp(t/" + d + ",0,1)\" 1.0";
 	}
@@ -157,8 +181,8 @@ public final class StyxShow {
 	private static String lyricTranslation(LyricLine line) {
 		if (line.tr() == null || line.tr().isBlank()) return null;
 		double x = PLAYHEAD_A * line.t() + PLAYHEAD_B + 7.4;
-		return "particlex text end_rod " + fmt(x) + " " + fmt(LYRIC_Y) + " " + fmt(ZC)
-			+ " \"" + escape(line.tr()) + "\" " + fmt(line.scale() * 0.52) + " \"" + FLAT_MATRIX + "\" " + fmt(dpb())
+		return "particlex text end_rod " + fmt(x) + " " + fmt(LYRIC_Y - 1.05) + " " + fmt(ZC)
+			+ " \"" + escape(line.tr()) + "\" " + fmt(line.scale() * 0.52) + " \"" + MATRICES[matrixIndex] + "\" " + fmt(dpb())
 			+ " 0 0 0 " + Math.max(1, (int) Math.round((line.end() - line.t() + 0.8) * 20))
 			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; alpha=0.62\" 1.0";
 	}
@@ -299,7 +323,10 @@ public final class StyxShow {
 		String firstErr = null;
 		for (String c : cmds) {
 			try {
-				src.getServer().getCommandManager().getDispatcher().parse(c, src.withMaxLevel(4));
+				var p = src.getServer().getCommandManager().getDispatcher().parse(c, src.withMaxLevel(4));
+				// ⚠ parse() 对"多余尾巴"不报错（Brigadier 的特性）：必须再查 reader 有没有剩余输入，
+				//    否则像 custom-polar-parameter 这种**不存在的字面量**会被判成"通过"（2026-09-24 真踩过）。
+				if (p.getReader().canRead()) throw new IllegalArgumentException("未解析完：" + p.getReader().getRemaining());
 				ok++;
 			} catch (Throwable e) {
 				if (firstErr == null) firstErr = e.toString() + "  ←  " + c;
