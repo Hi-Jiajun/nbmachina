@@ -19,6 +19,8 @@ const TTML_DATA = arg('ttml', path.join(ROOT, '_scratch-m3-80', 'styx_ttml_maste
 const TEXT_MATRIX = '(0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)';   // 平铺在水面：读向=+x、字上=−z（与预演里验证过的朝向一致）
 const DPB = 8;        // text 的 dpb = 每格几个字体像素
 const LINE_W = 20;    // 一行最多占几格（机器那条水面宽 25 格）
+// 逐字的等宽格（格）：字形 PNG 是 48×48，mod 侧用 dpb = 48/ADV 让**一个格子正好一格宽**
+const ADV = 1.25;
 const D = path.join(OUT, 'data', 'styxshow', 'function');
 const TAG = path.join(OUT, 'data', 'minecraft', 'tags', 'function');
 const MODE = TPS >= 50 ? 'hi' : 'lo';
@@ -82,14 +84,21 @@ if (JSON_OUT) {
     // 一行最多占 LINE_W 格：用字体像素宽度估总宽，超了就整体缩小
     const wpx = l.chars.reduce((a, c) => a + (c.c.codePointAt(0) > 0x7e ? 5.2 : 3.0) * 3.0, 0);
     const scale = Math.min(3.0, (LINE_W * DPB) / Math.max(1, wpx) * 3.0);
+    // TTML 的 span 是**音节块**（"Oh "、"plea"…），不是单字：这里按字符拆开，
+    // 时值在块内均分（块的首末时间仍然是 TTML 原值），并给每个字一个等宽格（ADV 格）。
+    // 2026-09-24：之前直接拿块当"字"（只画 charAt(0)）→ 屏幕上是 "O p s d l m d" 这种乱码。
     let z = 0;
-    const chars = l.chars.map((c) => {
-      const advPx = (c.c.codePointAt(0) > 0x7e ? 5.2 : 3.0) * scale;
-      const w = +((advPx + (c.c.codePointAt(0) > 0x7e ? 3.5 : 2.5)) / DPB).toFixed(3);   // 字宽 + 字距
-      const o = { t: +c.s.toFixed(3), c: c.c, w, dur: +Math.max(0.12, c.e - c.s).toFixed(3), z: +z.toFixed(3) };
-      z += w;
-      return o;
-    });
+    const chars = [];
+    for (const c of l.chars) {
+      const text = [...c.c];
+      const n = Math.max(1, text.length);
+      const dur = Math.max(0.06, (c.e - c.s) / n);
+      for (let i = 0; i < n; i++) {
+        const o = { t: +(c.s + i * dur).toFixed(3), c: text[i], w: ADV, dur: +dur.toFixed(3), z: +z.toFixed(3) };
+        z += ADV;
+        chars.push(o);   // 空格也占格（推进 z），渲染时由 mod 侧跳过
+      }
+    }
     return { t: +l.start.toFixed(3), end: +l.end.toFixed(3), scale: +scale.toFixed(2), tr: l.translation ?? null, w: +z.toFixed(2), chars };
   });
   const doc = {

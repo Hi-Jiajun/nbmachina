@@ -11,6 +11,7 @@ import com.google.gson.Gson;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.command.ServerCommandSource;
+import net.minecraft.server.network.ServerPlayerEntity;
 import net.minecraft.server.world.ServerWorld;
 import net.nbmachina.mod.NbmachinaMod;
 
@@ -30,24 +31,27 @@ public final class StyxShow {
 	private static final Gson GSON = new Gson();
 	/**
 	 * 文字朝向的候选矩阵（`/nbm machine textmatrix <序号>` 现场切）。
-	 * 2026-09-24 实测口径：用户机位是**与海平面平行**、沿机器飞——所以默认要用「竖立、正对相机」那一版，
-	 * 平铺（俯视才成立）只在从上方俯视时才对。
+	 *
+	 * <p>2026-09-24 实机对照（把 'E' 用三种矩阵摆在同一机位前拍照比对）确认的口径：
+	 * image 粒子的图像坐标里 u 是读向、v 已经翻转成「上」，所以**相机朝 +x（东）时**
+	 * 正确的映射是 <b>u → +z、v → +y</b>（= 1 号）。上一版默认的 (u→−z, v→−y)
+	 * 等于整幅画面**同时左右镜像 + 上下颠倒**——这就是「歌词朝向始终不对」的真因。
 	 */
 	private static final String[] MATRICES = {
-		"(0,0,0,0,,0,-1,0,0,,-1,0,0,0,,0,0,0,1)",   // 1 竖立·正对 −x·**镜像读向**（修"标题/歌词是反的"）★默认
-		"(0,0,0,0,,0,-1,0,0,,1,0,0,0,,0,0,0,1)",    // 2 竖立·正对 −x（上一版默认）
-		"(0,0,0,0,,0,-1,0,0,,1,0,0,0,,0,0,0,1)",    // 3 同 2（占位，便于现场对照）
-		"(0,0,0,0,,0,-1,0,0,,-1,0,0,0,,0,0,0,1)",   // 4 同 1（占位）
-		"(0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)",    // 5 平铺（读向 +x、字上 −z）——俯视用
-		"E4",                                       // 6 标准平面（朝 ±z）
+		"(0,0,0,0,,0,1,0,0,,1,0,0,0,,0,0,0,1)",     // 1 竖立·正对朝 +x 飞的机位（u→+z、上→+y）★默认
+		"(0,0,0,0,,0,1,0,0,,-1,0,0,0,,0,0,0,1)",    // 2 同 1 但左右镜像（现场对照用）
+		"(0,0,0,0,,0,-1,0,0,,1,0,0,0,,0,0,0,1)",    // 3 同 1 但上下颠倒（现场对照用）
+		"(0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)",    // 4 平铺（俯视/水面用，法线朝 +y）
+		"(1,0,0,0,,0,1,0,0,,0,0,0,0,,0,0,0,1)",     // 5 正对朝 −z 看的机位
+		"(-1,0,0,0,,0,1,0,0,,0,0,0,0,,0,0,0,1)",    // 6 正对朝 +z 看的机位
 	};
-	private static final String FLAT_MATRIX = MATRICES[4];
+	private static final String FLAT_MATRIX = MATRICES[3];
 	/** 文字是否平铺（决定"屏幕下方"是 +x 还是 −y）：默认竖立 */
 	private static int matrixIndex = 0;
 	private static final double ZC = 2.5;                    // 机器音轨轴（河心）
 	private static final double DECK_TOP = 111.0;            // 甲板顶面（machine_map 的 y=110 是甲板方块）
-	/** 文字基准高度：竖立时是行顶（行向下延伸到 −y）；音符盒顶层在 112.0，所以压在 113.4 上方一点 */
-	private static final double LYRIC_Y = DECK_TOP + 2.4;
+	/** 唱词基准（图像锚点 = **左下角**：图像沿 +u 右、沿 +v 上展开）。音符盒顶面 112.0 → 抬到 114.1 */
+	private static final double LYRIC_Y = DECK_TOP + 3.1;
 	private static final double PLAYHEAD_A = 8.3341, PLAYHEAD_B = -32.784;
 	/** M5-4：河/螺旋暂缓（用户："其他地方先别做了，等后面一起设计"），只留音符盒 + 文字 */
 	private static final boolean AMBIENT_ON = false;
@@ -122,61 +126,105 @@ public final class StyxShow {
 			+ "\"s1=t*0.62+" + phase + "; s2=1.5708; dis=4.2\" 0.12 3 40";
 	}
 
-	private static String title() {
-		return "particlex image-matrix end_rod 8 " + fmt(LYRIC_Y + 3.0) + " " + fmt(ZC) + " title2x.png 1.0 \""
-			+ MATRICES[matrixIndex] + "\" 96.0 0 0 0 150";
+	// ── 开场三件套：封面 + 标题 + 副标题 ────────────────────────────
+	// 素材尺寸 → 世界尺寸：封面 128px÷dpb16 = 8 格；标题 384px÷dpb48 = 8×1.33 格；副标题 256px÷dpb48 = 5.3×1 格
+	private static final double COVER_DPB = 16.0, COVER_W = 8.0;
+	private static final double TITLE_DPB = 48.0, TITLE_W = 8.0, TITLE_H = 64.0 / TITLE_DPB;
+	private static final double SUB_DPB = 48.0, SUB_W = 256.0 / SUB_DPB, SUB_H = 48.0 / SUB_DPB;
+	/** 开场距离：整组浮在玩家眼前，跟着机位走（不再依赖"玩家正好飞到某个坐标"） */
+	private static final double OPEN_DIST = 13.5;
+	/** start 时按玩家朝向算出来的「正对相机」矩阵（u→相机右、v→相机上） */
+	private static String openingMatrix = MATRICES[0];
+
+	/** 主标题：淡入 0.5s → 3.1s 起淡出；与封面同平面（偏移沿相机上方向量算） */
+	private static String title(double ax, double ay, double az) {
+		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
+			+ " title.png 1.0 \"" + openingMatrix + "\" " + fmt(TITLE_DPB) + " 0 0 0 90 "
+			+ "\"alpha=clamp(t/0.5,0,1)*clamp(1-(t-2.9)/0.7,0,1); size=0.7\" 0.05";
 	}
 
-	private static String subtitle() {
-		return "particlex image-matrix end_rod 11 " + fmt(LYRIC_Y + 3.0) + " " + fmt(ZC) + " subtitle2x.png 1.0 \""
-			+ MATRICES[matrixIndex] + "\" 80.0 0 0 0 140";
+	private static String subtitle(double ax, double ay, double az) {
+		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
+			+ " subtitle.png 1.0 \"" + openingMatrix + "\" " + fmt(SUB_DPB) + " 0 0 0 90 "
+			+ "\"alpha=clamp((t-0.45)/0.5,0,1)*clamp(1-(t-3.0)/0.7,0,1); size=0.7\" 0.05";
 	}
 
-	/** 开场：专辑封面平铺（素材 = `<游戏目录>/particleImages/styx-cover-64.png`，64×64） */
-	private static String cover() {
-		return "particlex image-matrix end_rod -10 " + fmt(LYRIC_Y + 3.5) + " " + fmt(ZC)
-			+ " styx-cover-128.png 1.0 \"" + MATRICES[matrixIndex] + "\" 16.0 0 0 0 80";
+	/**
+	 * 专辑封面（128×128 px ÷ dpb16 = 8 格）。
+	 *
+	 * <p>淡化动效（用户 2026-09-24 口径："封面淡化动效做得不太好"）：
+	 * ① 0–0.45s 淡入；② 2.0s 起**按行从上往下**分批被吹散——每颗粒子按初始高度 dy 错开
+	 * 0.65s 的起始时刻，边沿 +x 流走边淡出；③ 3.7s 前散尽（第一颗音在 3.917s）。
+	 */
+	private static String cover(double ax, double ay, double az) {
+		String p = "clamp((t-(2+((1-dy/8)*1.05)))/0.65,0,1)";
+		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
+			+ " styx-cover-128.png 1.0 \"" + openingMatrix + "\" " + fmt(COVER_DPB) + " 0 0 0 90 "
+			+ "\"alpha=clamp(t/0.45,0,1)*(1-" + p + "); vx=0.12*" + p + "; vy=0.03*" + p + "\" 0.05";
 	}
 
-	/** 逐字格宽（格）：48px 的字形图 ÷ dpb(24) = 2 格 + 0.25 字距 */
-	private static final double CELL = 2.25, CELL_DPB = 24.0;
+	/**
+	 * 逐字等宽格（格）：show-pack 生成的 show.json 里每个字占 {@code ADV} 格（含字距），
+	 * 48px 的字形图用 dpb = 48/ADV 摆上去，正好一格一个字形；整行超过 {@code LINE_MAX} 格时
+	 * 按 {@code fit} 等比缩小（字形和排布一起缩），免得长句子飞出机器那条水带。
+	 */
+	private static final double ADV = 1.25, GLYPH_DPB = 48.0 / ADV, LINE_MAX = 26.0;
+	/** 柔光/涟漪的预渲染素材参数（16px / 24px，见 `_scratch-m3-80/render-show-pngs.mjs`） */
+	private static final double GLOW_DPB = 8.0, GLOW_R = 16.0 / GLOW_DPB / 2;   // 直径 2 格
+	private static final double RING_DPB = 15.0, RING_R = 24.0 / RING_DPB / 2;  // 直径 1.6 格
+	/** 逐字点尺寸：四边形 ≈ 笔画宽（4×点距），实机对照 1.0 偏散、2.5 偏糊 */
+	private static final double LYRIC_SIZE = 32.0 / GLYPH_DPB;
 
 	private static String flareEdges(double cx, double cy, double cz, String col) {
 		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
 			// step 必须能整除 1.0：0.05 → 采样点正好落在 ±0.5 上，12 条棱全中；
 			// 0.06 会让 ±0.5 只被部分命中（2026-09-24 用户实测"只有 3 条棱"就是这个）
-			+ " \"size=0.9; cr,cg,cb=" + col + "; alpha=0.92; age=26; light=1.0\" 0.5 0.5 0.5 "
+			+ " \"size=0.55; cr,cg,cb=" + col + "; alpha=0.95; age=24; light=1.0\" 0.5 0.5 0.5 "
 			+ "\"abs(abs(x)-0.5)<0.01&abs(abs(y)-0.5)<0.01|abs(abs(x)-0.5)<0.01&abs(abs(z)-0.5)<0.01"
 			+ "|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01\" 0.05 "
 			// 扩散节奏跟"音符盒响"对齐：约 12 刻放到 1.4×，之后只淡出
-			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.034; alpha=0.92*(1-t/25)\" 1.0";
+			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.03; alpha=0.95*(1-t/24)\" 1.0";
 	}
 
 	/**
-	 * 柔光 = **音符盒顶面亮一下再消退**（用户口径）：在顶面铺一层大尺寸低透明的点，
-	 * 边亮边淡（粒子 alpha 完全可控，这就是柔光该用的做法；不用另加光斑/雾球）。
+	 * 柔光 = **正对机位的圆形光晕**（素材 glow.png = 预渲染径向渐变，16px ÷ dpb8 = 2 格）。
+	 *
+	 * <p>旧版用一颗 size 9→25 的 end_rod 冒充柔光，实测是「一大片实心色块」（2026-09-24 视频取证），
+	 * 因为单颗 end_rod 的精灵本身就是个硬边六边形。真正柔和的圆晕只能靠**逐像素带 alpha 的图**：
+	 * 每颗粒子吃 PNG 的像素 alpha（0.55 峰值）叠出连续衰减；颜色仍按音高给（cr,cg,cb 覆盖）。
 	 */
 	private static String flareGlow(double cx, double cy, double cz, String col) {
-		double y = DECK_TOP + 1.03;
-		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(y) + " " + fmt(cz)
-			+ " \"size=9; cr,cg,cb=" + col + "; alpha=0.30; age=16; light=1.0\" 0.5 0.02 0.5 \"1\" 0.25 "
-			+ "\"alpha=0.30*(1-t/15); size=9+16*t/16\" 1.0";
+		// 锚点 = 图像左下角 → 想让圆心落在音符盒中心，锚点要往左下各退 1 格
+		return "particlex image-matrix end_rod " + fmt(cx - GLOW_R) + " " + fmt(cy - GLOW_R) + " " + fmt(cz - GLOW_R)
+			+ " glow.png 1.0 \"" + MATRICES[0] + "\" " + fmt(GLOW_DPB) + " 0 0 0 15 "
+			// ⚠ alpha 一律写**绝对值**：写 `alpha=alpha*k` 会被逐刻自乘（第一刻乘到 0 就永远 0，
+			//   粒子还在、画面全空——2026-09-24 实测 15k 颗粒子在内存里但屏幕上一个都没有）。
+			//   径向衰减由每颗粒子自己的初始偏移 (dx,dy,dz) 现算，PNG 只负责"哪些像素存在"。
+			+ "\"size=1.0; cr,cg,cb=" + col + "; alpha=0.55*clamp(t/2,0,1)*(1-t/15)"
+			+ "*exp(-(dx*dx+dy*dy+dz*dz)/0.6)\" 1.0";
 	}
 
 	/** 余辉：弹过的音留一小块低透明色斑（2.5s），让"颜色沿着河往下传"看起来是流动的 */
 	private static String flareTrail(double cx, double cz, String col) {
 		return "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(DECK_TOP + 1.02) + " " + fmt(cz)
-			+ " \"size=7; cr,cg,cb=" + col + "; alpha=0.13; age=50; light=1.0\" 0.05 0.01 0.05 3 "
-			+ "\"alpha=0.13*(1-t/49)\" 1.0";
+			+ " \"size=6; cr,cg,cb=" + col + "; alpha=0.10; age=50; light=1.0\" 0.05 0.01 0.05 3 "
+			+ "\"alpha=0.10*(1-t/49)\" 1.0";
 	}
 
-	/** 涟漪：`custom-parameter` 只有**一个**字面量，极坐标要写成 `... <模式> ...`（normal|polar|tick|tick-polar） */
+	/**
+	 * 涟漪 = **音符盒顶面铺开的圆环**（素材 ring.png = 预渲染高斯环，24px ÷ dpb15 = 1.6 格）。
+	 *
+	 * <p>旧版用 `custom-parameter polar` 撒一圈点再往外推，视频里是梳齿状断弧（不连贯）；
+	 * 换成逐像素带 alpha 的环图后，`(vx,vy,vz)=(dx,dy,dz)*k` 是**等比放大**（半径按 (1+k)^t 指数长），
+	 * 环始终连续，1.3s 内从 0.8 格推到 ~2.3 格并淡出。
+	 */
 	private static String flareRipple(double cx, double cz, String col) {
-		// y = 音符盒**顶面**（音符盒占 111..112）：涟漪就该在表面荡开，埋在方块里是看不见的
-		// ⚠ 模式在**名字之前**：`custom-parameter <mode> <粒子> <坐标> …`（2026-09-24 第 27 字符处报错就是这个）
-		return "particlex custom-parameter polar end_rod " + fmt(cx) + " " + fmt(DECK_TOP + 1.02) + " " + fmt(cz)
-			+ " 0 6.2832 \"s1=t; s2=0; dis=0.5; size=2.6; cr,cg,cb=" + col + "; alpha=0.9; age=30; light=1.0\" 0.1 "
-			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.12/(1+t/10); alpha=0.9*(1-t/29)\" 1.0";
+		// 平铺矩阵 (0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)：v→+x、u→−z ⇒ 锚点要 (+x, +z) 各退 R
+		return "particlex image-matrix end_rod " + fmt(cx - RING_R) + " " + fmt(DECK_TOP + 1.03) + " " + fmt(cz + RING_R)
+			+ " ring.png 1.0 \"" + FLAT_MATRIX + "\" " + fmt(RING_DPB) + " 0 0 0 26 "
+			// 环带的柔和度同样现算：r 用粒子自己的初始偏移长度，峰在 0.65 格、σ≈0.12 格
+			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.055; size=0.7; cr,cg,cb=" + col
+			+ "; alpha=0.9*(1-t/26)*exp(-pow(sqrt(dx*dx+dy*dy+dz*dz)-0.65,2)/0.03)\" 1.0";
 	}
 
 	private static String flareSparks(double cx, double cy, double cz) {
@@ -196,44 +244,61 @@ public final class StyxShow {
 	 * 逐字：用**预渲染字形 PNG**（Noto Sans SC / OFL，见 _scratch-m3-80/render-lyric-pngs.mjs）
 	 * + image-matrix 摆放 —— 比 text 的系统字体点阵锐得多；颜色/透明度由逐刻表达式给（唱到哪亮到哪 + 弹一下）。
 	 */
-	private static String lyricChar(LyricLine line, LyricChar c, int index, int count) {
+	private static String lyricChar(LyricLine line, LyricChar c, int index) {
 		int d = Math.max(1, (int) Math.round(c.dur() * 20));
 		double x = PLAYHEAD_A * c.t() + PLAYHEAD_B + 5.0;
-		double z = ZC + count * CELL / 2 - index * CELL;
+		// 读向是 +z（= 相机右）：逐字的左边界取 show.json 的累计 z，整行按总宽 line.w() 居中。
+		// （上一版是 `index * CELL` 定步长 + 只画音节块首字母 → 屏幕上 "O p s d l m d" 那种乱码）
+		double fit = Math.min(1.0, LINE_MAX / Math.max(1.0, line.w()));
+		double z = ZC + (c.z() - line.w() / 2) * fit;
 		String file = "ly" + String.format("%04x", c.c().codePointAt(0)) + ".png";
-		double tint = line.scale() / 3.0;                 // 行内自动缩放：3.0 是基准
 		return "particlex image-matrix end_rod " + fmt(x) + " " + fmt(LYRIC_Y) + " " + fmt(z) + " " + file
-			+ " " + fmt(Math.max(0.5, tint)) + " \"" + MATRICES[matrixIndex] + "\" " + fmt(CELL_DPB) + " 0 0 0 "
+			+ " 1.0 \"" + MATRICES[matrixIndex] + "\" " + fmt(GLYPH_DPB / fit) + " 0 0 0 "
 			+ Math.max(1, (int) Math.round((line.end() - c.t() + 0.8) * 20))
-			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; size=1+1.6*exp(-t/4); "
-			+ "cr,cg,cb=lerp(clamp(t/" + d + ",0,1),0.32,1.0),lerp(clamp(t/" + d + ",0,1),0.46,0.98),"
-			+ "lerp(clamp(t/" + d + ",0,1),0.52,1.0); alpha=0.42+0.58*clamp(t/" + d + ",0,1)\" 1.0";
+			// ① 骑流：vx = 播放头速度，整行像船一样跟着河走；② 浮动：AMLL 的 y±0.07 正弦
+			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; vy=0.004*cos(t/20*1.15+" + fmt(index * 1.7) + "); "
+			// ③ 弹性缩放（AMLL spring 的近似）：刚亮起放大 22%，3 刻衰减 → 落在锐利的 1.4
+			+ "size=" + fmt(LYRIC_SIZE) + "*(1+0.22*exp(-t/3)); "
+			// ④ 唱到哪亮到哪：未唱 = 冥河青的暗调，唱过 = 苍白色（颜色也随音高微调见 hueColor）
+			+ "cr,cg,cb=lerp(clamp(t/" + d + ",0,1),0.20,0.93),lerp(clamp(t/" + d + ",0,1),0.28,0.98),"
+			+ "lerp(clamp(t/" + d + ",0,1),0.32,1.0); alpha=0.34+0.66*clamp(t/" + d + ",0,1)\" 1.0";
 	}
 
-	/** 译文：屏幕下方（= +x 方向）、小一号、暗一点 */
-	private static String lyricTranslation(LyricLine line) {
+	/**
+	 * 译文：唱词**下方**（图像锚点是左下角，所以基准要再降一个行高）、小一号、暗一点。
+	 *
+	 * <p>⚠ **不用 ExParticle 的 `text` 族**：它的「文本 → 图像」是自管 GL 离屏光栅化 + `glReadPixels`，
+	 * 开着 Iris 光影包时会直接打崩 NVIDIA 驱动（2026-09-24 实测：0.2.0 起播到 22.4s、第一句译文落地
+	 * 的瞬间 EXCEPTION_ACCESS_VIOLATION，hs_err 的 Java 栈 = TextUtil.requestImage →
+	 * GlTextRasterizer.rasterize → glReadPixels → nvoglv64.dll）。译文与逐字一样改成**预渲染 PNG**
+	 * （`trNNN.png`，见 `_scratch-m3-80/render-show-pngs.mjs`），走 image-matrix 就没有这条 GL 路径。
+	 */
+	private static String lyricTranslation(LyricLine line, int lineIndex) {
 		if (line.tr() == null || line.tr().isBlank()) return null;
-		double x = PLAYHEAD_A * line.t() + PLAYHEAD_B + 7.4;
-		return "particlex text end_rod " + fmt(x) + " " + fmt(LYRIC_Y - 1.05) + " " + fmt(ZC)
-			+ " \"" + escape(line.tr()) + "\" " + fmt(line.scale() * 0.52) + " \"" + MATRICES[matrixIndex] + "\" " + fmt(dpb())
-			+ " 0 0 0 " + Math.max(1, (int) Math.round((line.end() - line.t() + 0.8) * 20))
-			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; alpha=0.62\" 1.0";
+		double x = PLAYHEAD_A * line.t() + PLAYHEAD_B + 6.6;
+		// 译文字号固定 24px、dpb 24 ⇒ 每字正好 1 格宽，宽度 = 字数，按此居中
+		int n = line.tr().length();
+		double z = ZC - n / 2.0;
+		return "particlex image-matrix end_rod " + fmt(x) + " " + fmt(LYRIC_Y - 2.35) + " " + fmt(z)
+			+ " tr" + String.format("%03d", lineIndex) + ".png 1.0 \"" + MATRICES[matrixIndex] + "\" 24 0 0 0 "
+			+ Math.max(1, (int) Math.round((line.end() - line.t() + 0.8) * 20))
+			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; size=0.7; alpha=0.62*clamp(t/4,0,1)\" 1.0";
 	}
 
-	/** 朝向探针：同一句话用 6 个矩阵各来一份，用户指哪个是正的我就定哪个 */
+	/** 朝向探针：同一张图用 6 个矩阵各来一份（**不用 text 族**，见 lyricTranslation 的警告） */
 	private static List<String> probeCmds() {
 		String[] mats = {
-			"E4",
-			FLAT_MATRIX,
-			"(0,-1,0,0,,0,0,0,0,,1,0,0,0,,0,0,0,1)",
-			"(1,0,0,0,,0,0,1,0,,0,-1,0,0,,0,0,0,1)",
-			"(-1,0,0,0,,0,0,-1,0,,0,1,0,0,,0,0,0,1)",
-			"(0,1,0,0,,0,0,0,0,,1,0,0,0,,0,0,0,1)",
+			"(-1,0,0,0,,0,1,0,0,,0,0,0,0,,0,0,0,1)",   // 朝 −z 看
+			"(0,0,0,0,,0,1,0,0,,1,0,0,0,,0,0,0,1)",    // ★ 朝 +x 看（默认）
+			"(1,0,0,0,,0,1,0,0,,0,0,0,0,,0,0,0,1)",    // 朝 +z 看
+			"(0,0,0,0,,0,1,0,0,,-1,0,0,0,,0,0,0,1)",   // 左右镜像
+			"(0,0,0,0,,0,-1,0,0,,1,0,0,0,,0,0,0,1)",   // 上下颠倒
+			FLAT_MATRIX,                               // 平铺
 		};
 		List<String> out = new ArrayList<>();
 		for (int i = 0; i < mats.length; i++) {
-			out.add("particlex text end_rod ~ ~" + (3 + i * 2) + " ~ \"" + (i + 1) + " ABC " + (i + 1) + "\" 3.0 \""
-				+ mats[i] + "\" 8.0 0 0 0 600");
+			out.add("particlex image-matrix end_rod ~ ~" + (3 + i * 2) + " ~ title.png 1.0 \"" + mats[i]
+				+ "\" 48 0 0 0 600");
 		}
 		return out;
 	}
@@ -289,13 +354,45 @@ public final class StyxShow {
 			exec(world, helix(0.0));
 			exec(world, helix(3.1416));
 		}
-		if (fromSec < 3.5) {
-			exec(world, cover());
-			exec(world, title());
-			exec(world, subtitle());
-		}
-		NbmachinaMod.LOGGER.info("[styxshow] 视效层启动：从 {}s 起（重音剩 {} / 歌词剩 {} 行，整体平移 {:+.2f}s）",
+		if (fromSec < 3.5) opening(world);
+		NbmachinaMod.LOGGER.info("[styxshow] 视效层启动：从 {}s 起（重音剩 {} / 歌词剩 {} 行，整体平移 {:+}s）",
 			fromSec, doc.accents.length - accCursor, doc.lines.size() - lineCursor, lyricOffset);
+	}
+
+	/**
+	 * 开场：按**玩家当前机位**把「封面 + 标题 + 副标题」摆成一个正对相机的平面。
+	 *
+	 * <p>为什么按机位算：视效是服务端发命令、粒子在世界里，而**运镜是用户自己飞的**（mod 不接管相机）。
+	 * 之前把三件套钉死在固定 x 坐标上，用户没飞到那个坐标就什么都看不到（2026-09-24 录屏里
+	 * 封面/标题整段缺失）；改成「眼位 + 朝向 × 13.5 格」后，无论从哪儿起播都在视野正中，
+	 * 三个元素的偏移量都沿相机上方向量算，因此**严格共面**（用户：封面和标题应该在同一平面）。
+	 */
+	private static void opening(ServerWorld world) {
+		var players = world.getServer().getPlayerManager().getPlayerList();
+		if (players.isEmpty()) {
+			NbmachinaMod.LOGGER.info("[styxshow] 没有玩家 → 跳过开场三件套");
+			return;
+		}
+		ServerPlayerEntity p = players.get(0);
+		double yaw = Math.toRadians(p.getYaw()), pitch = Math.toRadians(p.getPitch());
+		double fx = -Math.sin(yaw) * Math.cos(pitch);
+		double fy = -Math.sin(pitch);
+		double fz = Math.cos(yaw) * Math.cos(pitch);
+		double rl = Math.hypot(fz, fx);
+		if (rl < 1e-4) rl = 1;
+		double rx = -fz / rl, rz = fx / rl;                            // 相机右 = f × up
+		double ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;    // 相机上 = r × f
+		openingMatrix = "(" + fmt(rx) + "," + fmt(ux) + ",0,0,," + 0 + "," + fmt(uy) + ",0,0,,"
+			+ fmt(rz) + "," + fmt(uz) + ",0,0,,0,0,0,1)";
+		double ax = p.getX() + fx * OPEN_DIST, ay = p.getEyeY() + fy * OPEN_DIST, az = p.getZ() + fz * OPEN_DIST;
+		double c = COVER_W / 2;
+		exec(world, cover(ax - rx * c - ux * c, ay - uy * c, az - rz * c - uz * c));
+		double tu = c + 0.8;
+		exec(world, title(ax - rx * TITLE_W / 2 + ux * tu, ay + uy * tu, az - rz * TITLE_W / 2 + uz * tu));
+		double su = c + 1.1;
+		exec(world, subtitle(ax - rx * SUB_W / 2 - ux * su, ay - uy * su, az - rz * SUB_W / 2 - uz * su));
+		NbmachinaMod.LOGGER.info("[styxshow] 开场三件套：机位 yaw {} pitch {} → 锚点 ({}, {}, {})（{} 格外）",
+			fmt(p.getYaw()), fmt(p.getPitch()), fmt(ax), fmt(ay), fmt(az), fmt(OPEN_DIST));
 	}
 
 	public static void stop(ServerWorld world) {
@@ -316,22 +413,27 @@ public final class StyxShow {
 			LyricLine line = doc.lines.get(lineCursor++);
 			if (line.chars() != null) {
 				List<LyricChar> cs = line.chars();
-				for (int i = 0; i < cs.size(); i++) exec(world, lyricChar(line, cs.get(i), i, cs.size()));
+				for (int i = 0; i < cs.size(); i++) {
+					LyricChar c = cs.get(i);
+					if (c.c() == null || c.c().isBlank()) continue;   // 空格只占格、不画字形
+					exec(world, lyricChar(line, c, i));
+				}
 			}
-			String tr = lyricTranslation(line);
+			String tr = lyricTranslation(line, lineCursor - 1);
 			if (tr != null) exec(world, tr);
 		}
 	}
 
 	public static void noteFlare(ServerWorld world, int x, int y, int z, int midi, int velocity, boolean bass) {
 		if (!active) return;
-		double cx = x + 0.5, cy = y + 1.5, cz = z + 0.5;
+		// 方块中心 = (x+.5, y+.5, z+.5)：棱边描的是**方块本体**（旧版写 y+1.5，整圈框浮在方块上方一格）
+		double cx = x + 0.5, cy = y + 0.5, cz = z + 0.5;
 		String col = hueColor(midi, bass);
-		exec(world, flareEdges(cx, cy, cz, col));
+		exec(world, flareGlow(cx, cy + 0.1, cz, col));
 		exec(world, flareRipple(cx, cz, col));
-		exec(world, flareGlow(cx, cy, cz, col));
+		exec(world, flareEdges(cx, cy, cz, col));
 		exec(world, flareTrail(cx, cz, col));
-		if (velocity >= 90) exec(world, flareSparks(cx, cy, cz));
+		if (velocity >= 90) exec(world, flareSparks(cx, cy + 0.45, cz));
 	}
 
 	/**
@@ -370,17 +472,17 @@ public final class StyxShow {
 		cmds.add(river());
 		cmds.add(riverLane(-8.0));
 		cmds.add(helix(0.0));
-		cmds.add(cover());
-		cmds.add(title());
-		cmds.add(subtitle());
+		cmds.add(cover(-10.0, 115.0, ZC));
+		cmds.add(title(-10.0, 119.5, ZC));
+		cmds.add(subtitle(-10.0, 111.0, ZC));
 		cmds.add(flareEdges(0.5, 111.5, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareRipple(0.5, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.5, -5.5));
 		cmds.add(accentRing(3.917));
 		LyricLine demo = new LyricLine(22.407, 24.457, 3.0, 10.0, "请不要让我就此死亡",
 			List.of(new LyricChar(22.407, "O", 0, 1.4, 0.23), new LyricChar(22.64, "k", 1.4, 1.4, 0.24)));
-		cmds.add(lyricChar(demo, demo.chars().get(0), 0, 2));
-		cmds.add(lyricTranslation(demo));
+		cmds.add(lyricChar(demo, demo.chars().get(0), 0));
+		cmds.add(lyricTranslation(demo, 0));
 		cmds.addAll(probeCmds());
 		int ok = 0;
 		String firstErr = null;
