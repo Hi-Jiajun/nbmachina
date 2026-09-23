@@ -123,20 +123,23 @@ public final class StyxShow {
 	}
 
 	private static String title() {
-		return "particlex text end_rod 8 " + fmt(LYRIC_Y + 2.0) + " " + fmt(ZC) + " \"STYX HELIX\" 4.0 \""
-			+ FLAT_MATRIX + "\" 6.0 0 0 0 150";
+		return "particlex image-matrix end_rod 8 " + fmt(LYRIC_Y + 3.0) + " " + fmt(ZC) + " title.png 1.0 \""
+			+ MATRICES[matrixIndex] + "\" 48.0 0 0 0 150";
 	}
 
 	private static String subtitle() {
-		return "particlex text end_rod 12 " + fmt(LYRIC_Y + 2.0) + " " + fmt(ZC) + " \"MYTH & ROID\" 2.6 \""
-			+ FLAT_MATRIX + "\" 6.0 0 0 0 140";
+		return "particlex image-matrix end_rod 11 " + fmt(LYRIC_Y + 3.0) + " " + fmt(ZC) + " subtitle.png 1.0 \""
+			+ MATRICES[matrixIndex] + "\" 40.0 0 0 0 140";
 	}
 
 	/** 开场：专辑封面平铺（素材 = `<游戏目录>/particleImages/styx-cover-64.png`，64×64） */
 	private static String cover() {
 		return "particlex image-matrix end_rod -10 " + fmt(LYRIC_Y + 3.5) + " " + fmt(ZC)
-			+ " styx-cover-64.png 1.0 \"" + FLAT_MATRIX + "\" 8.0 0 0 0 80";
+			+ " styx-cover-64.png 1.0 \"" + MATRICES[matrixIndex] + "\" 8.0 0 0 0 80";
 	}
+
+	/** 逐字格宽（格）：48px 的字形图 ÷ dpb(24) = 2 格 + 0.25 字距 */
+	private static final double CELL = 2.25, CELL_DPB = 24.0;
 
 	private static String flareEdges(double cx, double cy, double cz, String col) {
 		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
@@ -174,13 +177,18 @@ public final class StyxShow {
 			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.42/(1+t/6); alpha=0.5*(1-t/31)\" 1.0";
 	}
 
-	/** 逐字：平铺、骑流（vx = 播放头速度）、唱到哪亮到哪 + 弹性鼓一下 */
-	private static String lyricChar(LyricLine line, LyricChar c) {
+	/**
+	 * 逐字：用**预渲染字形 PNG**（Noto Sans SC / OFL，见 _scratch-m3-80/render-lyric-pngs.mjs）
+	 * + image-matrix 摆放 —— 比 text 的系统字体点阵锐得多；颜色/透明度由逐刻表达式给（唱到哪亮到哪 + 弹一下）。
+	 */
+	private static String lyricChar(LyricLine line, LyricChar c, int index, int count) {
 		int d = Math.max(1, (int) Math.round(c.dur() * 20));
 		double x = PLAYHEAD_A * c.t() + PLAYHEAD_B + 5.0;
-		double z = ZC + line.w() / 2 - c.z();
-		return "particlex text end_rod " + fmt(x) + " " + fmt(LYRIC_Y) + " " + fmt(z) + " \"" + escape(c.c())
-			+ "\" " + fmt(line.scale()) + " \"" + MATRICES[matrixIndex] + "\" " + fmt(dpb()) + " 0 0 0 "
+		double z = ZC + count * CELL / 2 - index * CELL;
+		String file = "ly" + String.format("%04x", c.c().codePointAt(0)) + ".png";
+		double tint = line.scale() / 3.0;                 // 行内自动缩放：3.0 是基准
+		return "particlex image-matrix end_rod " + fmt(x) + " " + fmt(LYRIC_Y) + " " + fmt(z) + " " + file
+			+ " " + fmt(Math.max(0.5, tint)) + " \"" + MATRICES[matrixIndex] + "\" " + fmt(CELL_DPB) + " 0 0 0 "
 			+ Math.max(1, (int) Math.round((line.end() - c.t() + 0.8) * 20))
 			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; size=1+1.6*exp(-t/4); "
 			+ "cr,cg,cb=lerp(clamp(t/" + d + ",0,1),0.32,1.0),lerp(clamp(t/" + d + ",0,1),0.46,0.98),"
@@ -291,7 +299,10 @@ public final class StyxShow {
 		}
 		while (lineCursor < doc.lines.size() && doc.lines.get(lineCursor).t() <= nowLyric) {
 			LyricLine line = doc.lines.get(lineCursor++);
-			if (line.chars() != null) for (LyricChar c : line.chars()) exec(world, lyricChar(line, c));
+			if (line.chars() != null) {
+				List<LyricChar> cs = line.chars();
+				for (int i = 0; i < cs.size(); i++) exec(world, lyricChar(line, cs.get(i), i, cs.size()));
+			}
 			String tr = lyricTranslation(line);
 			if (tr != null) exec(world, tr);
 		}
@@ -352,7 +363,7 @@ public final class StyxShow {
 		cmds.add(accentRing(3.917));
 		LyricLine demo = new LyricLine(22.407, 24.457, 3.0, 10.0, "请不要让我就此死亡",
 			List.of(new LyricChar(22.407, "O", 0, 1.4, 0.23), new LyricChar(22.64, "k", 1.4, 1.4, 0.24)));
-		cmds.add(lyricChar(demo, demo.chars().get(0)));
+		cmds.add(lyricChar(demo, demo.chars().get(0), 0, 2));
 		cmds.add(lyricTranslation(demo));
 		cmds.addAll(probeCmds());
 		int ok = 0;
