@@ -752,6 +752,8 @@ public final class StyxShow {
 	 *
 	 * <p>每场给三个元素的**剂量**（0..1，不是 alpha）：剂量只决定"几条 / 多密"，
 	 * alpha 由 {@link #SCENE_DEFAULTS} 里的 base × (0.55+0.45·剂量) 算 —— 安静段少而不虚，副歌多而实。
+	 * ⚠ 2026-09-25 用户复看后：**螺旋改成整曲常驻、不再看剂量**（剂量列只对河/光幕/重音波还有意义，
+	 * 那三个默认已关）。
 	 * 基色（r,g,b）是场景层自己的"冥河夜色"，**故意不用音符盒那套霓虹彩虹**：
 	 * 音符盒是主角（彩虹流转），场景层是它脚下的河（青 → 蓝 → 紫 → 收尾暖金）。
 	 */
@@ -783,34 +785,35 @@ public final class StyxShow {
 	private static final java.util.Map<String, Double> SCENE_PARAMS = new java.util.LinkedHashMap<>();
 	private static final java.util.Map<String, Double> SCENE_DEFAULTS = new java.util.LinkedHashMap<>();
 	static {
-		SCENE_DEFAULTS.put("river_base", 0.66);     // 河光带 alpha 基数
-		SCENE_DEFAULTS.put("river_gain", 1.0);      // 河光带总增益（0 = 关掉河）
-		SCENE_DEFAULTS.put("river_lead", 4.0);      // 河光前沿比播放头超前多少格
-		SCENE_DEFAULTS.put("curtain_base", 0.75);   // 光幕 alpha 基数
-		SCENE_DEFAULTS.put("curtain_gain", 1.0);
-		SCENE_DEFAULTS.put("helix_base", 0.70);     // 螺旋 alpha 基数
+		// ⚠ 2026-09-25 用户复看后拍板：**只留螺旋纽带**，其余三种元素默认关（gain=0；代码留着做 A/B）。
+		SCENE_DEFAULTS.put("helix_base", 0.78);     // 螺旋 alpha 基数
 		SCENE_DEFAULTS.put("helix_gain", 1.0);
-		SCENE_DEFAULTS.put("helix_radius", 8.0);    // 螺旋在 z 方向的半径（格）
-		SCENE_DEFAULTS.put("helix_height", 2.4);    // 螺旋在 y 方向的半径（格）
-		SCENE_DEFAULTS.put("accent_base", 0.62);    // 重音横波 alpha 基数
-		SCENE_DEFAULTS.put("accent_gain", 1.0);
+		SCENE_DEFAULTS.put("helix_radius", 14.0);   // z 半径（格）：≥13 才罩得住 z −9..15 的全部音符盒
+		SCENE_DEFAULTS.put("helix_height", 3.6);    // y 半径（格）：甲板上方 111.0 → 118.2，含着镜头高度
+		SCENE_DEFAULTS.put("helix_center", 3.4);    // 轴心高出甲板顶面多少格
+		SCENE_DEFAULTS.put("helix_pitch", 12.0);    // 每弧度走多少格（12 → 一圈 ≈75 格 ≈9s）
+		SCENE_DEFAULTS.put("helix_taper", 260.0);   // 结尾收拢长度（格）：最后 260 格半径收到 0（汇聚成一点）
+		SCENE_DEFAULTS.put("helix_end", 2380.0);    // 纽带停止生成的世界 x（最后一颗音在 2333）
+		SCENE_DEFAULTS.put("river_base", 0.66);     // 河光带（默认关，留作 A/B）
+		SCENE_DEFAULTS.put("river_gain", 0.0);
+		SCENE_DEFAULTS.put("river_lead", 4.0);
+		SCENE_DEFAULTS.put("curtain_base", 0.75);   // 光幕（默认关）
+		SCENE_DEFAULTS.put("curtain_gain", 0.0);
+		SCENE_DEFAULTS.put("accent_base", 0.62);    // 重音横波（默认关）
+		SCENE_DEFAULTS.put("accent_gain", 0.0);
 		SCENE_PARAMS.putAll(SCENE_DEFAULTS);
 	}
 
 	/** 场景层预设：对默认值的一组覆盖。 */
 	private static final java.util.Map<String, java.util.Map<String, Double>> SCENE_PRESETS = new java.util.LinkedHashMap<>();
 	static {
-		SCENE_PRESETS.put("scene-full", java.util.Map.of());                       // 默认：三层全开
-		SCENE_PRESETS.put("scene-still", java.util.Map.of(                          // 只留河 + 光幕（最"静"）
-			"helix_gain", 0.0, "accent_gain", 0.0));
-		SCENE_PRESETS.put("scene-dark", java.util.Map.of(                           // 只留一条暗河
-			"river.gain", 0.6, "curtain.gain", 0.0, "helix_gain", 0.0, "accent_gain", 0.0));
-		SCENE_PRESETS.put("scene-night", java.util.Map.of(                          // 河 + 螺旋，不要光幕与横波
-			"curtain_gain", 0.0, "accent_gain", 0.0));
+		SCENE_PRESETS.put("scene-helix", java.util.Map.of());                       // 默认：只留螺旋纽带（两条）
+		SCENE_PRESETS.put("scene-all", java.util.Map.of(                            // A/B：河+光幕+螺旋+重音波全开
+			"river_gain", 1.0, "curtain_gain", 1.0, "accent_gain", 1.0));
 		SCENE_PRESETS.put("scene-off", java.util.Map.of(                            // 全关 = 只留音符盒特效
-			"river.gain", 0.0, "curtain.gain", 0.0, "helix_gain", 0.0, "accent_gain", 0.0));
+			"river_gain", 0.0, "curtain_gain", 0.0, "helix_gain", 0.0, "accent_gain", 0.0));
 	}
-	private static String scenePresetName = "scene-full";
+	private static String scenePresetName = "scene-helix";
 
 	private static double sp(String key) {
 		Double v = SCENE_PARAMS.get(key);
@@ -920,17 +923,32 @@ public final class StyxShow {
 		return new double[]{sc.r() * 0.86, sc.g() * 0.58, Math.min(1.0, sc.b() * 1.02)};
 	}
 
-	/**
-	 * ③ 双螺旋：两条反相缠绕的光带（`z = R·sin(θ)`、`y = h·cos(θ)`，θ 随 x 推进），
-	 * 只有在副歌/顶点（剂量 ≥ 0.28）才挂。俯视机位看下去就是两道蛇形光在河面上交错前进。
-	 */
+	// ③ **螺旋纽带（唯一保留的场景元素，2026-09-25 用户复看后定稿）**
+	//
+	// 两条反相缠绕的光带：z = R·k·sin(θ)、y = c + h·k·cos(θ)，θ = x/pitch 随 x 推进 ——
+	// 俯视看就是两道蛇形光在整片音符盒上交错前进。三条用户口径逐字对应：
+	//
+	//   1) "从歌曲开始（音乐声音出现时）出现" → 不再按场次剂量开关，整曲常驻；begin 接在
+	//      播放头上，所以第一颗音（3.9s）时纽带正好从机器起点开始铺；
+	//   2) "范围要比整个音符盒的区域还要大一些，包含所有音符盒" → z 半径默认 14 格
+	//      （音符盒占 z −9..15、河心 2.5 → 至少要 12.5），y 半径 3.6 格、轴心抬到甲板上方 3.4 格
+	//      → 纽带的圈从甲板面一直扫到 118.2（在镜头高度之上）；
+	//   3) "到歌曲结束时要汇聚成一点结束" → 半径乘一个收拢因子
+	//      k = clamp((helix_end − t)/taper, 0, 1)：最后 260 格（≈31s）半径线性收到 0，
+	//      两条纽带连同各自的相位一起并到轴线上的一点；t > helix_end 之后不再生成。
+	//
+	// ⚠ k 只出现**一次 clamp**：本工程实测过"单个表达式里两个 clamp 相乘 → 整颗粒子不渲染"
+	//    （§7.0b），所以收拢放在参数表达式、淡入放在逐刻表达式，两处各一个 clamp。
 	private static String helixBand(double phase, double begin, double r, double g, double b, double alpha,
-	                                double radius, double height) {
-		return "particlex tick-parameter end_rod 0 114 " + fmt(ZC)
+	                                double radius, double height, double center, double pitch,
+	                                double taperEnd, double taperLen) {
+		String k = "clamp((" + fmt(taperEnd) + "-t)/" + fmt(Math.max(1.0, taperLen)) + ",0,1)";
+		String th = "t/" + fmt(Math.max(1.0, pitch)) + "+" + fmt(phase);
+		return "particlex tick-parameter end_rod 0 111.2 " + fmt(ZC)
 			+ " " + fmt(r) + " " + fmt(g) + " " + fmt(b) + " " + fmt(alpha)
-			+ " 0 0 0 " + fmt(Math.max(0, begin)) + " 2400"
-			+ " \"x,y,z=t," + fmt(height) + "*cos(t/9+" + fmt(phase) + "),"
-			+ fmt(radius) + "*sin(t/9+" + fmt(phase) + "); size=" + fmt(HELIX_SIZE) + "\" "
+			+ " 0 0 0 " + fmt(Math.max(0, begin)) + " " + fmt(taperEnd)
+			+ " \"x,y,z=t," + fmt(center) + "+" + fmt(height) + "*" + k + "*cos(" + th + "),"
+			+ fmt(radius) + "*" + k + "*sin(" + th + "); size=" + fmt(HELIX_SIZE) + "\" "
 			+ fmt6(PH_PER_TICK / 3.0) + " 3 84"
 			+ " \"alpha=" + fmt(alpha) + "*clamp(t/16,0,1); size=" + fmt(HELIX_SIZE) + "\" 1.0 styx_helix";
 	}
@@ -972,22 +990,23 @@ public final class StyxShow {
 				exec(world, riverBand(z, i * 1.7, front, cr[0], cr[1], cr[2], riverA));
 			}
 		}
-		double helixA = clamp(sp("helix_base") * tone * sp("helix_gain"), 0, 1);
-		if (sc.helix() >= 0.28 && helixA > 0.02) {
-			exec(world, helixBand(0.0, front, ch[0], ch[1], ch[2], helixA,
-				sp("helix_radius"), sp("helix_height")));
-			if (sc.helix() >= 0.60)
-				exec(world, helixBand(3.1416, front, ch[0], ch[1], ch[2], helixA * 0.85,
-					sp("helix_radius") * 0.86, sp("helix_height") * 1.05));
+		// 螺旋：整曲常驻、永远两条（用户 2026-09-25："从歌曲开始…螺旋纽带(两条)出现"）
+		double helixA = clamp(sp("helix_base") * sp("helix_gain"), 0, 1);
+		double hR = sp("helix_radius"), hH = sp("helix_height"), hC = sp("helix_center");
+		double hP = sp("helix_pitch"), hEnd = sp("helix_end"), hTap = sp("helix_taper");
+		if (helixA > 0.02) {
+			exec(world, helixBand(0.0, front, ch[0], ch[1], ch[2], helixA, hR, hH, hC, hP, hEnd, hTap));
+			exec(world, helixBand(3.1416, front, ch[0], ch[1], ch[2], helixA * 0.85,
+				hR * 0.92, hH * 1.05, hC, hP * 0.88, hEnd, hTap));
 		}
 		double curtainA = clamp(sp("curtain_base") * (0.55 + 0.45 * sc.curtain()) * sp("curtain_gain"), 0, 1);
 		if (curtainA > 0.02 && sc.curtain() >= 0.05) {
 			for (String c : curtain(front, cc[0], cc[1], cc[2], curtainA)) exec(world, c);
 			curtainAt = now;
 		}
-		NbmachinaMod.LOGGER.info("[styxshow] 场景层 → {}（{}-{}s；河 {} 条 α{} / 光幕 α{} / 螺旋 α{}，色 {}/{}/{}）",
-			sc.id(), fmt(sc.t0()), fmt(sc.t1()), lanesFor(sc.river()), fmt(riverA),
-			fmt(curtainA), fmt(helixA), fmt(sc.r()), fmt(sc.g()), fmt(sc.b()));
+		NbmachinaMod.LOGGER.info("[styxshow] 场景层 → {}（{}-{}s；螺旋 α{} R{} h{} 收拢 {}→{}；河 α{} / 光幕 α{}，色 {}/{}/{}）",
+			sc.id(), fmt(sc.t0()), fmt(sc.t1()), fmt(helixA), fmt(hR), fmt(hH), fmt(hEnd - hTap), fmt(hEnd),
+			fmt(riverA), fmt(curtainA), fmt(ch[0]), fmt(ch[1]), fmt(ch[2]));
 	}
 
 	/** 场景层总报告（`/nbm scene`）。 */
@@ -1423,8 +1442,8 @@ public final class StyxShow {
 		cmds.add(riverBand(ZC, 0.0, 0.0, 0.34, 0.78, 1.0, 0.42));
 		cmds.add(riverBand(ZC - 1.2, 1.7, 0.0, 0.34, 0.78, 1.0, 0.42));
 		java.util.Collections.addAll(cmds, curtain(0.0, 0.34, 0.78, 1.0, 0.75));
-		cmds.add(helixBand(0.0, 0.0, 0.34, 0.78, 1.0, 0.70, 8.0, 2.4));
-		cmds.add(helixBand(3.1416, 0.0, 0.34, 0.78, 1.0, 0.60, 6.9, 2.5));
+		cmds.add(helixBand(0.0, 0.0, 0.34, 0.78, 1.0, 0.78, 14.0, 3.6, 3.4, 12.0, 2380.0, 260.0));
+		cmds.add(helixBand(3.1416, 0.0, 0.34, 0.78, 1.0, 0.66, 12.9, 3.8, 3.4, 10.6, 2380.0, 260.0));
 		cmds.add(accentWave(0.0, 0.34, 0.78, 1.0, 0.62));
 		cmds.add(coverPlate(-10.0, 115.0, ZC, 40, true, OPEN_TEXT_IN_SEC));
 		cmds.add(textPlate(-10.0, 119.9, ZC, 40, true, OPEN_TEXT_IN_SEC));
