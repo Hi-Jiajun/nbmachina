@@ -21,41 +21,19 @@ import net.nbmachina.mod.NbmachinaMod;
  * <p>与演奏共用同一根真实时间轴（nanoTime）；用服务端命令 `particlex ...` 把 ExParticle 的 payload 发出去
  * —— 不引编译期依赖（避开 LGPL 链接与 Yarn/Mojmap 交叉），命令字符串与 `tools/show-pack.mjs` 同源。
  *
- * <p>数据：`<游戏目录>/nbmachina/styxshow.json`（v2：逐字时间来自**官方 TTML 的 span** + 整体平移；
- * 含每行中文翻译；文字用 textMatrix **平铺在水面上**，配合"从音符盒上方扫到末尾"的运镜）。
+ * <p>数据：`<游戏目录>/nbmachina/styxshow.json` 仍会载入做完整性诊断（逐字时间与译文由**剪辑层**消费）；
+ * **游戏内不再出歌词/译文粒子**——2026-09-25 用户拍板歌词改在剪辑层做（AMLL 逐字填充 + 行级模糊）。
  *
  * <p>⚠ 语法口径（2026-09-24 踩过）：`color4`/`speed3`/`range3` 是**空格分隔**；表达式内部元组仍是逗号。
  * `exec()` 一律**先 parse 再 execute**，语法错误不再被 silent source 吞掉。
  */
 public final class StyxShow {
 	private static final Gson GSON = new Gson();
-	/**
-	 * 文字朝向的候选矩阵（`/nbm machine textmatrix <序号>` 现场切）。
-	 *
-	 * <p>2026-09-24 实机对照（把 'E' 用三种矩阵摆在同一机位前拍照比对）确认的口径：
-	 * image 粒子的图像坐标里 u 是读向、v 已经翻转成「上」，所以**相机朝 +x（东）时**
-	 * 正确的映射是 <b>u → +z、v → +y</b>（= 1 号）。上一版默认的 (u→−z, v→−y)
-	 * 等于整幅画面**同时左右镜像 + 上下颠倒**——这就是「歌词朝向始终不对」的真因。
-	 */
-	private static final String[] MATRICES = {
-		"(0,0,0,0,,0,1,0,0,,1,0,0,0,,0,0,0,1)",     // 1 竖立·正对朝 +x 飞的机位（u→+z、上→+y）★默认
-		"(0,0,0,0,,0,1,0,0,,-1,0,0,0,,0,0,0,1)",    // 2 同 1 但左右镜像（现场对照用）
-		"(0,0,0,0,,0,-1,0,0,,1,0,0,0,,0,0,0,1)",    // 3 同 1 但上下颠倒（现场对照用）
-		"(0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)",    // 4 平铺（俯视/水面用，法线朝 +y）
-		"(1,0,0,0,,0,1,0,0,,0,0,0,0,,0,0,0,1)",     // 5 正对朝 −z 看的机位
-		"(-1,0,0,0,,0,1,0,0,,0,0,0,0,,0,0,0,1)",    // 6 正对朝 +z 看的机位
-	};
-	private static final String FLAT_MATRIX = MATRICES[3];
-	/** 文字是否平铺（决定"屏幕下方"是 +x 还是 −y）：默认竖立 */
-	private static int matrixIndex = 0;
 	private static final double ZC = 2.5;                    // 机器音轨轴（河心）
-	private static final double DECK_TOP = 111.0;            // 甲板顶面（machine_map 的 y=110 是甲板方块）
-	/** 唱词基准（图像锚点 = **左下角**：图像沿 +u 右、沿 +v 上展开）。音符盒顶面 112.0 → 抬到 114.1 */
-	private static final double LYRIC_Y = DECK_TOP + 3.1;
-	private static final double PLAYHEAD_A = 8.3341, PLAYHEAD_B = -32.784;
-	/** M5-4：河/螺旋暂缓（用户："其他地方先别做了，等后面一起设计"），只留音符盒 + 文字 */
+	/** M5-4：河/螺旋暂缓（用户："其他地方先别做了，等后面一起设计"），只留音符盒特效 */
 	private static final boolean AMBIENT_ON = false;
 
+	/** 歌词数据模型：**只为解析 styxshow.json 保留**（该文件是剪辑层歌词渲染的输入），游戏内不再出画。 */
 	private record LyricChar(double t, String c, double z, double w, double dur) {
 	}
 
@@ -65,8 +43,6 @@ public final class StyxShow {
 	private static final class Doc {
 		int version = 1;
 		double shiftSec = 0;
-		String textMatrix = FLAT_MATRIX;
-		double dpb = 8.0;
 		double[] accents = new double[0];
 		List<LyricLine> lines = new ArrayList<>();
 	}
@@ -74,7 +50,6 @@ public final class StyxShow {
 	private static Doc doc = null;
 	private static boolean active = false;
 	private static int accCursor = 0;
-	private static int lineCursor = 0;
 	/**
 	 * 开场"延迟生成"队列（视效层时间 → 命令）。
 	 *
@@ -90,8 +65,6 @@ public final class StyxShow {
 	private static int failed = 0;
 	/** 视效层当前时刻（秒，见 tick()）；音符盒特效的延迟队列用它算"到点"。 */
 	private static double showNow = 0.0;
-	/** 歌词整体提前/延后（秒，正数 = 更晚出现）：现场微调用 `/nbm machine lyricoff <秒>` */
-	private static double lyricOffset = 0.0;
 
 	private StyxShow() {
 	}
@@ -100,25 +73,9 @@ public final class StyxShow {
 		return active;
 	}
 
-	public static void setLyricOffset(double sec) {
-		lyricOffset = sec;
-	}
-
-	public static void setMatrixIndex(int i) {
-		matrixIndex = Math.max(0, Math.min(MATRICES.length - 1, i));
-	}
-
-	public static String matrixName() {
-		return MATRICES[matrixIndex];
-	}
-
-	public static double lyricOffset() {
-		return lyricOffset;
-	}
-
 	public static String status() {
-		return String.format("视效 %s；已发 %d 条命令，失败 %d 条；歌词平移 %+.2fs（show.json 内置 %+.2fs）",
-			active ? "**运行中**" : "停", sent, failed, lyricOffset, doc == null ? 0 : doc.shiftSec);
+		return String.format("视效 %s；已发 %d 条命令，失败 %d 条（show.json 内置平移 %+.2fs；歌词只在剪辑层）",
+			active ? "**运行中**" : "停", sent, failed, doc == null ? 0 : doc.shiftSec);
 	}
 
 	// ───────────────────────── 命令模板（唯一来源） ─────────────────────────
@@ -496,14 +453,6 @@ public final class StyxShow {
 	}
 
 	/**
-	 * 逐字等宽格（格）：show-pack 生成的 show.json 里每个字占 {@code ADV} 格（含字距），
-	 * 48px 的字形图用 dpb = 48/ADV 摆上去，正好一格一个字形；整行超过 {@code LINE_MAX} 格时
-	 * 按 {@code fit} 等比缩小（字形和排布一起缩），免得长句子飞出机器那条水带。
-	 */
-	private static final double ADV = 1.25, GLYPH_DPB = 48.0 / ADV, LINE_MAX = 26.0;
-	/** 逐字点尺寸：四边形 ≈ 笔画宽（≈0.17 格）。实机对照：1.0 偏散、2.5 偏糊，1.4 最锐 */
-	private static final double LYRIC_SIZE = 1.4;
-	/**
 	 * 涟漪环的预渲染素材（v5：**32px**，环带半径 11.2–13.8px）+ dpb：
 	 * 出生态半径 = 12.5/20 = 0.625 格。24px 版只有 116 颗/圈，用户要"粒子增多一点" →
 	 * 换成 32px（≈204 颗/圈），环线更连续。素材生成见 `_scratch-m3-80/render-show-pngs.mjs` 第 4 段。
@@ -795,67 +744,6 @@ public final class StyxShow {
 			+ rainbowExpr(phase, rate * 1.3, RAIN_BIAS, RAIN_SCALE) + "\" 1.0";
 	}
 
-	/**
-	 * 逐字：用**预渲染字形 PNG**（Noto Sans SC / OFL，见 _scratch-m3-80/render-lyric-pngs.mjs）
-	 * + image-matrix 摆放 —— 比 text 的系统字体点阵锐得多；颜色/透明度由逐刻表达式给（唱到哪亮到哪 + 弹一下）。
-	 */
-	private static String lyricChar(LyricLine line, LyricChar c, int index) {
-		int d = Math.max(1, (int) Math.round(c.dur() * 20));
-		double x = PLAYHEAD_A * c.t() + PLAYHEAD_B + 5.0;
-		// 读向是 +z（= 相机右）：逐字的左边界取 show.json 的累计 z，整行按总宽 line.w() 居中。
-		// （上一版是 `index * CELL` 定步长 + 只画音节块首字母 → 屏幕上 "O p s d l m d" 那种乱码）
-		double fit = Math.min(1.0, LINE_MAX / Math.max(1.0, line.w()));
-		double z = ZC + (c.z() - line.w() / 2) * fit;
-		String file = "ly" + String.format("%04x", c.c().codePointAt(0)) + ".png";
-		return "particlex image-matrix end_rod " + fmt(x) + " " + fmt(LYRIC_Y) + " " + fmt(z) + " " + file
-			+ " 1.0 \"" + MATRICES[matrixIndex] + "\" " + fmt(GLYPH_DPB / fit) + " 0 0 0 "
-			+ Math.max(1, (int) Math.round((line.end() - c.t() + 0.8) * 20))
-			// ① 骑流：vx = 播放头速度，整行像船一样跟着河走（**不加 vy 浮动**：用户要"码平、别错位"）
-			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; size=" + fmt(LYRIC_SIZE) + "; "
-			// ② 唱到哪亮到哪：未唱 = 冥河青的暗调，唱过 = 苍白色
-			+ "cr,cg,cb=lerp(clamp(t/" + d + ",0,1),0.20,0.93),lerp(clamp(t/" + d + ",0,1),0.28,0.98),"
-			+ "lerp(clamp(t/" + d + ",0,1),0.32,1.0); alpha=0.34+0.66*clamp(t/" + d + ",0,1)\" 1.0";
-	}
-
-	/**
-	 * 译文：唱词**下方**（图像锚点是左下角，所以基准要再降一个行高）、小一号、暗一点。
-	 *
-	 * <p>⚠ **不用 ExParticle 的 `text` 族**：它的「文本 → 图像」是自管 GL 离屏光栅化 + `glReadPixels`，
-	 * 开着 Iris 光影包时会直接打崩 NVIDIA 驱动（2026-09-24 实测：0.2.0 起播到 22.4s、第一句译文落地
-	 * 的瞬间 EXCEPTION_ACCESS_VIOLATION，hs_err 的 Java 栈 = TextUtil.requestImage →
-	 * GlTextRasterizer.rasterize → glReadPixels → nvoglv64.dll）。译文与逐字一样改成**预渲染 PNG**
-	 * （`trNNN.png`，见 `_scratch-m3-80/render-show-pngs.mjs`），走 image-matrix 就没有这条 GL 路径。
-	 */
-	private static String lyricTranslation(LyricLine line, int lineIndex) {
-		if (line.tr() == null || line.tr().isBlank()) return null;
-		double x = PLAYHEAD_A * line.t() + PLAYHEAD_B + 6.6;
-		// 译文字号固定 24px、dpb 24 ⇒ 每字正好 1 格宽，宽度 = 字数，按此居中
-		int n = line.tr().length();
-		double z = ZC - n / 2.0;
-		return "particlex image-matrix end_rod " + fmt(x) + " " + fmt(LYRIC_Y - 2.35) + " " + fmt(z)
-			+ " tr" + String.format("%03d", lineIndex) + ".png 1.0 \"" + MATRICES[matrixIndex] + "\" 24 0 0 0 "
-			+ Math.max(1, (int) Math.round((line.end() - line.t() + 0.8) * 20))
-			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; size=0.7; alpha=0.62*clamp(t/4,0,1)\" 1.0";
-	}
-
-	/** 朝向探针：同一张图用 6 个矩阵各来一份（**不用 text 族**，见 lyricTranslation 的警告） */
-	private static List<String> probeCmds() {
-		String[] mats = {
-			"(-1,0,0,0,,0,1,0,0,,0,0,0,0,,0,0,0,1)",   // 朝 −z 看
-			"(0,0,0,0,,0,1,0,0,,1,0,0,0,,0,0,0,1)",    // ★ 朝 +x 看（默认）
-			"(1,0,0,0,,0,1,0,0,,0,0,0,0,,0,0,0,1)",    // 朝 +z 看
-			"(0,0,0,0,,0,1,0,0,,-1,0,0,0,,0,0,0,1)",   // 左右镜像
-			"(0,0,0,0,,0,-1,0,0,,1,0,0,0,,0,0,0,1)",   // 上下颠倒
-			FLAT_MATRIX,                               // 平铺
-		};
-		List<String> out = new ArrayList<>();
-		for (int i = 0; i < mats.length; i++) {
-			out.add("particlex image-matrix end_rod ~ ~" + (3 + i * 2) + " ~ title.png 1.0 \"" + mats[i]
-				+ "\" 48 0 0 0 600");
-		}
-		return out;
-	}
-
 	// ───────────────────────── 生命周期 ─────────────────────────
 
 	private static void load(Path gameDir) {
@@ -863,7 +751,7 @@ public final class StyxShow {
 		Path p = gameDir.resolve("nbmachina").resolve("styxshow.json");
 		try {
 			if (!Files.isRegularFile(p)) {
-				NbmachinaMod.LOGGER.warn("[styxshow] 找不到 {} —— 只有逐音心跳，没有重音环与歌词", p);
+				NbmachinaMod.LOGGER.warn("[styxshow] 找不到 {} —— 只有逐音心跳", p);
 				doc = new Doc();
 				return;
 			}
@@ -871,20 +759,15 @@ public final class StyxShow {
 			if (doc == null) doc = new Doc();
 			if (doc.lines == null) doc.lines = new ArrayList<>();
 			if (doc.accents == null) doc.accents = new double[0];
-			if (doc.textMatrix == null || doc.textMatrix.isBlank()) doc.textMatrix = FLAT_MATRIX;
-			if (doc.dpb <= 0) doc.dpb = 8.0;
 			int nChars = 0;
 			for (LyricLine l : doc.lines) nChars += l.chars() == null ? 0 : l.chars().size();
-			NbmachinaMod.LOGGER.info("[styxshow] 视效数据 v{} 已载入：重音 {} / 歌词 {} 行 {} 字（平移 {}s）",
+			NbmachinaMod.LOGGER.info(
+				"[styxshow] 视效数据 v{} 已载入：重音 {} / 歌词 {} 行 {} 字（平移 {}s；歌词只作剪辑层数据源，游戏内不出画）",
 				doc.version, doc.accents.length, doc.lines.size(), nChars, doc.shiftSec);
 		} catch (Exception e) {
 			NbmachinaMod.LOGGER.warn("[styxshow] 载入 styxshow.json 失败：{}", e.toString());
 			doc = new Doc();
 		}
-	}
-
-	private static double dpb() {
-		return doc != null && doc.dpb > 0 ? doc.dpb : 8.0;
 	}
 
 	public static void start(ServerWorld world, double fromSec) {
@@ -898,8 +781,6 @@ public final class StyxShow {
 		failed = 0;
 		pending.clear();
 		accCursor = firstAtOrAfter(doc.accents, fromSec);
-		lineCursor = 0;
-		while (lineCursor < doc.lines.size() && doc.lines.get(lineCursor).t() + lyricOffset < fromSec) lineCursor++;
 
 		exec(world, river());
 		if (AMBIENT_ON) {
@@ -909,9 +790,8 @@ public final class StyxShow {
 			exec(world, helix(3.1416));
 		}
 		if (fromSec < 3.5) opening(world, fromSec);
-		// ⚠ SLF4J 不认 `{:+}` 这种格式（会原样打印并报 placeholder 数量不符）→ 偏移自己格式化
-		NbmachinaMod.LOGGER.info("[styxshow] 视效层启动：从 {}s 起（重音剩 {} / 歌词剩 {} 行，整体平移 {}s）",
-			fromSec, doc.accents.length - accCursor, doc.lines.size() - lineCursor, fmt(lyricOffset));
+		NbmachinaMod.LOGGER.info("[styxshow] 视效层启动：从 {}s 起（重音剩 {}；歌词改在剪辑层，不在游戏内出画）",
+			fromSec, doc.accents.length - accCursor);
 	}
 
 	/**
@@ -1051,22 +931,8 @@ public final class StyxShow {
 				}
 			}
 		}
-		double nowLyric = now - lyricOffset;
-		// 重音"大圆环"（旧 accentRing，青色 size 3.0 / 半径荡到 5 格）已按用户 2026-09-24 口径**删除**：
-		// "还有一个圆环的视效也是不符合要求的，把他去掉"。styxshow.json 里的 accents 数据保留但不再出画。
-		while (lineCursor < doc.lines.size() && doc.lines.get(lineCursor).t() <= nowLyric) {
-			LyricLine line = doc.lines.get(lineCursor++);
-			if (line.chars() != null) {
-				List<LyricChar> cs = line.chars();
-				for (int i = 0; i < cs.size(); i++) {
-					LyricChar c = cs.get(i);
-					if (c.c() == null || c.c().isBlank()) continue;   // 空格只占格、不画字形
-					exec(world, lyricChar(line, c, i));
-				}
-			}
-			String tr = lyricTranslation(line, lineCursor - 1);
-			if (tr != null) exec(world, tr);
-		}
+		// 歌词/译文粒子已按 2026-09-25 用户口径**整体移除**（改在剪辑层做，见类注释）；
+		// 重音"大圆环"也在 2026-09-24 删掉了：styxshow.json 里的 accents 数据保留但不出画。
 	}
 
 	public static void noteFlare(ServerWorld world, int x, int y, int z, int midi, int velocity, boolean bass) {
@@ -1227,20 +1093,12 @@ public final class StyxShow {
 		FX.put("ripple.bob", on ? 1.0 : 0.0);   // 与 fx/preset 的同一份参数保持一致
 	}
 
-	/** 朝向探针（`/nbm machine textprobe`） */
-	public static void textProbe(ServerWorld world) {
-		if (!FabricLoader.getInstance().isModLoaded("exparticle")) return;
-		load(world.getServer().getRunDirectory());
-		for (String c : probeCmds()) exec(world, c);
-	}
-
 	/** 命令自检：每类模板各拿一条真去 Brigadier 解析（`/nbm machine showcheck`） */
 	public static String selfCheck(ServerCommandSource src) {
 		List<String> cmds = new ArrayList<>();
 		cmds.add(river());
 		cmds.add(riverLane(-8.0));
 		cmds.add(helix(0.0));
-		String demoMatrix = MATRICES[0];
 		cmds.add(coverPlate(-10.0, 115.0, ZC, 40, true, OPEN_TEXT_IN_SEC));
 		cmds.add(textPlate(-10.0, 119.9, ZC, 40, true, OPEN_TEXT_IN_SEC));
 		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, -14.0, 111.0, ZC - 4.0,
@@ -1256,11 +1114,6 @@ public final class StyxShow {
 		cmds.add(flareSplash(0.5, 112.03, -5.5, PLATINUM));
 		cmds.add(flareSparks(0.5, 112.06, -5.5, GOLD, 22, 0.55, 0.34, 0.26));
 		cmds.add(flareNotes(0.5, 112.12, -5.5, 0.6, 0.14, 1));
-		LyricLine demo = new LyricLine(22.407, 24.457, 3.0, 10.0, "请不要让我就此死亡",
-			List.of(new LyricChar(22.407, "O", 0, 1.4, 0.23), new LyricChar(22.64, "k", 1.4, 1.4, 0.24)));
-		cmds.add(lyricChar(demo, demo.chars().get(0), 0));
-		cmds.add(lyricTranslation(demo, 0));
-		cmds.addAll(probeCmds());
 		int ok = 0;
 		String firstErr = null;
 		for (String c : cmds) {
