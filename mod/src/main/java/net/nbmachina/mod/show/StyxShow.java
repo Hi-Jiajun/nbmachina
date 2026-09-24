@@ -174,8 +174,19 @@ public final class StyxShow {
 	 */
 	private static final double COVER_PLATE_AT = 0.45;
 	private static final int COVER_PLATE_AGE = 50;      // → 2.95s 消失（点阵那时已经淡入完）
-	private static final double COVER_SCATTER_AT = 2.40; // 点阵提前 0.55s 淡入，接管时不掉亮度
-	private static final int COVER_SCATTER_AGE = 36;
+	/**
+	 * 点阵**垫在清晰板背后**（用户 2026-09-24 口径："把点阵直接放在封面背后，动效相当于把两者结合起来"）：
+	 * <pre>
+	 * +0.00s  静态点阵铺满（整张图，含暗部）→ 点阵是"底"
+	 * +0.45s  清晰板压上去（视觉上"对焦"）→ 两者叠在同一位置
+	 * +2.60s  再生成一份"炸开"副本：每颗点沿自身偏移方向飞散
+	 * +2.95s  清晰板到期 → 只剩点阵 + 正在飞散的点
+	 * +3.10s  静态点阵到期 → 点全部飞走
+	 * </pre>
+	 */
+	private static final int COVER_GRID_AGE = 62;
+	private static final double COVER_BURST_AT = 2.60;
+	private static final int COVER_BURST_AGE = 20;
 	/**
 	 * 点阵接棒用的素材与密度：**144px / dpb18 = 8 格**（与清晰板同尺寸），
 	 * 2.07 万颗（实测这个量级能稳定出图，192²=3.7 万颗时经常整批不画）。
@@ -234,10 +245,8 @@ public final class StyxShow {
 	 * 点阵接棒体：**沿用旧版口径**（锚点=图像左下角、dpb/size/淡入+逐像素吹散表达式都是原来的），
 	 * 自己从 t=0 起算，所以生成时刻由 {@code opening()} 用"延迟生成 + age 控寿命"来排。
 	 */
+	/** 点阵"底"：静态整张图（12 倍点距重叠 → 暗部也铺实）。 */
 	private static String coverGrid(double ax, double ay, double az, String matrix) {
-		// ⚠ 吹散进度**不要写 dy**：2026-09-24 实测带 `dy` 的表达式会让整批 image 粒子不渲染
-		//   （同一命令把 dy 项去掉就出图）。逐行错开的观感损失可以接受，稳定性优先。
-		String p = "clamp((t-0.35)/0.85,0,1)";
 		// ⚠ **点阵必须用 end_rod**：2026-09-24 二分实测——`minecraft:block` + 面向镜头的字面矩阵
 		//   **整段不出图**（同一命令换成 end_rod 就出，换成 "E4" 矩阵也出，但那是侧对镜头不能用）。
 		//   所以清晰板走 block+E4，点阵/吹散走 end_rod+字面矩阵，各走各的稳的那条。
@@ -245,25 +254,30 @@ public final class StyxShow {
 		//   **暗部像素几乎不发光**（用户 2026-09-24："点阵图不完整"——只剩中间那束花）。
 		//   12 倍重叠把暗部铺成实心之后，点阵观感才和清晰板接得上。
 		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " " + COVER_GRID_IMAGE + " 1.0 \"" + matrix + "\" " + fmt(COVER_DPB) + " 0 0 0 " + COVER_SCATTER_AGE + " "
-			+ "\"size=" + fmt(COVER_GRID_SIZE) + "; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
-			+ " vx=0.12*" + p + "; vy=0.03*" + p + "\" 0.05";
+			+ " " + COVER_GRID_IMAGE + " 1.0 \"" + matrix + "\" " + fmt(COVER_DPB) + " 0 0 0 " + COVER_GRID_AGE + " "
+			+ "\"size=" + fmt(COVER_GRID_SIZE) + "; alpha=1\" 1.0";
 	}
 
-	private static String titleGrid(double ax, double ay, double az, String matrix) {
-		String p = "clamp((t-0.30)/0.75,0,1)";
+	/**
+	 * 点阵"炸开"副本：每颗点沿自己相对锚点的方向飞出去（`(vx,vy,vz)=(dx,dy,dz)*k` 是旧版
+	 * 音符盒棱边用过、验证能跑的形式）。观感是"图从底部往上一层层被吹散"。
+	 */
+	private static String coverGridBurst(double ax, double ay, double az, String matrix) {
 		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " title.png 1.0 \"" + matrix + "\" " + fmt(TITLE_DPB) + " 0 0 0 30 "
-			+ "\"size=1.1; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
-			+ " vx=0.06*" + p + "\" 0.05";
+			+ " " + COVER_GRID_IMAGE + " 1.0 \"" + matrix + "\" " + fmt(COVER_DPB) + " 0 0 0 " + COVER_BURST_AGE + " "
+			+ "\"size=" + fmt(COVER_GRID_SIZE) + "; alpha=1; (vx,vy,vz)=(dx,dy,dz)*0.045\" 1.0";
 	}
 
-	private static String subtitleGrid(double ax, double ay, double az, String matrix) {
-		String p = "clamp((t-0.35)/0.75,0,1)";
+	private static String titleGrid(double ax, double ay, double az, String matrix, int age, boolean burst) {
 		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " subtitle.png 1.0 \"" + matrix + "\" " + fmt(SUB_DPB) + " 0 0 0 32 "
-			+ "\"size=1.1; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
-			+ " vx=0.06*" + p + "\" 0.05";
+			+ " title.png 1.0 \"" + matrix + "\" " + fmt(TITLE_DPB) + " 0 0 0 " + age + " "
+			+ "\"size=1.1; alpha=1" + (burst ? "; (vx,vy,vz)=(dx,dy,dz)*0.045" : "") + "\" 1.0";
+	}
+
+	private static String subtitleGrid(double ax, double ay, double az, String matrix, int age, boolean burst) {
+		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
+			+ " subtitle.png 1.0 \"" + matrix + "\" " + fmt(SUB_DPB) + " 0 0 0 " + age + " "
+			+ "\"size=1.1; alpha=1" + (burst ? "; (vx,vy,vz)=(dx,dy,dz)*0.045" : "") + "\" 1.0";
 	}
 
 	/**
@@ -492,12 +506,18 @@ public final class StyxShow {
 		// 点阵接棒（+2.5s 起逐像素吹散）：锚点是**图像左下角**，位置按相机右/上向量退半格。
 		String matrix = "(" + fmt(rx) + ",0,0,0,,0,1,0,0,," + fmt(rz) + ",0,0,0,,0,0,0,1)";
 		double c = COVER_W / 2;
-		pending.add(new Pending(atSec + COVER_SCATTER_AT,
-			coverGrid(ax - rx * c, ay - c, az - rz * c, matrix)));
-		pending.add(new Pending(atSec + COVER_SCATTER_AT + 0.20,
-			titleGrid(ax - rx * (TITLE_W / 2), ay + c + 0.8, az - rz * (TITLE_W / 2), matrix)));
-		pending.add(new Pending(atSec + COVER_SCATTER_AT + 0.30,
-			subtitleGrid(ax - rx * (SUB_W / 2), ay - c - 1.1, az - rz * (SUB_W / 2), matrix)));
+		// 点阵"底"从 0s 就在（垫在清晰板背后），清晰板到期后由它接住画面。
+		pending.add(new Pending(atSec, coverGrid(ax - rx * c, ay - c, az - rz * c, matrix)));
+		pending.add(new Pending(atSec + COVER_BURST_AT,
+			coverGridBurst(ax - rx * c, ay - c, az - rz * c, matrix)));
+		double tx = ax - rx * (TITLE_W / 2), ty = ay + c + 0.8, tz = az - rz * (TITLE_W / 2);
+		double sx = ax - rx * (SUB_W / 2), sy = ay - c - 1.1, sz = az - rz * (SUB_W / 2);
+		pending.add(new Pending(atSec, titleGrid(tx, ty, tz, matrix, 70, false)));
+		pending.add(new Pending(atSec, subtitleGrid(sx, sy, sz, matrix, 72, false)));
+		pending.add(new Pending(atSec + COVER_BURST_AT + 0.25,
+			titleGrid(tx, ty, tz, matrix, COVER_BURST_AGE, true)));
+		pending.add(new Pending(atSec + COVER_BURST_AT + 0.35,
+			subtitleGrid(sx, sy, sz, matrix, COVER_BURST_AGE, true)));
 		NbmachinaMod.LOGGER.info("[styxshow] 开场三件套：机位 yaw {} pitch {} → 锚点 ({}, {}, {})（{} 格外）",
 			fmt(p.getYaw()), fmt(p.getPitch()), fmt(ax), fmt(ay), fmt(az), fmt(OPEN_DIST));
 	}
@@ -597,8 +617,8 @@ public final class StyxShow {
 		cmds.add(title(-10.0, 119.9, ZC));
 		cmds.add(subtitle(-10.0, 110.1, ZC));
 		cmds.add(coverGrid(-14.0, 111.0, ZC - 4.0, demoMatrix));
-		cmds.add(titleGrid(-14.0, 119.9, ZC - 4.0, demoMatrix));
-		cmds.add(subtitleGrid(-14.0, 110.1, ZC - 1.3, demoMatrix));
+		cmds.add(titleGrid(-14.0, 119.9, ZC - 4.0, demoMatrix, 60, false));
+		cmds.add(subtitleGrid(-14.0, 110.1, ZC - 1.3, demoMatrix, 60, false));
 		cmds.add(flareEdges(0.5, 110.5, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareRipple(0.5, 111.0, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.5, -5.5));
