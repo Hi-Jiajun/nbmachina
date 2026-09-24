@@ -128,7 +128,8 @@ public final class StyxShow {
 
 	// ── 开场三件套：封面 + 标题 + 副标题 ────────────────────────────
 	// 素材尺寸 → 世界尺寸：封面 128px÷dpb16 = 8 格；标题 384px÷dpb48 = 8×1.33 格；副标题 256px÷dpb48 = 5.3×1 格
-	private static final double COVER_DPB = 16.0, COVER_W = 8.0;
+	/** 封面：192px ÷ dpb24 = 8 格（24 像素/格，比旧 128px/dpb16 的 16 像素/格更细） */
+	private static final double COVER_DPB = 24.0, COVER_W = 8.0;
 	private static final double TITLE_DPB = 48.0, TITLE_W = 8.0, TITLE_H = 64.0 / TITLE_DPB;
 	private static final double SUB_DPB = 48.0, SUB_W = 256.0 / SUB_DPB, SUB_H = 48.0 / SUB_DPB;
 	/** 开场距离：整组浮在玩家眼前，跟着机位走（不再依赖"玩家正好飞到某个坐标"） */
@@ -159,12 +160,14 @@ public final class StyxShow {
 	private static String cover(double ax, double ay, double az) {
 		String p = "clamp((t-(2+((1-dy/8)*1.05)))/0.65,0,1)";
 		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " styx-cover-128.png 1.0 \"" + openingMatrix + "\" " + fmt(COVER_DPB) + " 0 0 0 90 "
+			+ " styx-cover-192.png 1.0 \"" + openingMatrix + "\" " + fmt(COVER_DPB) + " 0 0 0 90 "
 			// ⚠ **必须写 size，而且要给足**：封面点距 1/16=0.0625 格，而 end_rod 精灵的可见核心又小又淡。
 			//   2026-09-24 两轮取证：不写 size / size=1.0 → 同样距离**整片看不见**；
 			//   size=2.0（16 个精灵叠一点）→ 亮部（手臂、花束）在，但**暗部被背景透上来**（用户："封面并不足够完整"）。
-			//   size=3.0（0.375 格，36 个精灵叠一点）→ 累积覆盖 ~98%，深蓝底才压得住。
-			+ "\"size=3.0; alpha=clamp(t/0.45,0,1)*(1-" + p + "); vx=0.12*" + p + "; vy=0.03*" + p + "\" 0.05";
+			//   size=3.0/128px → 覆盖够了但**糊**（用户："封面内容很糊，小字看不出来"）：精灵 0.375 格 ≈ 8 像素/格，
+			//   分辨率被精灵卡死。现在改成 192px/dpb24（点距 1/24）+ size=2.2（0.275 格，43 个叠一点 →
+			//   覆盖仍满，但有效分辨率约 24 像素/格 × 精灵核心比例），并且素材生成时做了 unsharp 预锐化。
+			+ "\"size=2.2; alpha=clamp(t/0.45,0,1)*(1-" + p + "); vx=0.12*" + p + "; vy=0.03*" + p + "\" 0.05";
 	}
 
 	/**
