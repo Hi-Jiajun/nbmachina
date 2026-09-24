@@ -202,31 +202,48 @@ public final class StyxShow {
 	 * 标题/副标题整体后移 0.10s / 0.15s（避免三块一起动像"整体闪"）。
 	 * 上一版的"炸开副本"（点向外飞）按用户要求**删除**——现在全程没有位移，只有交叉过渡与淡出。
 	 */
-	// ── 开场时间线（秒；0.7.0「世界固定」版）────────────────────────────────────────
+	// ── 开场时间线（秒；0.7.4「点阵先打印 → 清板压上 → 一起缩没」版）──────────────────
 	// ⚠ ExParticle 表达式里的 t 是**刻数**（命令末尾 step=1 → 每刻 +1），所以"秒"必须 ×20 才等于表达式里的时长。
-	// 0.00/0.12  封面 + 文案块淡入 0.70s
-	// 0.60-1.20  点阵分 12 条铺好（每条 768 颗，藏在封面后面 0.35 格，全程不透明）
-	// 2.35→3.05  封面淡出 0.70s → 露出点阵（交叉过渡，不做半透明叠色）
-	// 2.60→3.35  文案块随后淡出（让人多读一会儿）
-	// 3.05→3.90  点阵从画面中心向外逐层淡出（消散）
+	//
+	// 0.00→0.60  点阵**原地**从左上角打印到右下角（点阵与封面同轴，打印顺序 = 对角线扫描）
+	// 0.60→1.20  点阵整张晾着（打印完的定格，给用户看清点阵）
+	// 1.20→1.90  清晰封面压在点阵上淡入（点阵同时在背后被挡住）
+	// 2.00       第一拨点阵整批到期消失（此时封面已完全挡住它 → 看不见任何闪动）
+	// 1.25→1.95  文案块淡入
+	// 2.60→3.40  封面 + 文案淡出；**第二拨点阵**（同轴、同图）在背后原地缩成 0 → 一起消失
 	// 3.917      第一颗音
-	private static final double[] OPEN_IN_AT = {0.00, 0.12};
+	//
+	// 为什么会有"两拨点阵"：单个表达式里**两个 clamp 相乘的复合式实测整颗粒子不渲染**
+	// （2026-09-24 实机对照：单 clamp 正常、clamp*clamp 全灭），所以"长出来"和"缩回去"
+	// 必须拆成两批粒子，各自只带一个 clamp。
+	/** 封面/文案淡入起点（文案晚 0.05s，避免两块像一块）。 */
+	private static final double OPEN_COVER_IN_AT = 1.20;
+	private static final double OPEN_TEXT_IN_AT = 1.25;
 	private static final double OPEN_PLATE_IN_SEC = 0.70;
-	/** 封面与文案**同一时刻、同样时长**淡出（用户 2026-09-24：文字要跟封面同步、别那么生硬）。 */
-	private static final double OPEN_COVER_OUT_AT = 2.30;
+	/** 封面与文案**同一时刻、同样时长**淡出（用户 2026-09-24："点阵也要和封面文字同时消失"）。 */
+	private static final double OPEN_COVER_OUT_AT = 2.60;
 	private static final double OPEN_COVER_OUT_SEC = 0.80;
 	private static final double OPEN_TEXT_OUT_AT = OPEN_COVER_OUT_AT;
 	private static final double OPEN_TEXT_OUT_SEC = OPEN_COVER_OUT_SEC;
-	/** 点阵分批生成：每 0.075s 铺一条（"逐行打点"的打印感），12 条铺完 0.60-1.43s。 */
-	private static final double OPEN_DOT_SPAWN_AT = 0.60;
-	private static final double OPEN_DOT_SPAWN_STEP = 0.075;
+	/** 第一拨点阵（打印）：12 条**斜带**在 0.00→0.44s 生成，每颗点按自己的对角坐标错开长出来。 */
+	private static final double OPEN_DOT_PRINT_SPAWN_AT = 0.00;
+	private static final double OPEN_DOT_PRINT_SPAWN_STEP = 0.040;
+	/** 第一拨点阵的到期时刻（封面 1.90s 已完全不透明，整批直接到期不会看到闪）。 */
+	private static final double OPEN_DOT_PRINT_END_AT = 2.00;
+	/** 第二拨点阵（消散）：2.60s 生成（与封面淡出同时），缩到 0，3.40s 前收干净。 */
+	private static final double OPEN_DOT_DISSOLVE_AT = OPEN_COVER_OUT_AT;
+	private static final double OPEN_DOT_DISSOLVE_SPAWN_STEP = 0.020;
 	private static final int OPEN_DOT_BANDS = 12;
-	/** 点阵开始消散的时刻（所有条带同时开始，只是各自的 t 起点不同）与消散时长、每格半径的错开量。 */
-	private static final double OPEN_DOT_DISSOLVE_AT = OPEN_COVER_OUT_AT + OPEN_COVER_OUT_SEC;   // 3.10s
-	private static final double OPEN_DOT_FADE_SEC = 0.55;
-	private static final double OPEN_DOT_STAGGER_SEC = 0.025;
+	/** 斜向扫描速度（秒/格）：对角跨度 24 格 → 打印 0.48s、消散 0.36s。 */
+	private static final double OPEN_DOT_PRINT_SEC_PER_BLOCK = 0.020;
+	private static final double OPEN_DOT_PRINT_RISE_SEC = 0.12;
+	private static final double OPEN_DOT_DISSOLVE_SEC_PER_BLOCK = 0.015;
+	private static final double OPEN_DOT_DISSOLVE_FALL_SEC = 0.44;
 	/** 点阵全部消失的时刻（< 第一颗音 3.917s）。 */
-	private static final double OPEN_DOT_END_AT = 3.90;
+	private static final double OPEN_DOT_END_AT = 3.40;
+	/** 诊断开关（默认关）：`-Dstyx.nodots=true` 只放封面/文案，`-Dstyx.noplates=true` 只放点阵。 */
+	private static final boolean DBG_NO_DOTS = Boolean.getBoolean("styx.nodots");
+	private static final boolean DBG_NO_PLATES = Boolean.getBoolean("styx.noplates");
 	/**
 	 * 点阵素材：128px ÷ dpb8 = **16 格**（与清晰板同尺寸，见 {@link #PLATE_SIZE} 的实测说明）＝ 16384 颗。
 	 *
@@ -239,10 +256,14 @@ public final class StyxShow {
 	private static final double COVER_DPB = 96.0 / PLATE_BLOCKS;
 	/**
 	 * 点尺寸（1/8 格；渲染出来的四边形 ≈ size/4 格，见 {@link #PLATE_SIZE}）：点距 = 12 格 / 96 = 0.125 格
-	 * → size=0.5 时点正好相接。这里按像素亮度给尺寸（半调）：暗部 0.25（半格点距，看得见缝隙）、
-	 * 亮部 0.70（略重叠）→ 亮的密、暗的疏，图像结构清楚。
+	 * → <b>size ≤ 0.5 才不会互相糊在一起</b>。
+	 *
+	 * <p>2026-09-24 修正：旧版是 0.25–0.70（亮部 0.7 → 四边形 0.175 格 &gt; 点距），亮部直接糊成
+	 * 一整片——用户反馈"打点的时候好像连成一个图像了……出现闪动"，就是半调在高光处糊掉 + 大面积
+	 * 突然连片造成的。现在压到 0.32–0.48（四边形 0.08–0.12 格，**恒小于点距 0.125**）：
+	 * 任何亮度下都留得出缝，整片永远读得出"点阵"，不会变成实心图。
 	 */
-	private static final String COVER_DOT_SIZE = "0.25+0.45*((cr+cg+cb)/3)";
+	private static final String COVER_DOT_SIZE = "(0.32+0.16*((cr+cg+cb)/3))";
 	/**
 	 * 开场卡片距离：**起播那一刻**在玩家前方 {@code OPEN_AHEAD} 格处钉一份，之后**永远不再动**
 	 * （2026-09-24 用户口径："封面固定在某个位置"，既不跟镜头跑、也不随飞行漂移）。
@@ -268,8 +289,13 @@ public final class StyxShow {
 	 * 点阵层相对封面的**右移量**（格）。用户 2026-09-24 口径："之前那种向右偏移逐行打点出来的点阵
 	 * 还蛮有感觉的……只是把点阵的图层放在文字和封面之后"——即点阵故意偏到封面右侧，
 	 * 但它必须**排在后层**：被封面和文字挡住的部分不显示，只在空白处铺开。
+	 *
+	 * <p>2026-09-24 第二轮修正 → <b>改回 0（与封面同轴）</b>：偏右 6.5 格时，封面淡出过程中会
+	 * 同时看到"封面残影 + 右边 6.5 格处的同一张点阵图"，两层内容错位 → 用户看到的就是
+	 * "封面最后出现左右抖动"。同轴之后：打印就是"这张图自己从左上一路打印到右下"，
+	 * 淡出就是"封面原地化成点阵、点阵再缩没"，全程没有第二个错位的副本。
 	 */
-	private static final double OPEN_DOT_SHIFT_H = 6.5;
+	private static final double OPEN_DOT_SHIFT_H = 0.0;
 	/**
 	 * 点阵比清晰板靠后多少格：交叉过渡靠"清晰板淡出露出点阵"，避免半透明叠色（开光影会变麻点）。
 	 * ⚠ 镜头从 −x 方向飞来，所以"更远"= **更大** 的 x：点阵要放在 {@code ax + OPEN_DOT_BACK}。
@@ -346,28 +372,59 @@ public final class StyxShow {
 	}
 
 	/**
-	 * 点阵层（世界固定）：全程**不透明**地躲在封面后面（交叉过渡 = 封面淡出把它露出来，不做半透明叠色），
-	 * 到 {@code holdSec} 之后从画面中心向外逐层淡出消散。
+	 * 点阵层的对角坐标（格）：左上角 = 0、右下角 = 24。
 	 *
-	 * <p>消散表达式：{@code alpha = 1-clamp((t-起始-半径×错开)/时长,0,1)} —— 依旧只有一个 clamp（见 alphaSeg）。
-	 * {@code holdSec} 由调用方按"绝对消散时刻 − 本批生成时刻"算，这样 12 条分批生成的条带是**同时**开始消散的。
+	 * <p>推导：点阵矩阵把"图像列"映射到画面右向 {@code (rx,rz)}、"行"映射到 +y，所以
+	 * <pre>
+	 *   h（画面内水平偏移，格） = dx*rx + dz*rz
+	 *   v（竖直偏移，格，向上为正） = dy
+	 *   图像里的"列 + 行" ∝ (h - dy)
+	 * </pre>
+	 * 12 格的点阵 → {@code h,dy ∈ [-6,6]} → {@code h-dy ∈ [-12,12]}，加 12 平移到 [0,24]。
+	 * 用它当延迟量，就能让整片点阵按"左上 → 右下"的斜向顺序逐颗长出来 / 缩回去。
+	 */
+	private static String dotDiag(double rx, double rz) {
+		return "((" + fmt(rx) + "*dx+" + fmt(rz) + "*dz)-dy+12)";
+	}
+
+	/**
+	 * 打印入场：{@code size} 从 0 长到目标值，左上角的点先长出来。
+	 *
+	 * <p>⚠ 只有一个 {@code clamp}——实测两个 clamp 相乘会让整颗粒子不渲染（见时间线注释）。
+	 * {@code t0Sec} = 本批粒子的生成时刻（相对开场 0 秒），因为每批的 t 都从自己的 0 开始，
+	 * 不补上这个偏移，晚生成的批会整体迟到。
+	 */
+	private static String dotGrow(double rx, double rz, double t0Sec) {
+		double k = OPEN_DOT_PRINT_SEC_PER_BLOCK * 20.0, rise = OPEN_DOT_PRINT_RISE_SEC * 20.0;
+		return "size=" + COVER_DOT_SIZE + "*clamp((t+" + fmt(t0Sec * 20.0) + "-" + fmt(k)
+			+ "*" + dotDiag(rx, rz) + ")/" + fmt(rise) + ",0,1); alpha=1";
+	}
+
+	/**
+	 * 消散：{@code size} 从目标值缩到 0，顺序与打印一致（还是左上 → 右下），所以观感是
+	 * "点阵照原样往回退掉"；同样只有一个 clamp，且**不碰 alpha**——开光影时半透明粒子会被
+	 * 渲染成一层发光残影（2026-09-24 实测：alpha=0.55 的封面整块暗部直接消失），几何缩放则完全不受影响。
+	 */
+	private static String dotShrink(double rx, double rz, double t0Sec) {
+		double k = OPEN_DOT_DISSOLVE_SEC_PER_BLOCK * 20.0, fall = OPEN_DOT_DISSOLVE_FALL_SEC * 20.0;
+		return "size=" + COVER_DOT_SIZE + "*(1-clamp((t+" + fmt(t0Sec * 20.0) + "-" + fmt(k)
+			+ "*" + dotDiag(rx, rz) + ")/" + fmt(fall) + ",0,1)); alpha=1";
+	}
+
+	/**
+	 * 点阵条带（世界固定 / 屏幕锚定）：全程**不透明**地躲在封面后面
+	 * （交叉过渡靠"封面淡出把它露出来"，不做半透明叠色）。
 	 *
 	 * <p>⚠ 硬约束（2026-09-24 实测）：**必须用 {@code end_rod}**（{@code minecraft:block} + 面向镜头的
 	 * 字面矩阵整段不出图）；点必须小（点距 0.125 格时 size≈0.5，1.5 格的"大点"会糊成一个球）。
+	 *
+	 * <p>⚠ 粒子总数上限实测约 16384：四条 96² 点阵同屏时只活下来 ~16100 颗，后面的整批被丢。
 	 */
-	private static String dotBand(String image, double dpb, String sizeExpr, double cx, double cy, double cz,
-	                             String matrix, int age, double holdSec, double fadeSec, double staggerSec) {
-		return dotBand(image, dpb, sizeExpr, cx, cy, cz, matrix, age, holdSec, fadeSec, staggerSec, "");
-	}
-
-	/** 带屏幕锚定表达式的点阵条带（{@code lock} 为空 = 纯世界固定）。 */
-	private static String dotBand(String image, double dpb, String sizeExpr, double cx, double cy, double cz,
-	                             String matrix, int age, double holdSec, double fadeSec, double staggerSec, String lock) {
-		double hold = holdSec * 20.0, fade = fadeSec * 20.0, stagger = staggerSec * 20.0;
-		String alpha = "1-clamp((t-" + fmt(hold) + "-ddis*" + fmt(stagger) + ")/" + fmt(fade) + ",0,1)";
+	private static String dotBand(String image, double dpb, double cx, double cy, double cz,
+	                             String matrix, int age, String anim, String lock) {
 		return "particlex image-matrix end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
 			+ " " + image + " 1.0 \"" + matrix + "\" " + fmt(dpb) + " 0 0 0 " + age
-			+ " \"size=" + sizeExpr + "; alpha=" + alpha + (lock.isEmpty() ? "" : "; " + lock) + "\" 1.0";
+			+ " \"" + anim + (lock.isEmpty() ? "" : "; " + lock) + "\" 1.0";
 	}
 
 	/**
@@ -610,26 +667,39 @@ public final class StyxShow {
 		String textLock = OPEN_SCREEN_ANCHOR ? anchorTo(OPEN_AHEAD, OPEN_TEXT_H, 0.2, fx, fz, rx, rz) : "";
 		String dotLock = OPEN_SCREEN_ANCHOR
 			? anchorCloud(OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H + OPEN_DOT_SHIFT_H, 0.2, fx, fz, rx, rz) : "";
-		// ① 两片清晰板：淡入一颗 + 到交叉点换成只淡出的新一颗（复合 clamp 实测整颗不渲染，见 plateFade）
-		pending.add(new Pending(atSec + OPEN_IN_AT[0], coverPlate(coverX, ay, coverZ, ticks(OPEN_COVER_OUT_AT - OPEN_IN_AT[0]),
-			true, OPEN_PLATE_IN_SEC, coverLock)));
-		pending.add(new Pending(atSec + OPEN_COVER_OUT_AT, coverPlate(coverX, ay, coverZ, ticks(0.6),
-			false, OPEN_COVER_OUT_SEC, coverLock)));
-		pending.add(new Pending(atSec + OPEN_IN_AT[1], textPlate(textX, ay, textZ, ticks(OPEN_TEXT_OUT_AT - OPEN_IN_AT[1]),
-			true, OPEN_PLATE_IN_SEC, textLock)));
-		pending.add(new Pending(atSec + OPEN_TEXT_OUT_AT, textPlate(textX, ay, textZ, ticks(0.6),
-			false, OPEN_TEXT_OUT_SEC, textLock)));
-		// ② 点阵：12 条分批铺（每条 768 颗），藏在封面后面 0.35 格；3.05s 起同时从中心向外消散
-		for (int i = 0; i < OPEN_DOT_BANDS; i++) {
-			double spawnAt = OPEN_DOT_SPAWN_AT + i * OPEN_DOT_SPAWN_STEP;
-			double holdSec = OPEN_DOT_DISSOLVE_AT - spawnAt;
+		// 点阵发射位置 = 封面中心再沿前方退 OPEN_DOT_BACK（0.35 格）→ 永远在封面后层
+		double dotX = coverX + fx * OPEN_DOT_BACK + rx * OPEN_DOT_SHIFT_H;
+		double dotZ = coverZ + fz * OPEN_DOT_BACK + rz * OPEN_DOT_SHIFT_H;
+		// ① 第一拨点阵：12 条斜带分批生成，每颗点按自己的对角坐标错开长出来（= 左上 → 右下的打印）
+		for (int i = 0; !DBG_NO_DOTS && i < OPEN_DOT_BANDS; i++) {
+			double spawnAt = OPEN_DOT_PRINT_SPAWN_AT + i * OPEN_DOT_PRINT_SPAWN_STEP;
+			int age = ticks(OPEN_DOT_PRINT_END_AT - spawnAt) + 2;
+			String img = COVER_GRID_IMAGE + String.format("%02d", i) + ".png";
+			pending.add(new Pending(atSec + spawnAt, dotBand(img, COVER_DPB, dotX, ay, dotZ, coverM, age,
+				dotGrow(rx, rz, spawnAt), dotLock)));
+		}
+		// ② 两片清晰板：淡入一颗 + 到交叉点换成只淡出的新一颗（复合 clamp 实测整颗不渲染，见 plateFade）
+		if (!DBG_NO_PLATES) {
+			pending.add(new Pending(atSec + OPEN_COVER_IN_AT, coverPlate(coverX, ay, coverZ, ticks(OPEN_COVER_OUT_AT - OPEN_COVER_IN_AT),
+				true, OPEN_PLATE_IN_SEC, coverLock)));
+			pending.add(new Pending(atSec + OPEN_COVER_OUT_AT, coverPlate(coverX, ay, coverZ, ticks(0.6),
+				false, OPEN_COVER_OUT_SEC, coverLock)));
+			pending.add(new Pending(atSec + OPEN_TEXT_IN_AT, textPlate(textX, ay, textZ, ticks(OPEN_TEXT_OUT_AT - OPEN_TEXT_IN_AT),
+				true, OPEN_PLATE_IN_SEC, textLock)));
+			pending.add(new Pending(atSec + OPEN_TEXT_OUT_AT, textPlate(textX, ay, textZ, ticks(0.6),
+				false, OPEN_TEXT_OUT_SEC, textLock)));
+		}
+		/*
+		 * ③ 第二拨点阵：封面开始淡出的同一刻（2.30s）在它背后原地生成同一张点阵图，然后按对角顺序
+		 *    "往回缩"到 0 —— 观感就是"清晰封面化回点阵、点阵再缩没"，和文字一起在 3.10s 前收干净。
+		 *    与封面同轴（OPEN_DOT_SHIFT_H = 0）是关键：错位副本正是"封面最后左右抖动"的来源。
+		 */
+		for (int i = 0; !DBG_NO_DOTS && i < OPEN_DOT_BANDS; i++) {
+			double spawnAt = OPEN_DOT_DISSOLVE_AT + i * OPEN_DOT_DISSOLVE_SPAWN_STEP;
 			int age = ticks(OPEN_DOT_END_AT - spawnAt) + 6;
 			String img = COVER_GRID_IMAGE + String.format("%02d", i) + ".png";
-			// 发射位置 = 封面中心沿右向再偏 OPEN_DOT_SHIFT_H、沿前方再退 OPEN_DOT_BACK（只能被挡住，不能挡人）
-			pending.add(new Pending(atSec + spawnAt, dotBand(img, COVER_DPB, COVER_DOT_SIZE,
-				coverX + fx * OPEN_DOT_BACK + rx * OPEN_DOT_SHIFT_H, ay,
-				coverZ + fz * OPEN_DOT_BACK + rz * OPEN_DOT_SHIFT_H, coverM, age, holdSec,
-				OPEN_DOT_FADE_SEC, OPEN_DOT_STAGGER_SEC, dotLock)));
+			pending.add(new Pending(atSec + spawnAt, dotBand(img, COVER_DPB, dotX, ay, dotZ, coverM, age,
+				dotShrink(rx, rz, spawnAt - OPEN_DOT_DISSOLVE_AT), dotLock)));
 		}
 		NbmachinaMod.LOGGER.info("[styxshow] 开场卡片（{}）：机位 yaw {} → 锚点 ({}, {}, {})，封面 ({}, {}, {}) 文案 ({}, {}, {})，{} 格前方，{} 条点阵",
 			OPEN_SCREEN_ANCHOR ? "屏幕锚定、只显现/消失" : "世界固定",
@@ -761,8 +831,10 @@ public final class StyxShow {
 		String demoMatrix = MATRICES[0];
 		cmds.add(coverPlate(-10.0, 115.0, ZC, 40, true, OPEN_PLATE_IN_SEC));
 		cmds.add(textPlate(-10.0, 119.9, ZC, 40, true, OPEN_PLATE_IN_SEC));
-		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, COVER_DOT_SIZE, -14.0, 111.0, ZC - 4.0,
-			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, 1.0, OPEN_DOT_FADE_SEC, OPEN_DOT_STAGGER_SEC));
+		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, -14.0, 111.0, ZC - 4.0,
+			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, dotGrow(0.0, 1.0, 0.0), ""));
+		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, -14.0, 111.0, ZC - 8.0,
+			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, dotShrink(0.0, 1.0, 0.0), ""));
 		cmds.add(flareEdges(0.5, 110.5, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareRipple(0.5, 111.0, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.5, -5.5));
