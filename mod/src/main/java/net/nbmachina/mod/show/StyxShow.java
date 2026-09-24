@@ -213,27 +213,40 @@ public final class StyxShow {
 	// ── 开场时间线（秒；0.7.4「点阵先打印 → 清板压上 → 一起缩没」版）──────────────────
 	// ⚠ ExParticle 表达式里的 t 是**刻数**（命令末尾 step=1 → 每刻 +1），所以"秒"必须 ×20 才等于表达式里的时长。
 	//
-	// 0.00→0.70  封面 + 文案**同时、同样时长**淡入（用户口径："封面和文字应该同时出现"、"时长/速度要一致"）
-	// 0.75→1.35  点阵整片淡入（**不再打点**——用户 2026-09-24："不用点阵打点了"；点阵仍比封面右偏 6.5 格、后 0.35 格）
-	// 1.35→2.30  定格
-	// 2.30→3.00  封面 + 文案**同时**淡出（与出现同一类型：同一条线性斜坡的镜像）
-	// 3.00→3.70  点阵在封面/文案**消失之后**淡出（"随之自然消失"）
+	// 0.00→0.70  封面 + 文案**同一时刻、同一类型**柔和淡入（用户 2026-09-24："柔和淡入淡出"）
+	// 2.30→3.00  封面 + 文案**同一时刻**柔和淡出（同一条曲线的镜像）
 	// 3.917      第一颗音
+	//
+	// ⚠ **开场不再有点阵层**（用户 2026-09-24："把整个点阵去掉"）。下面 dot* 模板只留给
+	//   `/nbm machine showcheck` 做命令自检，开场流程里不再调用。
+	//
+	// ⚠ 淡入时长按"观感"对齐：开光影时 alpha<1 的板子**暗部会整块消失**（§16.1 实测），
+	//   深色封面要 alpha≈1（≈0.9×时长）才算"成形"，白字文案 ≈0.7×时长 就看清了。
+	//   要让两者**看起来**同时出现/同时消失，封面那条斜坡就得短一点（0.55 ≈ 0.78×0.70）。
 	//
 	// 为什么会有"两拨点阵"：单个表达式里**两个 clamp 相乘的复合式实测整颗粒子不渲染**
 	// （2026-09-24 实机对照：单 clamp 正常、clamp*clamp 全灭），所以"长出来"和"缩回去"
 	// 必须拆成两批粒子，各自只带一个 clamp。
 	/** 封面 + 文案**同一时刻、同一时长**淡入。 */
 	private static final double OPEN_PLATE_IN_AT = 0.00;
-	private static final double OPEN_PLATE_IN_SEC = 0.70;
+	/**
+	 * 淡入时长：封面 0.35s、文案 0.70s。
+	 *
+	 * <p>为什么不一样：开光影时 alpha&lt;1 的板子**暗部会整块消失**（§16.1），深色封面要 alpha≈0.9 才算
+	 * "成形"，白字文案 alpha≈0.25 就能读 → 若两者同长，封面看起来会比文案晚一大截（实测：文案 0.2s 可读、
+	 * 封面 0.8s 才成形）。把封面那条斜坡缩到一半、并让曲线"起手快"（x(2-x)），两者才基本同时到位。
+	 */
+	private static final double OPEN_TEXT_IN_SEC = 0.70;
+	private static final double OPEN_COVER_IN_SEC = 0.35;
 	/**
 	 * 封面与文案**同一时刻、同一时长**退场，曲线 = 入场那条线性斜坡的镜像
 	 * （用户口径："消失动画用和出现动画一样类型的"）。
 	 */
 	private static final double OPEN_COVER_OUT_AT = 2.30;
+	/** 退场两者都用 0.70s（用户口径"封面和文字同时消失"）：同时起、同时收干净。 */
 	private static final double OPEN_COVER_OUT_SEC = 0.70;
 	private static final double OPEN_TEXT_OUT_AT = OPEN_COVER_OUT_AT;
-	private static final double OPEN_TEXT_OUT_SEC = OPEN_COVER_OUT_SEC;
+	private static final double OPEN_TEXT_OUT_SEC = OPEN_TEXT_IN_SEC;
 	/**
 	 * 拆块动画参数：4×4 块、对角顺序（左上先）、**0.04s/步**错开、每块 0.35s 长满或缩没。
 	 * 错开量比"每块的时长"小得多 → 16 块在时间上互相重叠，读起来是"整幅图连着填满/退掉"，
@@ -371,10 +384,13 @@ public final class StyxShow {
 	 */
 	private static String alphaSeg(boolean rising, double durSec) {
 		double dur = durSec * 20.0;
-		if (rising) return "clamp(t/" + fmt(dur) + ",0,1)";
-		// 2026-09-24 用户口径："消失动画用和出现动画一样类型的" → 淡出就用淡入那条线性斜坡的**镜像**
-		// （`1-clamp(t/dur,0,1)`，同一个 dur）。早先那版用过 quadraticLerp 缓动，现在为了"同类型"去掉。
-		return "1-clamp(t/" + fmt(dur) + ",0,1)";
+		// 2026-09-24 用户口径："消失动画用出现动画一样类型的（柔和淡入 淡出）"：
+		//   出现 alpha = x(2-x)，消失 alpha = 1-x²（x = clamp(t/时长,0,1)）—— 后者正是前者的**镜像**。
+		// 形状：出现"起手快、收尾软"（深色封面能早点成形，不至于比白字晚太多），
+		//       消失"先稳住、末端收干净"，比线性柔。两个式子都只有一个 clamp + 四则运算，
+		//       不会踩到"两个 clamp 相乘整颗不渲染"的坑。
+		String x = "(clamp(t/" + fmt(dur) + ",0,1))";
+		return rising ? x + "*(2-" + x + ")" : "1-" + x + "*" + x;
 	}
 
 	/**
@@ -703,84 +719,35 @@ public final class StyxShow {
 		dirRz = rz;
 		double ax = p.getX() + fx * OPEN_AHEAD, az = p.getZ() + fz * OPEN_AHEAD;
 		double ay = p.getEyeY() + 0.2;
-		// 点阵矩阵：素材 96px，中心平移 -48 px → /8 = -6 格；平面基向量 = 起播时的相机右向
-		String coverM = gridMatrix(rx, rz, -(96.0 / 2), -(96.0 / 2));
 		// 屏幕锚定（0.7.1）：把卡片每刻搬到「眼位 + 起播方向×距离 + 起播右向×版面偏移」→ 屏幕上不动
 		String coverLock = OPEN_SCREEN_ANCHOR ? anchorTo(OPEN_AHEAD, OPEN_COVER_H, 0.2, fx, fz, rx, rz) : "";
 		String textLock = OPEN_SCREEN_ANCHOR ? anchorTo(OPEN_AHEAD, OPEN_TEXT_H, 0.2, fx, fz, rx, rz) : "";
-		String dotLock = OPEN_SCREEN_ANCHOR
-			? anchorCloud(OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H + OPEN_DOT_SHIFT_H, 0.2, fx, fz, rx, rz) : "";
-		// ① 点阵：12 条斜带分批生成、整片一起淡入（不再"打点"）
-		//    点阵整体比封面**右偏 OPEN_DOT_SHIFT_H 格、后 0.35 格**（用户口径：那个错位观感是要的）
-		for (int i = 0; !DBG_NO_DOTS && i < OPEN_DOT_BANDS; i++) {
-			double spawnAt = OPEN_DOT_SPAWN_AT + i * OPEN_DOT_SPAWN_STEP;
-			int age = ticks(OPEN_DOT_PRINT_END_AT - spawnAt) + 2;
-			String img = COVER_GRID_IMAGE + String.format("%02d", i) + ".png";
-			double t0 = spawnAt - OPEN_DOT_SPAWN_AT;      // 相对淡入起点
-			pending.add(new Pending(atSec + spawnAt, () -> {
-				double[] q = anchorPoint(world, OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H + OPEN_DOT_SHIFT_H, 0.2);
-				return dotBand(img, COVER_DPB, q[0], q[1], q[2], coverM, age, dotGrow(t0), dotLock);
-			}));
-		}
 		/*
-		 * ② 封面 + 文案：**同一套拆块动画**（4×4 块、对角顺序、同时长同错开）——
-		 *    出现 = 每块 size 0→满；消失 = 每块 size 满→0（用户口径："消失动画用和出现动画一样类型的"、
-		 *    "封面和文字的出现动画时长/速度要一致"）。走几何而不走 alpha 的原因见 {@link #tilePlate}。
+		 * 开场只有两件事：封面 + 文案。
+		 *   出现 = 柔和淡入；消失 = **同一条缓动曲线的镜像**（用户 2026-09-24："消失动画用出现动画一样
+		 *   类型的（柔和淡入 淡出）"、"把整个点阵去掉"）。
+		 * 每颗板子一颗粒子：淡入那颗活到退场时刻，退场那颗是"只淡出"的新粒子（复合 clamp 实测整颗不渲染）。
 		 */
 		if (!DBG_NO_PLATES) {
-			/*
-			 * 出现 / 消失 = **同一套拆块动画**（4×4 块、对角顺序、同一段错开、同一条斜坡），
-			 * 出现是 size 0→满、消失是 size 满→0（用户口径："消失动画用和出现动画一样类型的"、
-			 * "封面和文字的出现动画时长/速度要一致"）。几何动画对封面/文案完全一视同仁，
-			 * 不像 alpha 那样"深色封面要等 alpha≈1 才成形、白字早就亮了"。
-			 */
-			for (int tile = 0; tile < PLATE_TILES * PLATE_TILES; tile++) {
-				int col = tile % PLATE_TILES, row = tile / PLATE_TILES;
-				double dh = (col - (PLATE_TILES - 1) / 2.0) * OPEN_TILE_BLOCKS;
-				double dv = ((PLATE_TILES - 1) / 2.0 - row) * OPEN_TILE_BLOCKS;
-				double delay = OPEN_TILE_STAGGER_SEC * (col + row);
-				double u0 = col / (double) PLATE_TILES, u1 = (col + 1) / (double) PLATE_TILES;
-				double v0 = row / (double) PLATE_TILES, v1 = (row + 1) / (double) PLATE_TILES;
-				// 出现那 16 块要**活到退场那一刻**（delay 只挪动"长出来"的时机，不影响寿命）
-				int growAge = ticks(OPEN_COVER_OUT_AT - OPEN_PLATE_IN_AT) + 4;
-				int shrinkAge = ticks(delay + OPEN_TILE_SHRINK_SEC) + 4;
-				// 出现
-				pending.add(new Pending(atSec + OPEN_PLATE_IN_AT, () -> {
-					double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_COVER_H + dh, 0.2 + dv);
-					return tilePlate(COVER_BLOCK, q[0], q[1], q[2], growAge, OPEN_TILE_BLOCKS * 4.0,
-						u0, u1, v0, v1, delay, OPEN_TILE_GROW_SEC, true,
-						anchorTo(OPEN_AHEAD, OPEN_COVER_H + dh, 0.2 + dv, fx, fz, rx, rz));
-				}));
-				pending.add(new Pending(atSec + OPEN_PLATE_IN_AT, () -> {
-					double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_TEXT_H + dh, 0.2 + dv);
-					return tilePlate(TITLE_BLOCK, q[0], q[1], q[2], growAge, TEXT_BLOCKS / PLATE_TILES * 4.0,
-						u0, u1, v0, v1, delay, OPEN_TILE_GROW_SEC, true,
-						anchorTo(OPEN_AHEAD, OPEN_TEXT_H + dh, 0.2 + dv, fx, fz, rx, rz));
-				}));
-				// 消失（同一套栅格/顺序/时长，只把 grow 换成 shrink）
-				pending.add(new Pending(atSec + OPEN_TILE_OUT_AT, () -> {
-					double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_COVER_H + dh, 0.2 + dv);
-					return tilePlate(COVER_BLOCK, q[0], q[1], q[2], shrinkAge, OPEN_TILE_BLOCKS * 4.0,
-						u0, u1, v0, v1, delay, OPEN_TILE_SHRINK_SEC, false,
-						anchorTo(OPEN_AHEAD, OPEN_COVER_H + dh, 0.2 + dv, fx, fz, rx, rz));
-				}));
-				pending.add(new Pending(atSec + OPEN_TILE_OUT_AT, () -> {
-					double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_TEXT_H + dh, 0.2 + dv);
-					return tilePlate(TITLE_BLOCK, q[0], q[1], q[2], shrinkAge, TEXT_BLOCKS / PLATE_TILES * 4.0,
-						u0, u1, v0, v1, delay, OPEN_TILE_SHRINK_SEC, false,
-						anchorTo(OPEN_AHEAD, OPEN_TEXT_H + dh, 0.2 + dv, fx, fz, rx, rz));
-				}));
-			}
-		}
-		/** ③ 点阵缩回去：封面/文案收完之后（3.00s）才开始，与长出来同类型（几何）。 */
-		for (int i = 0; !DBG_NO_DOTS && i < OPEN_DOT_BANDS; i++) {
-			double spawnAt = OPEN_DOT_OUT_AT + i * OPEN_DOT_DISSOLVE_SPAWN_STEP;
-			int age = ticks(OPEN_DOT_END_AT - spawnAt) + 6;
-			String img = COVER_GRID_IMAGE + String.format("%02d", i) + ".png";
-			double t0 = spawnAt - OPEN_DOT_OUT_AT;
-			pending.add(new Pending(atSec + spawnAt, () -> {
-				double[] q = anchorPoint(world, OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H + OPEN_DOT_SHIFT_H, 0.2);
-				return dotBand(img, COVER_DPB, q[0], q[1], q[2], coverM, age, dotShrink(t0), dotLock);
+			pending.add(new Pending(atSec + OPEN_PLATE_IN_AT, () -> {
+				double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_COVER_H, 0.2);
+				return coverPlate(q[0], q[1], q[2], ticks(OPEN_COVER_OUT_AT - OPEN_PLATE_IN_AT),
+					true, OPEN_COVER_IN_SEC, coverLock);
+			}));
+			pending.add(new Pending(atSec + OPEN_PLATE_IN_AT, () -> {
+				double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_TEXT_H, 0.2);
+				return textPlate(q[0], q[1], q[2], ticks(OPEN_TEXT_OUT_AT - OPEN_PLATE_IN_AT),
+					true, OPEN_TEXT_IN_SEC, textLock);
+			}));
+			pending.add(new Pending(atSec + OPEN_COVER_OUT_AT, () -> {
+				double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_COVER_H, 0.2);
+				return coverPlate(q[0], q[1], q[2], ticks(OPEN_COVER_OUT_SEC) + 4,
+					false, OPEN_COVER_OUT_SEC, coverLock);
+			}));
+			pending.add(new Pending(atSec + OPEN_TEXT_OUT_AT, () -> {
+				double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_TEXT_H, 0.2);
+				return textPlate(q[0], q[1], q[2], ticks(OPEN_TEXT_OUT_SEC) + 4,
+					false, OPEN_TEXT_OUT_SEC, textLock);
 			}));
 		}
 		NbmachinaMod.LOGGER.info("[styxshow] 开场卡片（{}）：起播 yaw {} 锚点 ({}, {}, {})，{} 格前方、点阵右偏 {} 格；{} 条点阵、退出拆 {}×{} 块",
@@ -931,8 +898,8 @@ public final class StyxShow {
 		cmds.add(riverLane(-8.0));
 		cmds.add(helix(0.0));
 		String demoMatrix = MATRICES[0];
-		cmds.add(coverPlate(-10.0, 115.0, ZC, 40, true, OPEN_PLATE_IN_SEC));
-		cmds.add(textPlate(-10.0, 119.9, ZC, 40, true, OPEN_PLATE_IN_SEC));
+		cmds.add(coverPlate(-10.0, 115.0, ZC, 40, true, OPEN_TEXT_IN_SEC));
+		cmds.add(textPlate(-10.0, 119.9, ZC, 40, true, OPEN_TEXT_IN_SEC));
 		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, -14.0, 111.0, ZC - 4.0,
 			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, dotGrow(0.0), ""));
 		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, -14.0, 111.0, ZC - 8.0,
