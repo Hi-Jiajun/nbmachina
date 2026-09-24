@@ -537,8 +537,9 @@ public final class StyxShow {
 			exec(world, helix(3.1416));
 		}
 		if (fromSec < 3.5) opening(world, fromSec);
-		NbmachinaMod.LOGGER.info("[styxshow] 视效层启动：从 {}s 起（重音剩 {} / 歌词剩 {} 行，整体平移 {:+}s）",
-			fromSec, doc.accents.length - accCursor, doc.lines.size() - lineCursor, lyricOffset);
+		// ⚠ SLF4J 不认 `{:+}` 这种格式（会原样打印并报 placeholder 数量不符）→ 偏移自己格式化
+		NbmachinaMod.LOGGER.info("[styxshow] 视效层启动：从 {}s 起（重音剩 {} / 歌词剩 {} 行，整体平移 {}s）",
+			fromSec, doc.accents.length - accCursor, doc.lines.size() - lineCursor, fmt(lyricOffset));
 	}
 
 	/**
