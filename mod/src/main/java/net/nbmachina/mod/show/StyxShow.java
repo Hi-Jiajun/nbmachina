@@ -88,6 +88,8 @@ public final class StyxShow {
 	private static final List<Pending> pending = new ArrayList<>();
 	private static int sent = 0;
 	private static int failed = 0;
+	/** 视效层当前时刻（秒，见 tick()）；音符盒特效的延迟队列用它算"到点"。 */
+	private static double showNow = 0.0;
 	/** 歌词整体提前/延后（秒，正数 = 更晚出现）：现场微调用 `/nbm machine lyricoff <秒>` */
 	private static double lyricOffset = 0.0;
 
@@ -499,11 +501,44 @@ public final class StyxShow {
 	 * 按 {@code fit} 等比缩小（字形和排布一起缩），免得长句子飞出机器那条水带。
 	 */
 	private static final double ADV = 1.25, GLYPH_DPB = 48.0 / ADV, LINE_MAX = 26.0;
-	/** 柔光/涟漪的预渲染素材参数（16px / 24px，见 `_scratch-m3-80/render-show-pngs.mjs`） */
-	private static final double GLOW_DPB = 8.0, GLOW_R = 16.0 / GLOW_DPB / 2;   // 直径 2 格
-	private static final double RING_DPB = 15.0, RING_R = 24.0 / RING_DPB / 2;  // 直径 1.6 格
 	/** 逐字点尺寸：四边形 ≈ 笔画宽（≈0.17 格）。实机对照：1.0 偏散、2.5 偏糊，1.4 最锐 */
 	private static final double LYRIC_SIZE = 1.4;
+	/**
+	 * 涟漪环的预渲染素材（24px，环带半径 8.0–10.8px）+ dpb：
+	 * 出生态半径 ≈ 9.4/15 = 0.63 格、直径 1.26 格。素材生成见
+	 * `_scratch-m3-80/render-show-pngs.mjs` 第 4 段。
+	 */
+	private static final double RING_DPB = 15.0;
+	/**
+	 * 平铺圆环矩阵：把 24×24 贴图的**中心**（±11.5px）对到命令点上。
+	 *
+	 * <p>⚠ 这是 0.7.9 "涟漪根本看不到" 的第二个根因（第一个是命令字符串少个空格、压根没解析成功）：
+	 * `image-matrix` 每颗粒子的"中心"就是**命令点**，而 0.7.9 把命令点放在贴图左下角，
+	 * 于是 `(dx,dy,dz)` 里全带着 +0.8/−0.8 格的角点偏置，`(vx,vy,vz)=(dx,dy,dz)*k`
+	 * 等于把整圈**一边膨胀一边以 ~6 格/秒斜着推走**。现在命令点 = 环心，`dx/dz` 才是真正的半径方向。
+	 *
+	 * <p>⚠ 单位坑（2026-09-24 实测）：ExParticle 侧是 `pos = M · (像素坐标/dpb)`，
+	 * 所以矩阵里的平移量**已经除以 dpb 了** → 平移要写"格"（11.5/15 = 0.7667），
+	 * 写像素值会把整圈挪到 11 格外去（第一版就是这么翻的）。
+	 *
+	 * <p>scale 只给"预览"用：不开机器时三阵只能同刻出生，用不同半径错开（机器跑的时候是每阵晚 0.15s）。
+	 */
+	private static String ringMatrix(double scale) {
+		double half = 11.5 / RING_DPB;
+		return "(0," + fmt(scale) + ",0," + fmt(-half * scale) + ",,0,0,0,0,,"
+			+ fmt(-scale) + ",0,0," + fmt(half * scale) + ",,0,0,0,1)";
+	}
+	/** 水皮高度：水面实测在方块顶面下 ~0.12 格（水方块与音符盒同在 y=110 → 水面 110.875）。 */
+	private static final double RIPPLE_DROP = 0.02;
+
+	/** 颜色缩放（通道 ×f，钳到 1）：同一个音高用不同亮度区分棱框 / 表面光 / 水波 / 迸溅 / 火花。 */
+	private static String tint(String col, double f) {
+		String[] p = col.split(",");
+		double r = Math.min(1.0, Double.parseDouble(p[0]) * f);
+		double g = Math.min(1.0, Double.parseDouble(p[1]) * f);
+		double b = Math.min(1.0, Double.parseDouble(p[2]) * f);
+		return fmt(r) + "," + fmt(g) + "," + fmt(b);
+	}
 
 	/**
 	 * ① **12 条棱**（描边立方体）：从音符盒本体（1 格见方，半边长 0.5）起**等比例**往外扩
@@ -513,6 +548,9 @@ public final class StyxShow {
 	 *
 	 * <p>step 必须能整除 1.0：0.05 → 采样点正好落在 ±0.5 上，12 条棱全中；
 	 * 0.06 会让 ±0.5 只被部分命中（用户实测"只有 3 条棱"就是这个）。
+	 *
+	 * <p>锚点给**方块中心**（y+0.5）：棱框就是方块本体那 12 条棱。0.7.9 曾把锚点抬到
+	 * y+1.5（顶面上方半格），整只框悬在方块上空一格 —— 用户要的是"体积从和音符盒一样大"。
 	 */
 	private static String flareEdges(double cx, double cy, double cz, String col) {
 		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
@@ -523,66 +561,88 @@ public final class StyxShow {
 	}
 
 	/**
-	 * ② **柔光**（"音符盒表面亮了一下再消退"）v2：**一圈不透明小点**铺成圆晕。
+	 * ② **盒体表面发光**（v3）：把不透明小点铺在方块的**五个面**上（±0.5 壳层，去掉底面），
+	 * 每颗都是面向镜头的四边形 → 不管镜头多平，都能看到"盒体表面亮了一下再消退"。
 	 *
-	 * <p>走过的两条弯路都记下来，别再回去：
+	 * <p>踩过的三条路（别再回退）：
 	 * <ol>
 	 *   <li>单颗 size 9→25 的 end_rod 冒充柔光 → 是一大片硬边色块（精灵本身是六边形）；</li>
 	 *   <li>`glow.png`（16² 径向 alpha 渐变）+ 逐像素 alpha → 开光影时半透明被 **dither** 成
-	 *       一片抖动噪点方块（2026-09-24 逐帧取证，正是用户说的"柔光很拉跨"）。</li>
+	 *       一片抖动噪点方块（2026-09-24 逐帧取证，正是用户说的"柔光很拉跨"）；</li>
+	 *   <li>0.7.9 的"顶面上方一圈平铺的点"：机位与海平面平行时，平的圆晕在画面里被压成一条线，
+	 *       实机等于看不见（用户 2026-09-24 复看："其他效果都没看出来"）。</li>
 	 * </ol>
-	 * 所以改成**全不透明的小点**：中心大、外圈小（size 按半径线性衰减），整体在 0.9s 里缩没。
-	 * 点云用 `custom-normal` 的高斯分布生成，y 方向压到 0.02 → 薄薄一层贴在顶面上方，
-	 * 镜头在方块上方平飞时看到的就是"表面亮了一下"。
-	 */
-	private static String flareGlow(double cx, double cy, double cz, String col) {
-		return "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
-			// 尺寸/密度：0.42（四边形≈0.1 格）的小点 × 40 颗铺在 1.0 格半径内 ——
-			// 之前 1.25 × 54 太密太大，实机是一坨发白色块（2026-09-24 预览取证）。
-			+ " \"size=0.42; cr,cg,cb=" + col + "; alpha=1; age=16; light=1.0\" 1.0 0.02 1.0 40 "
-			+ "\"size=0.42*(1-t/16)*(1-0.45*clamp(sqrt(dx*dx+dz*dz)/1.0,0,1))\" 1.0";
-	}
-
-	/**
-	 * ⑤ 余辉：弹过的音在顶面留 3 颗**不透明**小色点，1.6s 里缩没 ——
-	 * 让"颜色沿着河往下传"看起来是流动的（旧版 alpha=0.10 的色斑在光影下等于看不见）。
-	 */
-	private static String flareTrail(double cx, double top, double cz, String col) {
-		return "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(top + 0.06) + " " + fmt(cz)
-			+ " \"size=1.5; cr,cg,cb=" + col + "; alpha=1; age=32; light=1.0\" 0.20 0.03 0.20 3 "
-			+ "\"size=1.5*(1-t/32)\" 1.0";
-	}
-
-	/**
-	 * ③ **涟漪**：音符盒顶面像被流星砸中那样荡开的**水波环**。
+	 * <p>采样口径：range 0.5 / step 0.125（二进制精确 → 9×9×9 = 729 点），条件取
+	 * |x|=0.5 或 |z|=0.5 或 y=+0.5 的壳层 → 337 颗；size 0.75（四边形 ≈0.19 格）在 0.125 格间距上
+	 * 互相压住 → 贴着盒面的一层细密辉光。
 	 *
-	 * <p>三次迭代口径（都在这条注释里，别再回退）：
-	 * <ol>
-	 *   <li>`custom-parameter polar` 撒一圈点再往外推 → 视频里是梳齿状断弧（不连贯 ✗）；</li>
-	 *   <li>用带 alpha 的 `ring.png` 高斯环 → 环是连的，但半透明被光影 dither 成噪点（✗）；</li>
-	 *   <li><b>现在</b>：`ring.png` 换成**不透明细环**（见 `_scratch-m3-80/render-show-pngs.mjs`），
-	 *       半径按 `r ← r·(1 + v/(1+t/3.5))` 先快后慢地荡开（水波感），退场只把 size 收细、不碰 alpha。</li>
-	 * </ol>
-	 * {@code delaySec} 用来让一颗音叠两圈（内圈快、外圈慢），涟漪更有层次。
+	 * <p>尺寸口径（2026-09-24 逐帧实测）：{@code size} 对应的四边形 ≈ <b>size/8 格</b>
+	 * （不是 size/4），所以 0.25 格间距要铺满，size 得 ≥1.2。0.7.9 之后第一版用 size 0.75
+	 * （0.094 格）在 0.125 间距上是一粒粒孤立的点，实机几乎看不见。
+	 * {@code 0.064*dx³} 让每颗沿自己的面法线慢慢往外飘 0.08 格 → 表面像"亮起来往外渗"。
+	 * 退场只缩 size、alpha 全程 1。
 	 */
-	private static String flareRipple(double cx, double top, double cz, String col, double delaySec, int age) {
-		double delay = Math.max(0.0, delaySec * 20.0);
-		// 平铺矩阵 (0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)：v→+x、u→−z ⇒ 锚点要 (+x, +z) 各退 R
-		return "particlex image-matrix end_rod " + fmt(cx - RING_R) + " " + fmt(top) + " " + fmt(cz + RING_R)
-			+ " ring.png 1.0 \"" + FLAT_MATRIX + "\" " + fmt(RING_DPB) + " 0 0 0 " + age
-			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.55/(1+" + fmt(delay) + "+t/3.5); size=0.9*(1-t/" + age + "); cr,cg,cb=" + col
-			+ "; alpha=1\" 1.0";
+	private static String flareSurface(double cx, double cy, double cz, String col) {
+		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
+			+ " \"size=1.40; cr,cg,cb=" + col + "; alpha=1; age=10; light=1.0\" 0.5 0.5 0.5 "
+			+ "\"abs(abs(x)-0.5)<0.01|abs(abs(z)-0.5)<0.01|abs(y-0.5)<0.01\" 0.125 "
+			+ "\"vx=0.064*dx*dx*dx; vy=0.064*dy*dy*dy; vz=0.064*dz*dz*dz; size=1.40*(1-t/10)\" 1.0";
 	}
 
 	/**
-	 * ④ **火花**：烟花绽放前往上窜的小点（用户口径："像烟花绽放之前就做的还可以"），
-	 * 颜色跟着音高走；退场靠 size 收缩，alpha 全程 1。
+	 * ③ **涟漪 / 水波**（v3）：`custom-parameter polar` 绕方块中心撒一圈点，沿半径向外推，
+	 * 边推边上下起伏 —— 湖面被雨点砸中后一圈圈荡开的波纹。
+	 *
+	 * <p>踩过的坑（别再回退）：
+	 * <ol>
+	 *   <li>0.7.9 用 `image-matrix` + ring.png：锚点在**贴图左下角**，而 `(vx,vy,vz)=(dx,dy,dz)*k`
+	 *       是按"相对锚点"推的 → 整圈一边膨胀一边以 ~6 格/秒斜着飞走，实机根本看不到环；</li>
+	 *   <li>平铺的水波环在"与海平面平行"的机位下被压成一条线，就算不出错也看不清。</li>
+	 * </ol>
+	 * 现在：`dis` 是**相对方块中心**的半径，每颗都是面向镜头的四边形（size ≈0.2 格），
+	 * 半径按 `0.17/(1+t/3.2)` 先快后慢往外荡；`vy=0.045*sin(t/2.4+ds1*3)` 给整圈叠一列行波，
+	 * 镜头平飞时看到的就是"一圈圈往外荡、还带着上下起伏"的水纹。
+	 *
+	 * <p>0.8.1 起改回 `image-matrix` + ring.png（**连续细环**，116 颗/圈）：
+	 * polar 版（105 颗/圈的点阵）实机是"一串珠子"——点与点之间有明显空隙，
+	 * 而且 size 的四边形只有 size/8 格（0.95 → 0.12 格），间距 0.11 格时就断成虚线了。
+	 * 环贴图是连着的，只在环带上取像素，观感就是"一条水波线"；
+	 * 竖向下沉/起伏仍靠 `vy=0.045*sin(...)`（`ds1` = 该像素在环上的方位角）。
+	 *
+	 * @param scale 出生半径缩放（1.0 = 素材原尺寸 0.63 格；只有预览才用 !=1）
+	 */
+	private static String flareRipple(double cx, double top, double cz, String col, double scale, int age, double size) {
+		return "particlex image-matrix end_rod " + fmt(cx) + " " + fmt(top) + " " + fmt(cz)
+			+ " ring.png 1.0 \"" + ringMatrix(scale) + "\" " + fmt(RING_DPB) + " 0 0 0 " + age
+			+ " \"(vx,vy,vz)=(dx,dy,dz)/ddis*0.17/(1+t/3.2); vy=0.045*sin(t/2.4+ds1*3); "
+			+ "size=" + fmt(size) + "*(1-t/" + age + "); cr,cg,cb=" + col + "; alpha=1\" 1.0";
+	}
+
+	/**
+	 * ④ **落点迸溅**：雨点砸在水面上的那一小簇向上窜的水花（10 颗 / 0.65s）。
+	 * 出生点压在水皮上（sigma_y=0.03），带重力自然回落。
+	 */
+	private static String flareSplash(double cx, double cy, double cz, String col) {
+		return "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
+			+ " \"size=1.10; cr,cg,cb=" + col + "; alpha=1; age=13; light=1.0; "
+			+ "vx=(random()-0.5)*0.12; vy=0.14+random()*0.20; vz=(random()-0.5)*0.12; "
+			+ "gravity=0.035; friction=0.98\" 0.15 0.03 0.15 10 "
+			+ "\"size=1.10*(1-t/13)\" 1.0";
+	}
+
+	/**
+	 * ⑤ **手持烟花**（仙女棒）：细、快、短的小火星。
+	 *
+	 * <p>用户 2026-09-24 口径："那些发光颗粒稍微有点大了，速度有点点慢，要像手里拿着玩的那种烟花"。
+	 * 0.7.9 是 size 1.2（≈0.3 格）＋ vy 0~0.24；现在 size 0.55（≈0.14 格）＋ vy 0.30~0.62 格/刻，
+	 * 带重力与阻尼，窜上去就灭；颜色仍跟音高（tint 提亮一档，火星本来就是白热的）。
 	 */
 	private static String flareSparks(double cx, double cy, double cz, String col) {
 		return "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
-			+ " \"size=1.2; cr,cg,cb=" + col + "; alpha=1; age=26; light=1.0; vx=(random()-0.5)*0.14; "
-			+ "vy=random()*0.24; vz=(random()-0.5)*0.14; gravity=0.06; friction=0.96\" 0.16 0.16 0.16 12 "
-			+ "\"size=1.2*(1-t/26)\" 1.0";
+			+ " \"size=0.80; cr,cg,cb=" + col + "; alpha=1; age=15; light=1.0; "
+			+ "vx=(random()-0.5)*0.12; vy=0.30+random()*0.32; vz=(random()-0.5)*0.12; "
+			+ "gravity=0.05; friction=0.98\" 0.12 0.05 0.12 16 "
+			+ "\"size=0.80*(1-t/15)\" 1.0";
 	}
 
 	private static String accentRing(double t) {
@@ -837,6 +897,7 @@ public final class StyxShow {
 	}
 
 	public static void tick(ServerWorld world, double now) {
+		showNow = now;
 		if (!active || doc == null) return;
 		if (!pending.isEmpty()) {
 			for (int i = pending.size() - 1; i >= 0; i--) {
@@ -878,24 +939,43 @@ public final class StyxShow {
 	}
 
 	private static void fireNote(ServerWorld world, int x, int y, int z, int midi, int velocity, boolean bass) {
-		// 一切以**方块自己的 y** 为准（机器 map 里音符盒就在 y=110，顶面 111.0）：
-		// 旧版涟漪写死在 DECK_TOP+1.03=112.03 —— 比顶面高一格，水面一涨就整条沉进去，
-		// 用户 2026-09-24 反馈"涟漪没做到每个音符盒上 / 特效跑到方块下方一格"就是这个。
+		// 一切以**方块自己的 y** 为准（机器 map 里音符盒就在 y=110，方块占 110..111、顶面 111.0）。
+		// v3 锚点（2026-09-24，用户复看 0.7.9 后重定）：
+		//   · 棱框 / 表面光 都挂**方块中心**（y+0.5）——"体积从和音符盒一样大"才是用户要的；
+		//   · 水面/涟漪挂**水皮**（顶面下 0.02 格；水方块与音符盒同在 y=110 → 水面 110.875）。
+		// 0.7.9 把整组抬到 y+1.5，棱框悬空一格、涟漪和柔光仍是平铺面 —— 平铺面在
+		// "与海平面平行"的机位下会被压成一条线，这就是用户"其他效果都没看出来"的真因。
 		double cx = x + 0.5, cz = z + 0.5;
-		// ⚠ 锚点刻意**比方块中心高 1 格**（y+1.5 = 顶面上方 0.5 格）：这台机器的水线就在方块顶面附近，
-		//   以方块中心（y+0.5）为锚时整组特效有一半沉在水里，从上方平飞看过去就是"特效在音符盒下方"
-		//   （用户 2026-09-24 反馈）。抬高之后描边框正好把方块上沿框住，涟漪/柔光也浮在水面之上。
-		double cy = y + 1.5;
-		double top = y + 1.0;         // 方块顶面
+		double mid = y + 0.5;      // 方块中心
+		double top = y + 1.0;      // 方块顶面
+		double water = top - RIPPLE_DROP;   // 水皮
 		String col = hueColor(midi, bass);
-		exec(world, flareEdges(cx, cy, cz, col));
-		exec(world, flareGlow(cx, top + 0.5, cz, col));
-		exec(world, flareRipple(cx, top + 0.45, cz, col, 0.0, 24));       // 内圈：快
-		if (velocity >= 70) {
-			exec(world, flareRipple(cx, top + 0.45, cz, col, 0.14, 36));  // 外圈：慢一拍、铺得更远
-			exec(world, flareSparks(cx, top + 0.9, cz, col));
+		exec(world, flareEdges(cx, mid, cz, col));
+		exec(world, flareSurface(cx, mid, cz, tint(col, 1.05)));
+		// 水波阵：同一处落点、每 0.15s 追一阵雨（0 / 0.15 / 0.30s），一圈圈往外荡 → "阵阵涟漪"。
+		// 机器在跑时用延迟队列错开（见 pulse()）；单独 /nbm machine flare 预览时只能同刻出生，
+		// 就换成"更大的出生半径"把三阵拉开（scale 1.0 / 1.45 / 1.9）。
+		pulse(world, 0.00, () -> flareRipple(cx, water, cz, tint(col, 1.05), 1.00, 26, 1.10));
+		pulse(world, 0.15, () -> flareRipple(cx, water, cz, tint(col, 1.15), 1.45, 30, 1.00));
+		if (velocity >= 85)
+			pulse(world, 0.30, () -> flareRipple(cx, water, cz, tint(col, 1.25), 1.90, 34, 0.90));
+		exec(world, flareSplash(cx, water + 0.02, cz, tint(col, 1.30)));
+		exec(world, flareSparks(cx, top + 0.05, cz, tint(col, 1.20)));
+	}
+
+	/**
+	 * 音符盒特效里"要不要晚一点再放"的开关：
+	 * 视效层在跑（= 机器在跑）→ 塞进 {@link #pending}，到点再拼命令；否则（预览）直接放。
+	 *
+	 * <p>延迟只用于涟漪的第二、三阵：同刻出生的话三圈会叠成一圈，
+	 * 分 0.15s 出生才是"雨点一层接一层推出去"。
+	 */
+	private static void pulse(ServerWorld world, double delaySec, java.util.function.Supplier<String> cmd) {
+		if (active && delaySec > 0) {
+			pending.add(new Pending(showNow + delaySec, cmd));
+		} else {
+			exec(world, cmd.get());
 		}
-		exec(world, flareTrail(cx, top + 0.4, cz, col));
 	}
 
 	/**
@@ -948,10 +1028,11 @@ public final class StyxShow {
 		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, -14.0, 111.0, ZC - 8.0,
 			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, dotShrink(0.0), ""));
 		cmds.add(flareEdges(0.5, 110.5, -5.5, "0.90,0.95,1.00"));
-		cmds.add(flareGlow(0.5, 111.6, -5.5, "0.90,0.95,1.00"));
-		cmds.add(flareRipple(0.5, 111.02, -5.5, "0.90,0.95,1.00", 0.0, 24));
-		cmds.add(flareTrail(0.5, 111.02, -5.5, "0.90,0.95,1.00"));
-		cmds.add(flareSparks(0.5, 111.5, -5.5, "0.90,0.95,1.00"));
+		cmds.add(flareSurface(0.5, 110.5, -5.5, "0.90,0.95,1.00"));
+		cmds.add(flareRipple(0.5, 110.98, -5.5, "0.90,0.95,1.00", 1.00, 26, 1.10));
+		cmds.add(flareRipple(0.5, 110.98, -5.5, "0.90,0.95,1.00", 1.90, 34, 0.90));
+		cmds.add(flareSplash(0.5, 110.98, -5.5, "0.90,0.95,1.00"));
+		cmds.add(flareSparks(0.5, 111.05, -5.5, "0.90,0.95,1.00"));
 		cmds.add(accentRing(3.917));
 		LyricLine demo = new LyricLine(22.407, 24.457, 3.0, 10.0, "请不要让我就此死亡",
 			List.of(new LyricChar(22.407, "O", 0, 1.4, 0.23), new LyricChar(22.64, "k", 1.4, 1.4, 0.24)));
