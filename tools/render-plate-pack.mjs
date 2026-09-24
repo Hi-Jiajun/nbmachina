@@ -20,7 +20,8 @@
  *   node tools/render-plate-pack.mjs \
  *     --game "C:\\Program Files\\PCL2\\.minecraft\\versions\\1.21.10-Fabric 0.19.5" \
  *     --cover "C:\\Users\\me\\Music\\…\\cover.png" \
- *     --title "STYX HELIX" --artist "MYTH & ROID" --arranger "Piano arrangement by Animenz"
+ *     --title "STYX HELIX" --artist "MYTH & ROID" --arranger "Piano arrangement by Animenz" \
+ *     --creator "Made by KiLiminal"
  *
  * 之后在游戏里让资源包 styx-plates 生效（options.txt 的 resourcePacks 末尾加
  * "file/styx-plates"，或在"选项 → 资源包"里拖到右侧）。
@@ -42,6 +43,8 @@ if (!gameDir || !cover) {
 const titleText = args.get('title') ?? 'STYX HELIX';
 const artistText = args.get('artist') ?? args.get('subtitle') ?? 'MYTH & ROID';
 const arrangerText = args.get('arranger') ?? 'Piano arrangement by Animenz';
+// 制作者一行（用户 2026-09-24："再添加一个，制作者 KiLiminal；制作者用英文"）
+const creatorText = args.get('creator') ?? 'Made by KiLiminal';
 // 字体：Noto Sans SC 静态版（OFL，可商用）。VF 变量字体在 drawtext 里会落到 Light 字重，
 // 亮背景上很虚，所以曲名/作者改用 Bold / Medium 静态字体（2026-09-24 实机对比）。
 const font = args.get('font') ?? 'C\\:/Windows/Fonts/Noto Sans SC (TrueType).otf';
@@ -65,10 +68,11 @@ const esc = (s) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/:/g, '
 run(['-i', cover, '-vf', 'scale=2048:2048:flags=lanczos,unsharp=5:5:0.7', '-frames:v', '1',
   path.join(blockTex, 'jigsaw_top.png')]);
 
-// 2) 文本块（1024² 方形贴图）：三行左对齐的"内页文案"——曲名 / 作者 / 钢琴改编，
+// 2) 文本块（1024² 方形贴图）：四行左对齐的"内页文案"——曲名 / 作者 / 钢琴改编 / 制作者，
 //    四周透明（quad 是正方形，靠透明留白控制视觉宽高比）。
-//    排版（2026-09-24）：曲名最大、字距拉开；作者次之；改编行最小、用天青色调呼应冥河主题；
-//    标题下方一条细横线做分割。
+//    排版（2026-09-24）：曲名最大、字距拉开；作者次之；改编行与制作者行最小、用天青色调呼应冥河主题；
+//    标题下方一条细横线做分割。加第四行后整块整体上移 14px，让墨迹仍以贴图中心居中
+//    （外面那颗 quad 是 15 格见方，"居中"靠这层留白对齐）。
 const spaced = (s) => [...s].join('\u2009');           // 细空格 = 手工字距
 const textBlock = (out, lines) => {
   const chain = lines.map((l) =>
@@ -81,15 +85,16 @@ const textBlock = (out, lines) => {
   ).join(',');
   run([
     '-f', 'lavfi', '-i', 'color=c=black@0.0:s=1024x1024:d=1,format=rgba',
-    '-vf', `${chain},drawbox=x=96:y=486:w=250:h=3:color=white@0.45:t=fill`,
+    '-vf', `${chain},drawbox=x=96:y=472:w=250:h=3:color=white@0.45:t=fill`,
     '-frames:v', '1', out,
   ]);
 };
 textBlock(path.join(blockTex, 'bamboo_fence_gate_particle.png'), [
   // 轮廓宽度按字号给（1024² 贴图里 124px 字配 7px 轮廓 ≈ 字高 6%，投到 1600 宽屏上约 3px）
-  { text: spaced(titleText), size: 124, color: 'white', x: 96, y: 330, font: fontBold, border: 7 },
-  { text: spaced(artistText), size: 72, color: 'white@0.96', x: 96, y: 504, font: fontMedium, border: 5 },
-  { text: arrangerText, size: 42, color: '#BCE6FF', x: 96, y: 604, font: font, border: 3, shadow: 0.5 },
+  { text: spaced(titleText), size: 124, color: 'white', x: 96, y: 316, font: fontBold, border: 7 },
+  { text: spaced(artistText), size: 72, color: 'white@0.96', x: 96, y: 490, font: fontMedium, border: 5 },
+  { text: arrangerText, size: 42, color: '#BCE6FF', x: 96, y: 584, font: font, border: 3, shadow: 0.5 },
+  { text: creatorText, size: 42, color: '#BCE6FF', x: 96, y: 654, font: font, border: 3, shadow: 0.5 },
 ]);
 
 // 3) pack.mcmeta：1.21.10 的资源包格式是 69，且**必须**带 min_format / max_format
