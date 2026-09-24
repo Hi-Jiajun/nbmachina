@@ -464,3 +464,72 @@ node tools/show-previs.mjs --still 165.5 --out ../_scratch-m3-80/out/still.ppm  
 > **它不是成品观感预览**：粒子是程序化光斑（不是 MC 的贴图/光影 bloom），颜色只是 5 色系近似。
 > 它负责证明的是**动效连贯、构图、剂量、同步**四件事——成品观感以游戏内 ExParticle 为准。
 > 逐字歌词那层：英文用的是真 5×7 字模，**日文/汉字是占位笔画**（真机由 MC 字体光栅化，见 §4.8）。
+
+---
+
+## §10 开场三件套 v3：一图一四边形（2026-09-24）
+
+用户口径（2026-09-24，两轮录屏）：**"封面图不全"**、**"清晰度能不能做到跟原图一致"**。
+
+### 10.1 为什么点阵做不到
+
+旧版把封面渲染成"一像素一颗粒子"的点阵（192² = 3.7 万颗 `end_rod`）。实测结论：
+
+| 现象 | 取证 | 结论 |
+|---|---|---|
+| 暗部看不见、像"封面不全" | 用户 4K 录屏 1:1 裁切：矩形中下方能看到**水纹透过封面** | `end_rod` 精灵是软光点，暗像素 × 软 alpha ≈ 透明 |
+| 内容糊、小字认不出 | 同上；192px/dpb24 + size 2.2（0.275 格 = **6.6 倍点距**）| 叠这么多才铺满，必然糊；清晰度被精灵尺寸卡死 |
+| 改硬边方片也救不了 | `minecraft:block` + `size` 恰好铺满点距（dpb=2/3、size=4/2.8）实机截图 | 粒子位置有抖动，1× 铺满时画面变**彩纸屑**；只有大面积重叠才"看起来完整"，那就回到糊 |
+| 分辨率上限 | 一像素一颗粒子，192² 已 3.7 万颗 | dpb 再翻倍 = 15 万颗，不划算 |
+
+**结论：清晰度问题不是参数没调好，是"粒子 = 一个点"这个模型的天花板。**
+
+### 10.2 现在的做法
+
+**一张贴图 = 一颗 `minecraft:block` 粒子**，quad 是 billboard（自动正对镜头），
+所以：清晰度 = 贴图分辨率（封面 2048²），完整度 = 贴图本身（不透明像素全都画），
+粒子数从 3.7 万降到 **3 颗**，动效（淡入/淡出/漂移/微放大）走 ExParticle 的 alpha/size/vx 表达式。
+
+贴图必须挂在**模型里显式写了 `particle` 槽**的方块上（否则覆盖贴图无效——实测
+`structure_block` 的 `cube_all` 没有 particle 槽，覆盖 `block/structure_block_save` 后粒子仍用原版贴图）。
+选的都是"正常世界里不会出现"的方块：
+
+| 元素 | 粒子方块 | 被覆盖的贴图 | 尺寸 |
+|---|---|---|---|
+| 封面 | `minecraft:jigsaw` | `block/jigsaw_top` | 2048²（源图 1424²，lanczos + unsharp） |
+| 标题 | `minecraft:bamboo_fence_gate` | `block/bamboo_fence_gate_particle` | 1024²，白字居中、四周透明 |
+| 副标题 | `minecraft:conduit` | `block/conduit` | 1024²，同上 |
+
+命令形态（`styx-1px.png` = 1×1 白点，粒子颜色 = 白 × 贴图 = 贴图原色）：
+
+```
+particlex image-matrix minecraft:block{block_state:"minecraft:jigsaw"} <x> <y> <z> \
+  styx-1px.png 1.0 "E4" 1 0 0 0 110 "size=64*(1+0.06*clamp((t-1.9)/1.3,0,1)); light=1.0; alpha=…; vx=…; vz=…" 1.0
+```
+
+`size` 单位是 **1/8 格**：8 格见方 → `size=64`。
+
+### 10.3 配套改动（都要一起装）
+
+1. **exparticle-fabric**：新增 `TerrainParticleMixin` —— 被 ExParticle 的 `size` 表达式接管过
+   （`getCustomSize()` 非 NaN）的 `minecraft:block` 粒子改画**整张 sprite**；
+   原版只随机取 sprite 的 1/4×1/4 子块（那是给"方块碎裂"用的）。
+   ⚠ `sprite` 字段声明在 `SingleQuadParticle` 上、被 `TerrainParticle` 继承，
+   直接 `@Shadow` 会崩在启动（`field_62632 was not located in the target class`），
+   所以走 `SpriteAccessor` 接口（`SingleQuadParticleMixin` 实现）。
+2. **资源包 `styx-plates`**：由 `tools/render-plate-pack.mjs` 生成到
+   `<gameDir>/resourcepacks/styx-plates/`，并在 `options.txt` 的 `resourcePacks` 末尾加
+   `"file/styx-plates"`。**含专辑封面，产物不进 git**（仓库里只放生成脚本）。
+   1.21.10 的 `pack.mcmeta` 必须是 `{pack_format:69, min_format:69, max_format:81}`：
+   只写 `pack_format` 会被判"声明了比 64 新的版本却缺 min/max_format"直接拒绝加载。
+
+### 10.4 已知坑
+
+* 一图一四边形后**丢掉了"按行逐像素吹散"**：单颗粒子做不了逐像素，改成整体漂移 + 淡出 + 1.06× 微放大。
+* 会话级卡死：长时间反复 spawn + `F3+T` 资源热重载之后，出现过**所有 image 粒子都不再渲染**
+  （命令仍被正常接收、聊天栏无报错）；重启游戏即恢复。用户正常流程（重启 → `/nbm machine start`）不受影响，
+  但**别把 F3+T 当作改贴图的常规手段**——改贴图就重启。
+* `light=1.0` 对 `minecraft:block` 粒子目前**不生效**（`TerrainParticle` 覆写了 `getLightColor`，
+  遮蔽了 `ParticleMixin` 的自定义亮度）。雨天/夜间画面里板子会跟着世界光变暗。
+  要修就照 `SimpleAnimatedParticleMixin` 的样子，在 `TerrainParticleMixin` 里
+  `cir.setReturnValue(super.getLightColor(partialTick))`。

@@ -126,48 +126,75 @@ public final class StyxShow {
 			+ "\"s1=t*0.62+" + phase + "; s2=1.5708; dis=4.2\" 0.12 3 40";
 	}
 
-	// ── 开场三件套：封面 + 标题 + 副标题 ────────────────────────────
-	// 素材尺寸 → 世界尺寸：封面 128px÷dpb16 = 8 格；标题 384px÷dpb48 = 8×1.33 格；副标题 256px÷dpb48 = 5.3×1 格
-	/** 封面：192px ÷ dpb24 = 8 格（24 像素/格，比旧 128px/dpb16 的 16 像素/格更细） */
-	private static final double COVER_DPB = 24.0, COVER_W = 8.0;
-	private static final double TITLE_DPB = 48.0, TITLE_W = 8.0, TITLE_H = 64.0 / TITLE_DPB;
-	private static final double SUB_DPB = 48.0, SUB_W = 256.0 / SUB_DPB, SUB_H = 48.0 / SUB_DPB;
+	// ── 开场三件套：封面 + 标题 + 副标题（2026-09-24 v3：**一图一四边形**）────────────
+	//
+	// 为什么不再用"一像素一颗粒子"的点阵：
+	//   ① 分辨率被粒子数卡死（192² 已经是 3.7 万颗，MC 里再往上加不划算）；
+	//   ② 单颗 `end_rod` 精灵是软的，要铺满只能叠到 6.6 倍间距 → 必然糊，且暗部像素
+	//      几乎全透明（用户："封面图不全"、"清晰度能不能跟原图一致"）；
+	//   ③ 改硬边方片（`minecraft:block` + size=间距）实测被引擎/光影的粒子位置抖动打散，
+	//      画面变彩纸屑（2026-09-24 实测：dpb=2、size 恰好铺满时最明显）。
+	// 所以：一张贴图 = 一颗 `minecraft:block` 粒子，quad 是 billboard（自动正对镜头），
+	// 清晰度 = 贴图分辨率（资源包里的 2048² 封面）。贴图挂在**正常世界里不会出现**的方块上：
+	//   · 封面   → minecraft:jigsaw                （贴图 block/jigsaw_top）
+	//   · 标题   → minecraft:bamboo_fence_gate     （贴图 block/bamboo_fence_gate_particle）
+	//   · 副标题 → minecraft:conduit               （贴图 block/conduit）
+	//   ⚠ 必须选**模型里显式写了 particle 槽**的方块：structure_block 的 cube_all 没有 particle 槽，
+	//     实测覆盖 block/structure_block_save 无效（粒子仍用原版贴图，2026-09-24 实机截图取证）。
+	// ⚠ ExParticle 侧配套改动：TerrainParticleMixin —— 被 size 接管的 block 粒子画**整张** sprite
+	//   （原版 TerrainParticle 只随机取 1/4×1/4 子块，那是给"方块碎裂"用的）。
+	private static final String COVER_BLOCK = "minecraft:jigsaw";
+	private static final String TITLE_BLOCK = "minecraft:bamboo_fence_gate";
+	private static final String SUB_BLOCK = "minecraft:conduit";
+	/** 封面 8 格见方（贴图 2048²）；size 的单位是 1/8 格，所以 8 格 → size=64。 */
+	private static final double COVER_W = 8.0;
+	private static final double PLATE_SIZE = COVER_W * 8.0;
 	/** 开场距离：整组浮在玩家眼前，跟着机位走（不再依赖"玩家正好飞到某个坐标"） */
 	private static final double OPEN_DIST = 13.5;
-	/** start 时按玩家朝向算出来的「正对相机」矩阵（u→相机右、v→相机上） */
-	private static String openingMatrix = MATRICES[0];
 
-	/** 主标题：淡入 0.5s → 3.1s 起淡出；与封面同平面（偏移沿相机上方向量算） */
-	private static String title(double ax, double ay, double az) {
-		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " title.png 1.0 \"" + openingMatrix + "\" " + fmt(TITLE_DPB) + " 0 0 0 90 "
-			+ "\"alpha=clamp(t/0.5,0,1)*clamp(1-(t-2.9)/0.7,0,1); size=0.7\" 0.05";
+	/**
+	 * 板子通用模板：一颗 block 粒子 = 一整张贴图。
+	 *
+	 * <p>{@code age} 是寿命（刻）；{@code anim} 是 ExParticle 的表达式（逐刻求值），
+	 * 里面用 {@code size=}（1/8 格）{@code alpha=}（0–1）{@code vx/vz=}（每刻位移）做动效。
+	 * 贴图文件固定用 1×1 白点 `styx-1px.png`：粒子颜色 = 白色 × 贴图 = 贴图原色。
+	 */
+	private static String plate(String block, double cx, double cy, double cz, int age, String anim) {
+		return "particlex image-matrix minecraft:block{block_state:\"" + block + "\"} "
+			+ fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
+			+ " styx-1px.png 1.0 \"E4\" 1 0 0 0 " + age + " \"" + anim + "\" 1.0";
 	}
 
-	private static String subtitle(double ax, double ay, double az) {
-		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " subtitle.png 1.0 \"" + openingMatrix + "\" " + fmt(SUB_DPB) + " 0 0 0 90 "
-			+ "\"alpha=clamp((t-0.45)/0.5,0,1)*clamp(1-(t-3.0)/0.7,0,1); size=0.7\" 0.05";
+	/** 主标题：淡入 0.5s → 2.9s 起淡出，同时沿机头方向轻微漂走 */
+	private static String title(double cx, double cy, double cz, double dx, double dz) {
+		String p = "clamp((t-2.9)/0.7,0,1)";
+		return plate(TITLE_BLOCK, cx, cy, cz, 90,
+			"size=" + fmt(PLATE_SIZE) + "; light=1.0;"
+				+ " alpha=clamp(t/0.5,0,1)*(1-" + p + ");"
+				+ " vx=" + fmt(dx * 0.06) + "*" + p + "; vz=" + fmt(dz * 0.06) + "*" + p);
+	}
+
+	private static String subtitle(double cx, double cy, double cz, double dx, double dz) {
+		String p = "clamp((t-3.0)/0.7,0,1)";
+		return plate(SUB_BLOCK, cx, cy, cz, 95,
+			"size=" + fmt(PLATE_SIZE) + "; light=1.0;"
+				+ " alpha=clamp((t-0.45)/0.5,0,1)*(1-" + p + ");"
+				+ " vx=" + fmt(dx * 0.06) + "*" + p + "; vz=" + fmt(dz * 0.06) + "*" + p);
 	}
 
 	/**
-	 * 专辑封面（128×128 px ÷ dpb16 = 8 格）。
+	 * 专辑封面：一整张贴图 8 格见方，正对镜头（billboard）。
 	 *
-	 * <p>淡化动效（用户 2026-09-24 口径："封面淡化动效做得不太好"）：
-	 * ① 0–0.45s 淡入；② 2.0s 起**按行从上往下**分批被吹散——每颗粒子按初始高度 dy 错开
-	 * 0.65s 的起始时刻，边沿 +x 流走边淡出；③ 3.7s 前散尽（第一颗音在 3.917s）。
+	 * <p>动效（对齐用户"整体动效要连贯顺滑"的口径）：① 0–0.45s 淡入；
+	 * ② 1.9s 起边淡出边沿机头方向漂走、同时轻微放大一点点（1.06×）；③ 3.2s 前散尽。
+	 * 旧版"按行从上往下逐像素吹散"依赖点阵，一图一四边形后做不到逐像素，改为整体漂移 + 淡出。
 	 */
-	private static String cover(double ax, double ay, double az) {
-		String p = "clamp((t-(2+((1-dy/8)*1.05)))/0.65,0,1)";
-		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " styx-cover-192.png 1.0 \"" + openingMatrix + "\" " + fmt(COVER_DPB) + " 0 0 0 90 "
-			// ⚠ **必须写 size，而且要给足**：封面点距 1/16=0.0625 格，而 end_rod 精灵的可见核心又小又淡。
-			//   2026-09-24 两轮取证：不写 size / size=1.0 → 同样距离**整片看不见**；
-			//   size=2.0（16 个精灵叠一点）→ 亮部（手臂、花束）在，但**暗部被背景透上来**（用户："封面并不足够完整"）。
-			//   size=3.0/128px → 覆盖够了但**糊**（用户："封面内容很糊，小字看不出来"）：精灵 0.375 格 ≈ 8 像素/格，
-			//   分辨率被精灵卡死。现在改成 192px/dpb24（点距 1/24）+ size=2.2（0.275 格，43 个叠一点 →
-			//   覆盖仍满，但有效分辨率约 24 像素/格 × 精灵核心比例），并且素材生成时做了 unsharp 预锐化。
-			+ "\"size=2.2; alpha=clamp(t/0.45,0,1)*(1-" + p + "); vx=0.12*" + p + "; vy=0.03*" + p + "\" 0.05";
+	private static String cover(double cx, double cy, double cz, double dx, double dz) {
+		String p = "clamp((t-1.9)/1.3,0,1)";
+		return plate(COVER_BLOCK, cx, cy, cz, 110,
+			"size=" + fmt(PLATE_SIZE) + "*(1+0.06*" + p + "); light=1.0;"
+				+ " alpha=clamp(t/0.45,0,1)*(1-" + p + ");"
+				+ " vx=" + fmt(dx * 0.09) + "*" + p + "; vz=" + fmt(dz * 0.09) + "*" + p);
 	}
 
 	/**
@@ -384,16 +411,13 @@ public final class StyxShow {
 		double yaw = Math.toRadians(p.getYaw());
 		double fx = -Math.sin(yaw), fz = Math.cos(yaw);   // 水平朝向（已单位化）
 		double rx = -fz, rz = fx;                         // 相机右 = f × up
-		openingMatrix = "(" + fmt(rx) + ",0,0,0,,0,1,0,0,," + fmt(rz) + ",0,0,0,,0,0,0,1)";
 		// 位置：镜头前方 OPEN_DIST 格、眼位略上一点（镜头在音符盒上方平飞，所以整组都高于方块）
 		double ax = p.getX() + fx * OPEN_DIST, ay = p.getEyeY() + 0.5, az = p.getZ() + fz * OPEN_DIST;
-		double c = COVER_W / 2;
-		// 竖直平面：上方向就是世界 +y，所以上下的偏移直接加在 y 上（不再跟俯仰角）
-		exec(world, cover(ax - rx * c, ay - c, az - rz * c));
-		double tu = c + 0.8;
-		exec(world, title(ax - rx * TITLE_W / 2, ay + tu, az - rz * TITLE_W / 2));
-		double su = c + 1.1;
-		exec(world, subtitle(ax - rx * SUB_W / 2, ay - su, az - rz * SUB_W / 2));
+		// 一图一四边形：**位置就是画面中心**（billboard 自己正对镜头，不需要矩阵摆朝向）。
+		// 标题在封面上方 4.9 格、副标题在下方 4.9 格（封面半高 4 格 + 0.9 格间距），三者同平面。
+		exec(world, cover(ax, ay, az, fx, fz));
+		exec(world, title(ax, ay + 4.9, az, fx, fz));
+		exec(world, subtitle(ax, ay - 4.9, az, fx, fz));
 		NbmachinaMod.LOGGER.info("[styxshow] 开场三件套：机位 yaw {} pitch {} → 锚点 ({}, {}, {})（{} 格外）",
 			fmt(p.getYaw()), fmt(p.getPitch()), fmt(ax), fmt(ay), fmt(az), fmt(OPEN_DIST));
 	}
@@ -479,9 +503,9 @@ public final class StyxShow {
 		cmds.add(river());
 		cmds.add(riverLane(-8.0));
 		cmds.add(helix(0.0));
-		cmds.add(cover(-10.0, 115.0, ZC));
-		cmds.add(title(-10.0, 119.5, ZC));
-		cmds.add(subtitle(-10.0, 111.0, ZC));
+		cmds.add(cover(-10.0, 115.0, ZC, 1.0, 0.0));
+		cmds.add(title(-10.0, 119.9, ZC, 1.0, 0.0));
+		cmds.add(subtitle(-10.0, 110.1, ZC, 1.0, 0.0));
 		cmds.add(flareEdges(0.5, 110.5, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareRipple(0.5, 111.0, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.5, -5.5));
