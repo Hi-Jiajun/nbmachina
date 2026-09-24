@@ -212,20 +212,21 @@ public final class StyxShow {
 	// 3.917      第一颗音
 	private static final double[] OPEN_IN_AT = {0.00, 0.12};
 	private static final double OPEN_PLATE_IN_SEC = 0.70;
-	private static final double OPEN_COVER_OUT_AT = 2.35;
-	private static final double OPEN_COVER_OUT_SEC = 0.70;
-	private static final double OPEN_TEXT_OUT_AT = 2.60;
-	private static final double OPEN_TEXT_OUT_SEC = 0.75;
+	/** 封面与文案**同一时刻、同样时长**淡出（用户 2026-09-24：文字要跟封面同步、别那么生硬）。 */
+	private static final double OPEN_COVER_OUT_AT = 2.30;
+	private static final double OPEN_COVER_OUT_SEC = 0.80;
+	private static final double OPEN_TEXT_OUT_AT = OPEN_COVER_OUT_AT;
+	private static final double OPEN_TEXT_OUT_SEC = OPEN_COVER_OUT_SEC;
 	/** 点阵分批生成：每 0.05s（1 刻）铺一条，12 条铺完 0.60-1.20s。 */
 	private static final double OPEN_DOT_SPAWN_AT = 0.60;
 	private static final double OPEN_DOT_SPAWN_STEP = 0.05;
 	private static final int OPEN_DOT_BANDS = 12;
 	/** 点阵开始消散的时刻（所有条带同时开始，只是各自的 t 起点不同）与消散时长、每格半径的错开量。 */
-	private static final double OPEN_DOT_DISSOLVE_AT = 3.05;
-	private static final double OPEN_DOT_FADE_SEC = 0.60;
-	private static final double OPEN_DOT_STAGGER_SEC = 0.03;
+	private static final double OPEN_DOT_DISSOLVE_AT = OPEN_COVER_OUT_AT + OPEN_COVER_OUT_SEC;   // 3.10s
+	private static final double OPEN_DOT_FADE_SEC = 0.55;
+	private static final double OPEN_DOT_STAGGER_SEC = 0.025;
 	/** 点阵全部消失的时刻（< 第一颗音 3.917s）。 */
-	private static final double OPEN_DOT_END_AT = 3.92;
+	private static final double OPEN_DOT_END_AT = 3.90;
 	/**
 	 * 点阵素材：128px ÷ dpb8 = **16 格**（与清晰板同尺寸，见 {@link #PLATE_SIZE} 的实测说明）＝ 16384 颗。
 	 *
@@ -319,7 +320,11 @@ public final class StyxShow {
 	 */
 	private static String alphaSeg(boolean rising, double durSec) {
 		double dur = durSec * 20.0;
-		return rising ? "clamp(t/" + fmt(dur) + ",0,1)" : "1-clamp(t/" + fmt(dur) + ",0,1)";
+		if (rising) return "clamp(t/" + fmt(dur) + ",0,1)";
+		// 淡出加一点缓动（用户 2026-09-24："消失动画还比较生硬"）：quadraticLerp 让透明度
+		// 先慢慢掉、后段收干净，比线性柔。仍是"单个 clamp + 一个函数调用"，
+		// 和歌词里 lerp(clamp(...)) 同型（实测能渲染）；两个 clamp 相乘那类复合式才会整颗不渲染。
+		return "quadraticLerp(clamp(t/" + fmt(dur) + ",0,1),1,0,0.30,0.85)";
 	}
 
 	/**
@@ -598,7 +603,7 @@ public final class StyxShow {
 		String coverLock = OPEN_SCREEN_ANCHOR ? anchorTo(OPEN_AHEAD, OPEN_COVER_H, 0.2, fx, fz, rx, rz) : "";
 		String textLock = OPEN_SCREEN_ANCHOR ? anchorTo(OPEN_AHEAD, OPEN_TEXT_H, 0.2, fx, fz, rx, rz) : "";
 		String dotLock = OPEN_SCREEN_ANCHOR
-			? anchorCloud(OPEN_AHEAD + OPEN_DOT_BACK, 0.2, fx, fz, rx, rz) : "";
+			? anchorCloud(OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H, 0.2, fx, fz, rx, rz) : "";
 		// ① 两片清晰板：淡入一颗 + 到交叉点换成只淡出的新一颗（复合 clamp 实测整颗不渲染，见 plateFade）
 		pending.add(new Pending(atSec + OPEN_IN_AT[0], coverPlate(coverX, ay, coverZ, ticks(OPEN_COVER_OUT_AT - OPEN_IN_AT[0]),
 			true, OPEN_PLATE_IN_SEC, coverLock)));
@@ -646,11 +651,13 @@ public final class StyxShow {
 	 * 点阵层的屏幕锚定：每颗点再叠加它在画面平面内的偏移（引擎逐粒子给的 {@code dx/dy/dz}）——
 	 * 水平方向按起播右向投影，竖直直接用 {@code dy}。
 	 */
-	private static String anchorCloud(double dist, double v, double fx, double fz, double rx, double rz) {
+	private static String anchorCloud(double dist, double hBase, double v, double fx, double fz, double rx, double rz) {
+		// hBase = 点阵整体在版面里的水平位置（要和封面板的 OPEN_COVER_H 一致，
+		// 否则点阵会整体偏到右边、盖住文案——2026-09-24 用户截图取证）
 		String h = "(" + fmt(rx) + "*dx+" + fmt(rz) + "*dz)";
-		return "vx=(px+" + fmt(fx * dist) + "+" + fmt(rx) + "*" + h + ")-(cx+x);"
+		return "vx=(px+" + fmt(fx * dist + rx * hBase) + "+" + fmt(rx) + "*" + h + ")-(cx+x);"
 			+ "vy=(py+" + fmt(v) + "+dy)-(cy+y);"
-			+ "vz=(pz+" + fmt(fz * dist) + "+" + fmt(rz) + "*" + h + ")-(cz+z)";
+			+ "vz=(pz+" + fmt(fz * dist + rz * hBase) + "+" + fmt(rz) + "*" + h + ")-(cz+z)";
 	}
 
 	public static void stop(ServerWorld world) {

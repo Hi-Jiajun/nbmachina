@@ -74,10 +74,10 @@ const textBlock = (out, lines) => {
   const chain = lines.map((l) =>
     `drawtext=fontfile='${l.font}':text='${esc(l.text)}':fontsize=${l.size}:`
     + `fontcolor=${l.color}:x=${l.x}:y=${l.y}`
-    // 亮天空下要读得清：细描边 + 偏移投影（0.6.x 那版细字重配 3px 描边显"脏"，
-    // 现在曲名/作者是 Bold/Medium，2px 描边反而干净且有轮廓）
-    + `:borderw=${l.border ?? 2}:bordercolor=black@0.55`
-    + `:shadowcolor=black@${l.shadow ?? 0.45}:shadowx=3:shadowy=4`
+    // 亮天空/白云下要读得清（用户 2026-09-24："轮廓线的方式更好一些"）：
+    // 粗一点的实心底色描边当轮廓 + 一点偏移投影增加厚度感
+    + `:borderw=${l.border ?? 5}:bordercolor=black@0.85`
+    + `:shadowcolor=black@${l.shadow ?? 0.5}:shadowx=2:shadowy=3`
   ).join(',');
   run([
     '-f', 'lavfi', '-i', 'color=c=black@0.0:s=1024x1024:d=1,format=rgba',
