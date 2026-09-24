@@ -173,30 +173,28 @@ public final class StyxShow {
 	 * </ol>
 	 */
 	/**
-	 * 开场三件套时间表（0.4.0 优化版；用户口径："把点阵直接放在封面背后，动效相当于把两者结合起来"）。
+	 * 开场三件套时间表（0.5.0；用户 2026-09-24 口径：**"两个封面都不需要动，只需要在一定时间里
+	 * 从清晰封面过渡成点阵消散"**）。
 	 *
 	 * <pre>
-	 * 0.00–0.45s  点阵淡入（整张图，含暗部）——点阵是"底"
-	 * 0.45/0.55/0.60s  清晰板逐个"对焦"压上去（封面→标题→副标题，错开 0.05s 更像运镜）
-	 * 2.70/2.80/2.85s  炸开副本起飞（每颗点沿相对画面中心的方向飞散）
-	 * 2.80/2.90/2.95s  点阵开始淡出（0.75s）——清晰板在 2.85/2.95/3.00s 到期让位，
-	 *                  此时点阵还有 ~93% 亮度，所以"板没了"这一下看不出跳变
-	 * 3.90s        第一颗音
+	 * 0.00–0.45s  清晰板淡入（位置静止、尺寸不变）
+	 * 0.45–2.30s  保持清晰（静止）
+	 * 2.30–3.10s  **交叉过渡**：清晰板 alpha 1→0，同时点阵层 alpha 0→1（两块都不动）
+	 * 3.15–3.90s  点阵层淡出"消散"（仍然不移动）
+	 * 3.917s      第一颗音
 	 * </pre>
 	 *
-	 * 与上一版的差别：① 点阵补上淡入/淡出（不再硬生生出现/消失）；
-	 * ② 矩阵带平移列，`pos` 变成**画面中心**，炸开才是四周均匀散开而不是从角落吹；
-	 * ③ 点阵多生成一份（+0.10s）当"重试"，缓解实测里"整批不画"的偶发问题。
+	 * 标题/副标题整体后移 0.10s / 0.15s（避免三块一起动像"整体闪"）。
+	 * 上一版的"炸开副本"（点向外飞）按用户要求**删除**——现在全程没有位移，只有交叉过渡与淡出。
 	 */
-	private static final double[] OPEN_PLATE_AT = {0.45, 0.55, 0.60};
-	private static final int OPEN_PLATE_AGE = 48;          // 0.45→2.85s / 0.55→2.95s / 0.60→3.00s
-	/** 点阵层出现时刻：比清晰板早 0.05s（先见点阵，再"对焦"成清晰图）。 */
-	private static final double OPEN_DOT_AT = 0.40;
-	/** 点阵层寿命（刻）：封面 66（3.3s）；标题/副标题 70/72（3.5/3.6s）。 */
-	private static final int[] OPEN_DOT_AGE = {66, 70, 72};
-	private static final double[] OPEN_BURST_AT = {2.70, 2.80, 2.85};
-	private static final double OPEN_BURST_K = 0.05;       // 每刻位移 = 相对中心的偏移 × k
-	private static final int OPEN_BURST_AGE = 20;          // 炸开副本寿命 1 秒
+	private static final double[] OPEN_IN_AT = {0.00, 0.10, 0.15};        // 清晰板淡入起点（+0.45s 淡完）
+	private static final double OPEN_PLATE_FADE_IN = 0.45;
+	private static final double[] OPEN_XFADE_AT = {2.30, 2.40, 2.45};     // 点阵淡入起点（交叉过渡开始）
+	private static final double OPEN_XFADE_DUR = 0.80;
+	private static final double[] OPEN_PLATE_OUT_AT = {2.40, 2.50, 2.55}; // 清晰板换成"只淡出"的新一颗
+	private static final double[] OPEN_DOT_OUT_AT = {3.10, 3.20, 3.25};   // 点阵换成"只淡出"的新一颗
+	private static final double OPEN_PLATE_OUT_DUR = 0.80;
+	private static final double OPEN_DOT_OUT_DUR = 0.75;
 	/**
 	 * 点阵接棒用的素材与密度：**144px / dpb18 = 8 格**（与清晰板同尺寸），
 	 * 2.07 万颗（实测这个量级能稳定出图，192²=3.7 万颗时经常整批不画）。
@@ -228,32 +226,22 @@ public final class StyxShow {
 			+ " styx-1px.png 1.0 \"E4\" 1 0 0 0 " + age + " \"" + anim + "\" 1.0";
 	}
 
-	/**
-	 * 主标题：清晰板 0–2.6s（淡入 0.5s → 2.6s 起淡出）。
-	 *
-	 * <p>2026-09-24 用户反馈"闪一下就没了"后，开场改成**两段接力**：
-	 * 前段用清晰四边形（清晰度=贴图分辨率），后段在 2.5s 交叉回点阵做逐像素吹散——
-	 * 点阵那段刻意保留旧版的 soft 精灵，因为它负责的是"碎开"而不是"看清"。
-	 */
-	private static String title(double cx, double cy, double cz) {
-		return plate(TITLE_BLOCK, cx, cy, cz, OPEN_PLATE_AGE,
-			"size=" + fmt(PLATE_SIZE) + "; light=1.0; alpha=1");
+	/** 三件套的清晰板（位置静止、尺寸不变）。{@code rising=true} 只淡入、false 只淡出。 */
+	private static String coverPlate(double cx, double cy, double cz, boolean rising, double dur, int age) {
+		return plateFade(COVER_BLOCK, cx, cy, cz, age, alphaSeg(rising, dur));
 	}
 
-	private static String subtitle(double cx, double cy, double cz) {
-		return plate(SUB_BLOCK, cx, cy, cz, OPEN_PLATE_AGE,
-			"size=" + fmt(PLATE_SIZE) + "; light=1.0; alpha=1");
+	private static String titlePlate(double cx, double cy, double cz, boolean rising, double dur, int age) {
+		return plateFade(TITLE_BLOCK, cx, cy, cz, age, alphaSeg(rising, dur));
 	}
 
-	/**
-	 * 专辑封面：一整张贴图 8 格见方、正对镜头（billboard），**持有 0–2.0s**。
-	 *
-	 * <p>它只是"面"：底下的点阵（{@link #dotted}）从 0s 就在，2.7s 起由 {@link #burst} 炸开，
-	 * 这张清晰板 2.85s 到期让位时点阵还有 ~93% 亮度，所以看不出跳变。
-	 */
-	private static String cover(double cx, double cy, double cz) {
-		return plate(COVER_BLOCK, cx, cy, cz, OPEN_PLATE_AGE,
-			"size=" + fmt(PLATE_SIZE) + "; light=1.0; alpha=1");
+	private static String subtitlePlate(double cx, double cy, double cz, boolean rising, double dur, int age) {
+		return plateFade(SUB_BLOCK, cx, cy, cz, age, alphaSeg(rising, dur));
+	}
+
+	/** 单段 alpha：淡入 = clamp(t/dur,0,1)；淡出 = 1-clamp(t/dur,0,1)。只用一个 clamp。 */
+	private static String alphaSeg(boolean rising, double dur) {
+		return rising ? "clamp(t/" + fmt(dur) + ",0,1)" : "1-clamp(t/" + fmt(dur) + ",0,1)";
 	}
 
 	/**
@@ -269,25 +257,28 @@ public final class StyxShow {
 	}
 
 	/**
-	 * 点阵"底"：淡入 0.45s → 保持 → 与炸开同步淡出 0.75s。寿命给足，靠 alpha 归零而不是硬切。
+	 * 点阵层：**位置静止**，只在交叉过渡时淡入（{@code xfadeAt} 起 {@code OPEN_XFADE_DUR} 秒），
+	 * 然后在 {@code outAt} 起淡出消散。
 	 *
-	 * <p>⚠ 两点硬约束（2026-09-24 实测）：**必须用 {@code end_rod}**（`minecraft:block` + 面向镜头的
-	 * 字面矩阵整段不出图）；点的尺寸要给大（0.66 格 ≈ 12 个点距重叠），否则**暗部像素几乎不发光**，
-	 * 整张图只剩亮部（用户："点阵图不完整——上面没有图像"）。
+	 * <p>⚠ 两条硬约束（2026-09-24 实测）：**必须用 {@code end_rod}**（`minecraft:block` + 面向镜头的
+	 * 字面矩阵整段不出图）；点阵素材必须小（64² 才整张出图，192²/144² 会丢掉后面约 1/3 的行）。
 	 */
 	private static String dotted(String image, double dpb, double dotSize, double cx, double cy, double cz,
-	                             String matrix, int age) {
+	                             String matrix, int age, String alphaExpr) {
 		return "particlex image-matrix end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
 			+ " " + image + " 1.0 \"" + matrix + "\" " + fmt(dpb) + " 0 0 0 " + age
-			+ " \"size=" + fmt(dotSize) + "; alpha=1\" 1.0";
+			+ " \"size=" + fmt(dotSize) + "; alpha=" + alphaExpr + "\" 1.0";
 	}
 
-	/** 炸开副本：每颗点沿自身相对**画面中心**的方向飞散（表达式形式沿用旧版棱边，已验证可跑）。 */
-	private static String burst(String image, double dpb, double dotSize, double cx, double cy, double cz,
-	                            String matrix) {
-		return "particlex image-matrix end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
-			+ " " + image + " 1.0 \"" + matrix + "\" " + fmt(dpb) + " 0 0 0 " + OPEN_BURST_AGE
-			+ " \"size=" + fmt(dotSize) + "; alpha=1; (vx,vy,vz)=(dx,dy,dz)*" + fmt(OPEN_BURST_K) + "\" 1.0";
+	/**
+	 * 清晰板：静止，只有一个 alpha 段。
+	 *
+	 * <p>⚠ **不要写"两个 clamp 相乘"的复合表达式**：2026-09-24 实测（同一会话对照）——
+	 * 单 clamp 正常渲染，`clamp(...)*(1-clamp(...))` 会让**整颗粒子不渲染**（无声无息）。
+	 * 所以淡入、淡出各自生成一颗粒子：前一颗只淡入、寿命正好到交叉点，后一颗只淡出。
+	 */
+	private static String plateFade(String block, double cx, double cy, double cz, int age, String alphaExpr) {
+		return plate(block, cx, cy, cz, age, "size=" + fmt(PLATE_SIZE) + "; light=1.0; alpha=" + alphaExpr);
 	}
 
 	/**
@@ -519,25 +510,29 @@ public final class StyxShow {
 		double[] cys = {cy0, cy1, cy2};
 		String[] matrices = {coverM, titleM, subM};
 		for (int i = 0; i < 3; i++) {
-			pending.add(new Pending(atSec + OPEN_DOT_AT,
-				dotted(images[i], dpbs[i], dotSizes[i], ax, cys[i], az, matrices[i], OPEN_DOT_AGE[i])));
-			pending.add(new Pending(atSec + OPEN_BURST_AT[i],
-				burst(images[i], dpbs[i], dotSizes[i], ax, cys[i], az, matrices[i])));
-			pending.add(new Pending(atSec + OPEN_PLATE_AT[i], plateFor(i, ax, cys[i], az)));
+			// 全程零位移，只有两条 alpha 段：清晰板（淡入 → 交叉点换成只淡出的新一颗）、
+			// 点阵层（交叉点淡入 → 消散点换成只淡出的新一颗）。见 plateFade 的注释。
+			int plateRiseAge = (int) Math.round((OPEN_PLATE_OUT_AT[i] - OPEN_IN_AT[i]) * 20);
+			pending.add(new Pending(atSec + OPEN_IN_AT[i],
+				plateFadeOf(i, ax, cys[i], az, true, OPEN_PLATE_FADE_IN, plateRiseAge)));
+			pending.add(new Pending(atSec + OPEN_PLATE_OUT_AT[i],
+				plateFadeOf(i, ax, cys[i], az, false, OPEN_PLATE_OUT_DUR, 20)));
+			int dotRiseAge = (int) Math.round((OPEN_DOT_OUT_AT[i] - OPEN_XFADE_AT[i]) * 20);
+			pending.add(new Pending(atSec + OPEN_XFADE_AT[i], dotted(images[i], dpbs[i], dotSizes[i],
+				ax, cys[i], az, matrices[i], dotRiseAge, alphaSeg(true, OPEN_XFADE_DUR))));
+			pending.add(new Pending(atSec + OPEN_DOT_OUT_AT[i], dotted(images[i], dpbs[i], dotSizes[i],
+				ax, cys[i], az, matrices[i], 20, alphaSeg(false, OPEN_DOT_OUT_DUR))));
 		}
-		// 封面点阵再来一份当"重试"（两份只差 0.10s，视觉上只是略密一点）
-		pending.add(new Pending(atSec + OPEN_DOT_AT + 0.10, dotted(COVER_GRID_IMAGE, COVER_DPB,
-			COVER_GRID_SIZE, ax, cy0, az, coverM, OPEN_DOT_AGE[0])));
 		NbmachinaMod.LOGGER.info("[styxshow] 开场三件套：机位 yaw {} pitch {} → 锚点 ({}, {}, {})（{} 格外）",
 			fmt(p.getYaw()), fmt(p.getPitch()), fmt(ax), fmt(ay), fmt(az), fmt(OPEN_DIST));
 	}
 
 	/** 开场三件套的第 i 个清晰板（0=封面 1=标题 2=副标题）。 */
-	private static String plateFor(int i, double cx, double cy, double cz) {
+	private static String plateFadeOf(int i, double cx, double cy, double cz, boolean rising, double dur, int age) {
 		return switch (i) {
-			case 0 -> cover(cx, cy, cz);
-			case 1 -> title(cx, cy, cz);
-			default -> subtitle(cx, cy, cz);
+			case 0 -> coverPlate(cx, cy, cz, rising, dur, age);
+			case 1 -> titlePlate(cx, cy, cz, rising, dur, age);
+			default -> subtitlePlate(cx, cy, cz, rising, dur, age);
 		};
 	}
 
@@ -632,17 +627,15 @@ public final class StyxShow {
 		cmds.add(riverLane(-8.0));
 		cmds.add(helix(0.0));
 		String demoMatrix = MATRICES[0];
-		cmds.add(cover(-10.0, 115.0, ZC));
-		cmds.add(title(-10.0, 119.9, ZC));
-		cmds.add(subtitle(-10.0, 110.1, ZC));
+		cmds.add(coverPlate(-10.0, 115.0, ZC, true, OPEN_PLATE_FADE_IN, 40));
+		cmds.add(titlePlate(-10.0, 119.9, ZC, true, OPEN_PLATE_FADE_IN, 40));
+		cmds.add(subtitlePlate(-10.0, 110.1, ZC, true, OPEN_PLATE_FADE_IN, 40));
 		cmds.add(dotted(COVER_GRID_IMAGE, COVER_DPB, COVER_GRID_SIZE, -14.0, 111.0, ZC - 4.0,
-			gridMatrix(0.0, 1.0, -96.0, -96.0), 100));
-		cmds.add(burst(COVER_GRID_IMAGE, COVER_DPB, COVER_GRID_SIZE, -14.0, 111.0, ZC - 4.0,
-			gridMatrix(0.0, 1.0, -96.0, -96.0)));
-		cmds.add(dotted("title.png", TITLE_DPB, 1.1, -14.0, 119.9, ZC - 4.0,
-			gridMatrix(0.0, 1.0, -32.0, -192.0), 100));
-		cmds.add(dotted("subtitle.png", SUB_DPB, 1.1, -14.0, 110.1, ZC - 1.3,
-			gridMatrix(0.0, 1.0, -24.0, -128.0), 100));
+			gridMatrix(0.0, 1.0, -32.0, -32.0), 40, alphaSeg(true, OPEN_XFADE_DUR)));
+		cmds.add(dotted("title-96.png", 12.0, 8.0, -14.0, 119.9, ZC - 4.0,
+			gridMatrix(0.0, 1.0, -8.0, -48.0), 40, alphaSeg(true, OPEN_XFADE_DUR)));
+		cmds.add(dotted("subtitle-64.png", 8.0, 8.0, -14.0, 110.1, ZC - 1.3,
+			gridMatrix(0.0, 1.0, -6.0, -32.0), 40, alphaSeg(true, OPEN_XFADE_DUR)));
 		cmds.add(flareEdges(0.5, 110.5, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareRipple(0.5, 111.0, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.5, -5.5));
