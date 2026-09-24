@@ -262,6 +262,8 @@
 | 强加载是**滚动窗口**（当前音 ~ 未来 40s、z 带 ±1 chunk，每 10 刻重申一次；落后 >6 chunk 就释放） | `maintainForceload()` / `FORCELOAD_AHEAD_SEC = 40` |
 | mod 起播时会**主动静音数据包播放链**（#on/#nb/#snd 全 0） | `silenceDataPack()`；M3-43 教训：两条链同时跑会同一颗音触发两次、录音削顶 |
 | 数据包 `styx:play/*` 仍在，但属**遗留路线**；它的 forceload 窗口还是旧原点（`480 -176 1735 -136`，中途切 `1728 -176 2880 -136`） | `src/emit/datapack-playback.mjs` L135/L250；**只有切回数据包路线才会踩到**（`styx:redo` 自己用的是推导出来的 `0 -12 783 15 / 784 … / 1568 … 2351`） |
+| **2026-09-24 收尾**：`styx_build` 的播放链已彻底停用——`data/minecraft/tags/function/tick.json` 改成 `{"values": []}`（不再挂 `styx:play/tick`，所以既不会自己起播、也没有任何周期性入口）；包本身保留启用，因为 `styx:build / flat_build* / lamps* / doctor` 这些建造工具还在里面 | 世界目录 `…\styx_build\data\minecraft\tags\function\tick.json`；`/datapack list` 里 styx_build 正常在列 |
+| ⚠ **不要拿 `起音延迟统计（本窗口 25 颗）` 判断"有没有在放音"**：那是音频线程**任务**窗口，每刻的相机/听者同步（`NbmachinaAudio.setListener`）就够把它刷满（≈1 行/秒）。判断有没有真的放音看 `已收到 N 条音符`（`NbmachinaAudio` L498，只在真收到音符时打） | 2026-09-24 就因为这条误判过一次"数据包还在自动起播"；实测：没起播的会话里 `已收到` 行数 = 0，`/nbm machine start 22` 那次 = 12 行（到 300 颗） |
 | 机器自描述（音符盒方块实体）已实测可用，但当前**关着**（`nbmachina/machine.json.off`） | 01:43 日志：`谱面来自方块实体：3044 颗音，origin=(0,110,-9) 段数=49` + `与 machine_map.csv 逐格一致（3044 格）`；现在跑的是 CSV 路线 |
 | 当前世界 = `StyxHelix水世界`：机器原点 **(0,110,-9)**、49 段、甲板 y=110、**音符盒 y=111** | 存档 region 里扫得到 `note_block` + `nbm_*` NBT；`redo.mcfunction` 的强加载窗口 `0 -12 783 15`… |
 
