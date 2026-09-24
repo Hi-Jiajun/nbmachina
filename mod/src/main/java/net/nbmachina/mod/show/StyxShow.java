@@ -251,6 +251,15 @@ public final class StyxShow {
 	 * 钉完就固定在世界里 → 镜头推进时卡片自然放大，是"运镜推近"的观感。
 	 */
 	private static final double OPEN_AHEAD = 16.0;
+	/**
+	 * 是否把卡片**锚在屏幕上**（0.7.1 起默认 true；用户 2026-09-24 追评：
+	 * "不太需要让他们移动，只需要自然显现和消失"）。
+	 *
+	 * <p>锚定 = 每刻把卡片搬到「当前眼位 + **起播方向**×16 格 + 起播右向×版面偏移」：
+	 * 玩家飞行时卡片跟着平移 → **屏幕上位置和大小完全不变**，只有淡入/淡出；
+	 * 方向用起播那一刻的常量（不是实时视角），所以转头时它会自然滑出画面，不会"甩着跟着转"。
+	 */
+	private static final boolean OPEN_SCREEN_ANCHOR = true;
 	/** 卡片平面内偏移（格，沿 +z = 相机右）：封面在左、文案块在右，整组大致居中。 */
 	private static final double OPEN_COVER_H = -6.5;
 	private static final double OPEN_TEXT_H = 7.4;
@@ -284,10 +293,22 @@ public final class StyxShow {
 		return plateFade(COVER_BLOCK, cx, cy, cz, age, "alpha=" + alphaSeg(rising, durSec));
 	}
 
+	/** 带屏幕锚定表达式的封面板（{@code lock} 为空 = 纯世界固定）。 */
+	private static String coverPlate(double cx, double cy, double cz, int age, boolean rising, double durSec, String lock) {
+		return plateFade(COVER_BLOCK, cx, cy, cz, age,
+			"alpha=" + alphaSeg(rising, durSec) + (lock.isEmpty() ? "" : "; " + lock));
+	}
+
 	/** 文案块板（世界固定）：曲名 / 作者 / 钢琴改编三行，贴图见 tools/render-plate-pack.mjs。 */
 	private static String textPlate(double cx, double cy, double cz, int age, boolean rising, double durSec) {
+		return textPlate(cx, cy, cz, age, rising, durSec, "");
+	}
+
+	/** 带屏幕锚定表达式的文案块板（{@code lock} 为空 = 纯世界固定）。 */
+	private static String textPlate(double cx, double cy, double cz, int age, boolean rising, double durSec, String lock) {
 		return plate(TITLE_BLOCK, cx, cy, cz, age,
-			"size=" + fmt(TEXT_SIZE) + "; light=1.0; alpha=" + alphaSeg(rising, durSec));
+			"size=" + fmt(TEXT_SIZE) + "; light=1.0; alpha=" + alphaSeg(rising, durSec)
+				+ (lock.isEmpty() ? "" : "; " + lock));
 	}
 
 	/**
@@ -325,11 +346,17 @@ public final class StyxShow {
 	 */
 	private static String dotBand(String image, double dpb, String sizeExpr, double cx, double cy, double cz,
 	                             String matrix, int age, double holdSec, double fadeSec, double staggerSec) {
+		return dotBand(image, dpb, sizeExpr, cx, cy, cz, matrix, age, holdSec, fadeSec, staggerSec, "");
+	}
+
+	/** 带屏幕锚定表达式的点阵条带（{@code lock} 为空 = 纯世界固定）。 */
+	private static String dotBand(String image, double dpb, String sizeExpr, double cx, double cy, double cz,
+	                             String matrix, int age, double holdSec, double fadeSec, double staggerSec, String lock) {
 		double hold = holdSec * 20.0, fade = fadeSec * 20.0, stagger = staggerSec * 20.0;
 		String alpha = "1-clamp((t-" + fmt(hold) + "-ddis*" + fmt(stagger) + ")/" + fmt(fade) + ",0,1)";
 		return "particlex image-matrix end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
 			+ " " + image + " 1.0 \"" + matrix + "\" " + fmt(dpb) + " 0 0 0 " + age
-			+ " \"size=" + sizeExpr + "; alpha=" + alpha + "\" 1.0";
+			+ " \"size=" + sizeExpr + "; alpha=" + alpha + (lock.isEmpty() ? "" : "; " + lock) + "\" 1.0";
 	}
 
 	/**
@@ -567,15 +594,20 @@ public final class StyxShow {
 		double textX = ax + rx * OPEN_TEXT_H, textZ = az + rz * OPEN_TEXT_H;
 		// 点阵矩阵：素材 96px，中心平移 -48 px → /8 = -6 格；平面基向量 = 起播时的相机右向
 		String coverM = gridMatrix(rx, rz, -(96.0 / 2), -(96.0 / 2));
+		// 屏幕锚定（0.7.1）：把卡片每刻搬到「眼位 + 起播方向×距离 + 起播右向×版面偏移」→ 屏幕上不动
+		String coverLock = OPEN_SCREEN_ANCHOR ? anchorTo(OPEN_AHEAD, OPEN_COVER_H, 0.2, fx, fz, rx, rz) : "";
+		String textLock = OPEN_SCREEN_ANCHOR ? anchorTo(OPEN_AHEAD, OPEN_TEXT_H, 0.2, fx, fz, rx, rz) : "";
+		String dotLock = OPEN_SCREEN_ANCHOR
+			? anchorCloud(OPEN_AHEAD + OPEN_DOT_BACK, 0.2, fx, fz, rx, rz) : "";
 		// ① 两片清晰板：淡入一颗 + 到交叉点换成只淡出的新一颗（复合 clamp 实测整颗不渲染，见 plateFade）
 		pending.add(new Pending(atSec + OPEN_IN_AT[0], coverPlate(coverX, ay, coverZ, ticks(OPEN_COVER_OUT_AT - OPEN_IN_AT[0]),
-			true, OPEN_PLATE_IN_SEC)));
+			true, OPEN_PLATE_IN_SEC, coverLock)));
 		pending.add(new Pending(atSec + OPEN_COVER_OUT_AT, coverPlate(coverX, ay, coverZ, ticks(0.6),
-			false, OPEN_COVER_OUT_SEC)));
+			false, OPEN_COVER_OUT_SEC, coverLock)));
 		pending.add(new Pending(atSec + OPEN_IN_AT[1], textPlate(textX, ay, textZ, ticks(OPEN_TEXT_OUT_AT - OPEN_IN_AT[1]),
-			true, OPEN_PLATE_IN_SEC)));
+			true, OPEN_PLATE_IN_SEC, textLock)));
 		pending.add(new Pending(atSec + OPEN_TEXT_OUT_AT, textPlate(textX, ay, textZ, ticks(0.6),
-			false, OPEN_TEXT_OUT_SEC)));
+			false, OPEN_TEXT_OUT_SEC, textLock)));
 		// ② 点阵：12 条分批铺（每条 768 颗），藏在封面后面 0.35 格；3.05s 起同时从中心向外消散
 		for (int i = 0; i < OPEN_DOT_BANDS; i++) {
 			double spawnAt = OPEN_DOT_SPAWN_AT + i * OPEN_DOT_SPAWN_STEP;
@@ -584,9 +616,10 @@ public final class StyxShow {
 			String img = COVER_GRID_IMAGE + String.format("%02d", i) + ".png";
 			pending.add(new Pending(atSec + spawnAt, dotBand(img, COVER_DPB, COVER_DOT_SIZE,
 				coverX + fx * OPEN_DOT_BACK, ay, coverZ + fz * OPEN_DOT_BACK, coverM, age, holdSec,
-				OPEN_DOT_FADE_SEC, OPEN_DOT_STAGGER_SEC)));
+				OPEN_DOT_FADE_SEC, OPEN_DOT_STAGGER_SEC, dotLock)));
 		}
-		NbmachinaMod.LOGGER.info("[styxshow] 开场卡片（钉死后不动）：机位 yaw {} → 锚点 ({}, {}, {})，封面 ({}, {}, {}) 文案 ({}, {}, {})，{} 格前方，{} 条点阵",
+		NbmachinaMod.LOGGER.info("[styxshow] 开场卡片（{}）：机位 yaw {} → 锚点 ({}, {}, {})，封面 ({}, {}, {}) 文案 ({}, {}, {})，{} 格前方，{} 条点阵",
+			OPEN_SCREEN_ANCHOR ? "屏幕锚定、只显现/消失" : "世界固定",
 			fmt(p.getYaw()), fmt(ax), fmt(ay), fmt(az), fmt(coverX), fmt(ay), fmt(coverZ),
 			fmt(textX), fmt(ay), fmt(textZ), fmt(OPEN_AHEAD), OPEN_DOT_BANDS);
 	}
@@ -594,6 +627,30 @@ public final class StyxShow {
 	/** 秒 → 刻（表达式里的 t 是刻数）。 */
 	private static int ticks(double sec) {
 		return Math.max(1, (int) Math.round(sec * 20.0));
+	}
+
+	/**
+	 * 屏幕锚定表达式（0.7.1）：每刻把粒子搬到「当前眼位 + 起播方向×dist + 起播右向×h + 上×v」。
+	 *
+	 * <p>方向/右向是**起播那一刻**的常量（不是实时视角）→ 飞行时卡片跟着平移、屏幕上位置与大小不变，
+	 * 只有淡入淡出；转头时它会自然滑出画面而不是"甩着跟你转"。用 ExParticle 的只读镜头变量
+	 * {@code px/py/pz}（玩家眼位，每刻刷新）。
+	 */
+	private static String anchorTo(double dist, double h, double v, double fx, double fz, double rx, double rz) {
+		return "vx=(px+" + fmt(fx * dist + rx * h) + ")-(cx+x);"
+			+ "vy=(py+" + fmt(v) + ")-(cy+y);"
+			+ "vz=(pz+" + fmt(fz * dist + rz * h) + ")-(cz+z)";
+	}
+
+	/**
+	 * 点阵层的屏幕锚定：每颗点再叠加它在画面平面内的偏移（引擎逐粒子给的 {@code dx/dy/dz}）——
+	 * 水平方向按起播右向投影，竖直直接用 {@code dy}。
+	 */
+	private static String anchorCloud(double dist, double v, double fx, double fz, double rx, double rz) {
+		String h = "(" + fmt(rx) + "*dx+" + fmt(rz) + "*dz)";
+		return "vx=(px+" + fmt(fx * dist) + "+" + fmt(rx) + "*" + h + ")-(cx+x);"
+			+ "vy=(py+" + fmt(v) + "+dy)-(cy+y);"
+			+ "vz=(pz+" + fmt(fz * dist) + "+" + fmt(rz) + "*" + h + ")-(cz+z)";
 	}
 
 	public static void stop(ServerWorld world) {
