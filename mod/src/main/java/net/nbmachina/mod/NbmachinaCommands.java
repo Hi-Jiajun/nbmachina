@@ -116,6 +116,38 @@ public final class NbmachinaCommands {
 									FloatArgumentType.getFloat(ctx, "offsetMs"),
 									FloatArgumentType.getFloat(ctx, "rate")))))))
 				.then(CommandManager.literal("stop").executes(ctx -> machineStop(ctx.getSource())))
+				// 音符盒特效预览：站在音符盒上执行，就在**脚下那块**上放一次完整的音效
+				// （调特效时不用等机器弹到那一下，见 docs/M5-show-design.md §20）
+				.then(CommandManager.literal("flare")
+					.then(CommandManager.argument("midi", IntegerArgumentType.integer(21, 108))
+						.executes(ctx -> {
+							var src = ctx.getSource();
+							var p = src.getPlayer();
+							if (p == null) return 0;
+							int midi = IntegerArgumentType.getInteger(ctx, "midi");
+							net.nbmachina.mod.show.StyxShow.previewFlare(src.getWorld(),
+								net.minecraft.util.math.MathHelper.floor(p.getX()),
+								net.minecraft.util.math.MathHelper.floor(p.getY()) - 1,
+								net.minecraft.util.math.MathHelper.floor(p.getZ()), midi, 100, false);
+							src.sendFeedback(() -> Text.literal(
+								"[nbmachina] 音符盒特效预览：midi " + midi + "（脚下那块）"), false);
+							return 1;
+						})
+						// 也可以指定方块坐标：/nbm machine flare 67 0 110 -6（站在远处调特效时用）
+						.then(CommandManager.argument("x", IntegerArgumentType.integer())
+							.then(CommandManager.argument("y", IntegerArgumentType.integer())
+								.then(CommandManager.argument("z", IntegerArgumentType.integer())
+									.executes(ctx -> {
+										var src = ctx.getSource();
+										int midi = IntegerArgumentType.getInteger(ctx, "midi");
+										int fx = IntegerArgumentType.getInteger(ctx, "x");
+										int fy = IntegerArgumentType.getInteger(ctx, "y");
+										int fz = IntegerArgumentType.getInteger(ctx, "z");
+										net.nbmachina.mod.show.StyxShow.previewFlare(src.getWorld(), fx, fy, fz, midi, 100, false);
+										src.sendFeedback(() -> Text.literal(
+											"[nbmachina] 音符盒特效预览：midi " + midi + " @ " + fx + " " + fy + " " + fz), false);
+										return 1;
+									}))))))
 				.then(CommandManager.literal("silent")
 					.executes(ctx -> machineSilent(ctx.getSource(), null))
 					.then(CommandManager.literal("on").executes(ctx -> machineSilent(ctx.getSource(), true)))
