@@ -736,8 +736,15 @@ public final class StyxShow {
 	// ② 场景层常驻在**甲板顶面之上**（y ≥ 111.16），不埋在方块里；③ 场次切换只 `group remove` 自己那三组，
 	// 不打断正在扩散的音符盒心跳（重音横波是短命粒子，不需要组）。
 
-	/** 场景层总开关（`/nbm scene on|off`）。 */
-	private static boolean sceneOn = true;
+	/**
+	 * 场景层总开关（`/nbm scene on|off`）。
+	 *
+	 * <p>⚠ **2026-09-25 用户三连否后定为默认关**：河 / 光幕 / 重音横波被否掉（§28.7），
+	 * 接着螺旋纽带也被否掉（"算了，这个纽带也不要了，感觉不咋地"）→ 游戏内**不再有场景层**，
+	 * 只留音符盒特效（§20–§26）与开场卡片（§19）。
+	 * 代码保留、`/nbm scene preset scene-helix|scene-all` 一键可切回来做 A/B（默认 `scene-off`）。
+	 */
+	private static boolean sceneOn = false;
 	/** 当前场次索引（-1 = 本场还没挂过）。 */
 	private static int sceneIdx = -1;
 	/** 上一次重挂光幕的时刻（秒）——光幕骑流靠速度推算，定期重挂抵消累积误差。 */
@@ -807,13 +814,13 @@ public final class StyxShow {
 	/** 场景层预设：对默认值的一组覆盖。 */
 	private static final java.util.Map<String, java.util.Map<String, Double>> SCENE_PRESETS = new java.util.LinkedHashMap<>();
 	static {
-		SCENE_PRESETS.put("scene-helix", java.util.Map.of());                       // 默认：只留螺旋纽带（两条）
+		SCENE_PRESETS.put("scene-helix", java.util.Map.of());                       // A/B：只留螺旋纽带（两条）
 		SCENE_PRESETS.put("scene-all", java.util.Map.of(                            // A/B：河+光幕+螺旋+重音波全开
 			"river_gain", 1.0, "curtain_gain", 1.0, "accent_gain", 1.0));
-		SCENE_PRESETS.put("scene-off", java.util.Map.of(                            // 全关 = 只留音符盒特效
+		SCENE_PRESETS.put("scene-off", java.util.Map.of(                            // 默认：全关 = 只留音符盒特效
 			"river_gain", 0.0, "curtain_gain", 0.0, "helix_gain", 0.0, "accent_gain", 0.0));
 	}
-	private static String scenePresetName = "scene-helix";
+	private static String scenePresetName = "scene-off";
 
 	private static double sp(String key) {
 		Double v = SCENE_PARAMS.get(key);
