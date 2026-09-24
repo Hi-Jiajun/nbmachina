@@ -213,47 +213,52 @@ public final class StyxShow {
 	// ── 开场时间线（秒；0.7.4「点阵先打印 → 清板压上 → 一起缩没」版）──────────────────
 	// ⚠ ExParticle 表达式里的 t 是**刻数**（命令末尾 step=1 → 每刻 +1），所以"秒"必须 ×20 才等于表达式里的时长。
 	//
-	// 0.00→0.70  封面 + 文案**同时**淡入（用户口径："封面和文字应该同时出现"）
-	// 0.75→1.45  点阵**从左上角打印到右下角**（每颗点按自己的对角坐标错开长出来；点阵比封面右偏 6.5 格、后 0.35 格）
-	// 1.45→2.30  定格（点阵只在封面右侧露出来）
-	// 2.30→3.09  封面 + 文案拆成 4×4 块、按对角顺序缩没（用户口径："消失动画要自然/灵动"）
-	// 3.10       第一拨点阵整批到期、第二拨（同图同位）接上 → 3.10→3.86 逐颗缩没（"随之自然消失"）
+	// 0.00→0.70  封面 + 文案**同时、同样时长**淡入（用户口径："封面和文字应该同时出现"、"时长/速度要一致"）
+	// 0.75→1.35  点阵整片淡入（**不再打点**——用户 2026-09-24："不用点阵打点了"；点阵仍比封面右偏 6.5 格、后 0.35 格）
+	// 1.35→2.30  定格
+	// 2.30→3.00  封面 + 文案**同时**淡出（与出现同一类型：同一条线性斜坡的镜像）
+	// 3.00→3.70  点阵在封面/文案**消失之后**淡出（"随之自然消失"）
 	// 3.917      第一颗音
 	//
 	// 为什么会有"两拨点阵"：单个表达式里**两个 clamp 相乘的复合式实测整颗粒子不渲染**
 	// （2026-09-24 实机对照：单 clamp 正常、clamp*clamp 全灭），所以"长出来"和"缩回去"
 	// 必须拆成两批粒子，各自只带一个 clamp。
-	/** 封面 + 文案**同一时刻**淡入（用户口径："封面和文字应该同时出现"）。 */
+	/** 封面 + 文案**同一时刻、同一时长**淡入。 */
 	private static final double OPEN_PLATE_IN_AT = 0.00;
 	private static final double OPEN_PLATE_IN_SEC = 0.70;
-	/** 封面与文案**同一时刻**开始退场（拆块溶解，见 {@link #tilePlate}）。 */
+	/**
+	 * 封面与文案**同一时刻、同一时长**退场，曲线 = 入场那条线性斜坡的镜像
+	 * （用户口径："消失动画用和出现动画一样类型的"）。
+	 */
 	private static final double OPEN_COVER_OUT_AT = 2.30;
-	private static final double OPEN_COVER_OUT_SEC = 0.80;
+	private static final double OPEN_COVER_OUT_SEC = 0.70;
 	private static final double OPEN_TEXT_OUT_AT = OPEN_COVER_OUT_AT;
 	private static final double OPEN_TEXT_OUT_SEC = OPEN_COVER_OUT_SEC;
-	/** 退场拆块：4×4 块（每块 3 格见方），对角顺序、0.09s/步，每块再花 0.25s 缩到 0。 */
+	/**
+	 * 拆块动画参数：4×4 块、对角顺序（左上先）、**0.04s/步**错开、每块 0.35s 长满或缩没。
+	 * 错开量比"每块的时长"小得多 → 16 块在时间上互相重叠，读起来是"整幅图连着填满/退掉"，
+	 * 而不是一块块孤零零地蹦。出现与消失共用同一组数字（用户口径：两者同类型、同速度）。
+	 */
 	private static final int PLATE_TILES = 4;
 	private static final double OPEN_TILE_BLOCKS = PLATE_BLOCKS / PLATE_TILES;
-	private static final double OPEN_TILE_STAGGER_SEC = 0.09;
-	private static final double OPEN_TILE_SHRINK_SEC = 0.25;
-	/** 16 块一起在 2.28s 出生（比整板退场早 0.02s，交接时画面是完整的）。 */
-	private static final double OPEN_TILE_IN_AT = OPEN_COVER_OUT_AT - 0.02;
-	/** 第一拨点阵（打印）：12 条**斜带**在 0.75→1.19s 生成，每颗点按自己的对角坐标错开长出来。 */
-	private static final double OPEN_DOT_PRINT_SPAWN_AT = 0.75;
-	private static final double OPEN_DOT_PRINT_SPAWN_STEP = 0.040;
-	/** 第一拨点阵的到期时刻（= 第二拨生成的时刻；两拨同图同位，交接看不见缝）。 */
-	private static final double OPEN_DOT_PRINT_END_AT = 3.12;
-	/** 第二拨点阵（消散）：封面/文案收完之后（3.10s）才开始，缩到 0，3.86s 前收干净。 */
-	private static final double OPEN_DOT_DISSOLVE_AT = 3.10;
+	private static final double OPEN_TILE_STAGGER_SEC = 0.04;
+	private static final double OPEN_TILE_GROW_SEC = 0.35;
+	private static final double OPEN_TILE_SHRINK_SEC = 0.35;
+	/** 消失用的 16 块比"消失起点"早 0.02s 出生（视觉上就是同一时刻交接，不会闪）。 */
+	private static final double OPEN_TILE_OUT_AT = OPEN_COVER_OUT_AT - 0.02;
+	/** 点阵淡入：12 条在 0.75→0.97s 生成，整片一起在 1.35s 亮满（不再有"打点"过程）。 */
+	private static final double OPEN_DOT_SPAWN_AT = 0.75;
+	private static final double OPEN_DOT_SPAWN_STEP = 0.020;
+	private static final double OPEN_DOT_IN_SEC_EXPR = 0.60;
+	/** 第一拨点阵的到期时刻（= 第二拨生成的时刻；两拨同图同位、alpha 都是 1，交接看不见缝）。 */
+	private static final double OPEN_DOT_PRINT_END_AT = 3.02;
+	/** 第二拨点阵（淡出）：封面/文案收完之后（3.00s）才开始，3.70s 收干净。 */
+	private static final double OPEN_DOT_OUT_AT = 3.00;
+	private static final double OPEN_DOT_OUT_SEC_EXPR = 0.70;
 	private static final double OPEN_DOT_DISSOLVE_SPAWN_STEP = 0.020;
 	private static final int OPEN_DOT_BANDS = 12;
-	/** 斜向扫描速度（秒/格）：对角跨度 24 格 → 打印 0.48s、消散 0.36s。 */
-	private static final double OPEN_DOT_PRINT_SEC_PER_BLOCK = 0.020;
-	private static final double OPEN_DOT_PRINT_RISE_SEC = 0.12;
-	private static final double OPEN_DOT_DISSOLVE_SEC_PER_BLOCK = 0.015;
-	private static final double OPEN_DOT_DISSOLVE_FALL_SEC = 0.40;
 	/** 点阵全部消失的时刻（< 第一颗音 3.917s）。 */
-	private static final double OPEN_DOT_END_AT = 3.86;
+	private static final double OPEN_DOT_END_AT = 3.74;
 	/** 起播机位（fire 时取不到玩家就用它）与起播朝向常量。 */
 	private static double eye0X, eye0Y, eye0Z, dirFx, dirFz, dirRx, dirRz;
 	/** 诊断开关（默认关）：`-Dstyx.nodots=true` 只放封面/文案，`-Dstyx.noplates=true` 只放点阵。 */
@@ -367,10 +372,9 @@ public final class StyxShow {
 	private static String alphaSeg(boolean rising, double durSec) {
 		double dur = durSec * 20.0;
 		if (rising) return "clamp(t/" + fmt(dur) + ",0,1)";
-		// 淡出加一点缓动（用户 2026-09-24："消失动画还比较生硬"）：quadraticLerp 让透明度
-		// 先慢慢掉、后段收干净，比线性柔。仍是"单个 clamp + 一个函数调用"，
-		// 和歌词里 lerp(clamp(...)) 同型（实测能渲染）；两个 clamp 相乘那类复合式才会整颗不渲染。
-		return "quadraticLerp(clamp(t/" + fmt(dur) + ",0,1),1,0,0.30,0.85)";
+		// 2026-09-24 用户口径："消失动画用和出现动画一样类型的" → 淡出就用淡入那条线性斜坡的**镜像**
+		// （`1-clamp(t/dur,0,1)`，同一个 dur）。早先那版用过 quadraticLerp 缓动，现在为了"同类型"去掉。
+		return "1-clamp(t/" + fmt(dur) + ",0,1)";
 	}
 
 	/**
@@ -386,43 +390,21 @@ public final class StyxShow {
 	}
 
 	/**
-	 * 点阵层的对角坐标（格）：左上角 = 0、右下角 = 24。
+	 * 点阵"整片长出来"（2026-09-24 用户口径："不用点阵打点了"）：不再逐点/逐带打印，
+	 * 全片一起从 0 长到目标尺寸 —— 和封面/文案的拆块动画同一类型（几何缩放，不碰 alpha）。
 	 *
-	 * <p>推导：点阵矩阵把"图像列"映射到画面右向 {@code (rx,rz)}、"行"映射到 +y，所以
-	 * <pre>
-	 *   h（画面内水平偏移，格） = dx*rx + dz*rz
-	 *   v（竖直偏移，格，向上为正） = dy
-	 *   图像里的"列 + 行" ∝ (h - dy)
-	 * </pre>
-	 * 12 格的点阵 → {@code h,dy ∈ [-6,6]} → {@code h-dy ∈ [-12,12]}，加 12 平移到 [0,24]。
-	 * 用它当延迟量，就能让整片点阵按"左上 → 右下"的斜向顺序逐颗长出来 / 缩回去。
+	 * <p>{@code t0Sec} = 本批粒子相对"长出来起点"的出生偏移：12 条分批生成（避免一次 9216 颗卡帧），
+	 * 补上这个偏移，12 条才会在同一时刻长满。依旧只用一个 clamp（两个 clamp 相乘会让整颗不渲染，实测）。
 	 */
-	private static String dotDiag(double rx, double rz) {
-		return "((" + fmt(rx) + "*dx+" + fmt(rz) + "*dz)-dy+12)";
+	private static String dotGrow(double t0Sec) {
+		double rise = OPEN_DOT_IN_SEC_EXPR * 20.0;
+		return "size=" + COVER_DOT_SIZE + "*clamp((t+" + fmt(t0Sec * 20.0) + ")/" + fmt(rise) + ",0,1); alpha=1";
 	}
 
-	/**
-	 * 打印入场：{@code size} 从 0 长到目标值，左上角的点先长出来。
-	 *
-	 * <p>⚠ 只有一个 {@code clamp}——实测两个 clamp 相乘会让整颗粒子不渲染（见时间线注释）。
-	 * {@code t0Sec} = 本批粒子的生成时刻（相对开场 0 秒），因为每批的 t 都从自己的 0 开始，
-	 * 不补上这个偏移，晚生成的批会整体迟到。
-	 */
-	private static String dotGrow(double rx, double rz, double t0Sec) {
-		double k = OPEN_DOT_PRINT_SEC_PER_BLOCK * 20.0, rise = OPEN_DOT_PRINT_RISE_SEC * 20.0;
-		return "size=" + COVER_DOT_SIZE + "*clamp((t+" + fmt(t0Sec * 20.0) + "-" + fmt(k)
-			+ "*" + dotDiag(rx, rz) + ")/" + fmt(rise) + ",0,1); alpha=1";
-	}
-
-	/**
-	 * 消散：{@code size} 从目标值缩到 0，顺序与打印一致（还是左上 → 右下），所以观感是
-	 * "点阵照原样往回退掉"；同样只有一个 clamp，且**不碰 alpha**——开光影时半透明粒子会被
-	 * 渲染成一层发光残影（2026-09-24 实测：alpha=0.55 的封面整块暗部直接消失），几何缩放则完全不受影响。
-	 */
-	private static String dotShrink(double rx, double rz, double t0Sec) {
-		double k = OPEN_DOT_DISSOLVE_SEC_PER_BLOCK * 20.0, fall = OPEN_DOT_DISSOLVE_FALL_SEC * 20.0;
-		return "size=" + COVER_DOT_SIZE + "*(1-clamp((t+" + fmt(t0Sec * 20.0) + "-" + fmt(k)
-			+ "*" + dotDiag(rx, rz) + ")/" + fmt(fall) + ",0,1)); alpha=1";
+	/** 点阵"整片缩回去"：与长出来同类型（线性斜坡的镜像），时间点在封面/文案消失之后。 */
+	private static String dotShrink(double t0Sec) {
+		double fall = OPEN_DOT_OUT_SEC_EXPR * 20.0;
+		return "size=" + COVER_DOT_SIZE + "*(1-clamp((t+" + fmt(t0Sec * 20.0) + ")/" + fmt(fall) + ",0,1)); alpha=1";
 	}
 
 	/**
@@ -453,21 +435,43 @@ public final class StyxShow {
 	}
 
 	/**
+	 * **整块缩放板**（0.7.7 出场/退场统一用）：{@code size} 从 0 长到 {@code size}（出现）
+	 * 或者从 {@code size} 缩到 0（消失），全程 {@code alpha=1}、位置不动。
+	 *
+	 * <p>为什么不用 alpha 淡入淡出：开光影时 alpha&lt;1 的板子**暗部会整块消失**（§16.1 实测）——
+	 * 同一段 0.7s 里白字的文案 0.6s 就看清、深色封面要到 1.0s 才成形，用户反馈的
+	 * "封面和文字出现动画时长/速度不一致"就是这个。几何缩放没有这个问题，而且封面/文案
+	 * 可以走**完全同一条曲线**，出现与消失又是同一条曲线正反走（用户："消失动画用和出现动画一样类型的"）。
+	 */
+	private static String scalePlate(String block, double cx, double cy, double cz, int age,
+	                                 double size, double durSec, boolean grow, String lock) {
+		double dur = Math.max(1.0, durSec * 20.0);
+		String ramp = grow ? "clamp(t/" + fmt(dur) + ",0,1)" : "1-clamp(t/" + fmt(dur) + ",0,1)";
+		return plate(block, cx, cy, cz, age,
+			"size=" + fmt(size) + "*" + ramp + "; light=1.0; alpha=1" + (lock.isEmpty() ? "" : "; " + lock));
+	}
+
+	/**
 	 * **拆块板**（0.7.5 退场用）：一颗粒子只画贴图的一个矩形块。
 	 *
 	 * <p>取景窗走 ExParticle 的 {@code u0/u1/v0/v1}（归一化，默认 0,1,0,1 = 整张）——这是这次给
 	 * ExParticle Fabric 侧新加的变量，落点是 {@code TerrainParticleMixin} 的 UV 覆写。
 	 *
-	 * <p>为什么不是淡出：开光影时 alpha<1 的板子暗部会整块消失（§16.1 实测），画面像"中途换了一张"。
-	 * 拆块后每块**全程 alpha=1**，只把 {@code size} 缩到 0 —— 观感是"画面碎成方块、一块块退掉"，
-	 * 既不依赖 alpha，也不会被引擎丢粒子。
+	 * <p>⚠ 为什么入场/退场都用它：开光影时 alpha&lt;1 的板子**暗部会整块消失**（§16.1 实测），
+	 * 于是同一段 0.7s 淡入里，白字的文案 0.6s 就看清了、深色封面要到 1.0s 才成形——
+	 * 用户 2026-09-24 反馈的"封面和文字出现动画时长/速度不一致"就是这个（逐帧量过：文案先亮）。
+	 * 改成拆块后每块**全程 alpha=1**，只动 {@code size}：封面与文案用同一套栅格、同一段错开、同一时长，
+	 * 出现与消失又是同一种动画的"长出来 / 缩回去" —— 类型一致、速度一致，且完全不受光影影响。
 	 */
 	private static String tilePlate(String block, double cx, double cy, double cz, int age, double size,
 	                                double u0, double u1, double v0, double v1, double delaySec,
-	                                double shrinkSec, String lock) {
+	                                double durSec, boolean grow, String lock) {
 		double delay = Math.max(0.0, delaySec * 20.0);
-		double shrink = Math.max(1.0, shrinkSec * 20.0);
-		String anim = "size=" + fmt(size) + "*(1-clamp((t-" + fmt(delay) + ")/" + fmt(shrink) + ",0,1)); light=1.0; alpha=1"
+		double dur = Math.max(1.0, durSec * 20.0);
+		String ramp = grow
+			? "clamp((t-" + fmt(delay) + ")/" + fmt(dur) + ",0,1)"
+			: "1-clamp((t-" + fmt(delay) + ")/" + fmt(dur) + ",0,1)";
+		String anim = "size=" + fmt(size) + "*" + ramp + "; light=1.0; alpha=1"
 			+ "; u0=" + fmt(u0) + "; u1=" + fmt(u1) + "; v0=" + fmt(v0) + "; v1=" + fmt(v1)
 			+ (lock.isEmpty() ? "" : "; " + lock);
 		return plate(block, cx, cy, cz, age, anim);
@@ -706,70 +710,76 @@ public final class StyxShow {
 		String textLock = OPEN_SCREEN_ANCHOR ? anchorTo(OPEN_AHEAD, OPEN_TEXT_H, 0.2, fx, fz, rx, rz) : "";
 		String dotLock = OPEN_SCREEN_ANCHOR
 			? anchorCloud(OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H + OPEN_DOT_SHIFT_H, 0.2, fx, fz, rx, rz) : "";
-		// ① 点阵：12 条斜带分批生成，每颗点按自己的对角坐标错开长出来（= 左上 → 右下的打印）
+		// ① 点阵：12 条斜带分批生成、整片一起淡入（不再"打点"）
 		//    点阵整体比封面**右偏 OPEN_DOT_SHIFT_H 格、后 0.35 格**（用户口径：那个错位观感是要的）
 		for (int i = 0; !DBG_NO_DOTS && i < OPEN_DOT_BANDS; i++) {
-			double spawnAt = OPEN_DOT_PRINT_SPAWN_AT + i * OPEN_DOT_PRINT_SPAWN_STEP;
+			double spawnAt = OPEN_DOT_SPAWN_AT + i * OPEN_DOT_SPAWN_STEP;
 			int age = ticks(OPEN_DOT_PRINT_END_AT - spawnAt) + 2;
 			String img = COVER_GRID_IMAGE + String.format("%02d", i) + ".png";
-			double t0 = spawnAt;
+			double t0 = spawnAt - OPEN_DOT_SPAWN_AT;      // 相对淡入起点
 			pending.add(new Pending(atSec + spawnAt, () -> {
 				double[] q = anchorPoint(world, OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H + OPEN_DOT_SHIFT_H, 0.2);
-				return dotBand(img, COVER_DPB, q[0], q[1], q[2], coverM, age, dotGrow(rx, rz, t0), dotLock);
+				return dotBand(img, COVER_DPB, q[0], q[1], q[2], coverM, age, dotGrow(t0), dotLock);
 			}));
 		}
-		// ② 封面 + 文案：**同一时刻**淡入（用户口径："封面和文字应该同时出现"）
+		/*
+		 * ② 封面 + 文案：**同一套拆块动画**（4×4 块、对角顺序、同时长同错开）——
+		 *    出现 = 每块 size 0→满；消失 = 每块 size 满→0（用户口径："消失动画用和出现动画一样类型的"、
+		 *    "封面和文字的出现动画时长/速度要一致"）。走几何而不走 alpha 的原因见 {@link #tilePlate}。
+		 */
 		if (!DBG_NO_PLATES) {
-			int inAge = ticks(OPEN_COVER_OUT_AT - OPEN_PLATE_IN_AT);
-			pending.add(new Pending(atSec + OPEN_PLATE_IN_AT, () -> {
-				double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_COVER_H, 0.2);
-				return coverPlate(q[0], q[1], q[2], inAge, true, OPEN_PLATE_IN_SEC, coverLock);
-			}));
-			pending.add(new Pending(atSec + OPEN_PLATE_IN_AT, () -> {
-				double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_TEXT_H, 0.2);
-				return textPlate(q[0], q[1], q[2], inAge, true, OPEN_PLATE_IN_SEC, textLock);
-			}));
 			/*
-			 * 退出：**拆成 4×4 块、按对角顺序一块块缩没**（0.7.5，用户口径："消失动画不自然/灵动"）。
-			 * 为什么不用 alpha：开光影时 alpha<1 的板子暗部会整块消失（见 §16.1 实测），画面像"换了一张"。
-			 * 拆块后每块全程 alpha=1，只靠 size 缩到 0 —— 观感是"画面碎成方块、从左上往右下退掉"。
+			 * 出现 / 消失 = **同一套拆块动画**（4×4 块、对角顺序、同一段错开、同一条斜坡），
+			 * 出现是 size 0→满、消失是 size 满→0（用户口径："消失动画用和出现动画一样类型的"、
+			 * "封面和文字的出现动画时长/速度要一致"）。几何动画对封面/文案完全一视同仁，
+			 * 不像 alpha 那样"深色封面要等 alpha≈1 才成形、白字早就亮了"。
 			 */
 			for (int tile = 0; tile < PLATE_TILES * PLATE_TILES; tile++) {
 				int col = tile % PLATE_TILES, row = tile / PLATE_TILES;
 				double dh = (col - (PLATE_TILES - 1) / 2.0) * OPEN_TILE_BLOCKS;
 				double dv = ((PLATE_TILES - 1) / 2.0 - row) * OPEN_TILE_BLOCKS;
 				double delay = OPEN_TILE_STAGGER_SEC * (col + row);
-				// 16 块**同时**在场（比整板晚 0.02s 出生，保证交接时画面是完整的），
-				// 各自按 delay 开始缩 → 观感才是"这块退了、其余还在"的逐块溶解。
-				int age = ticks(delay + OPEN_TILE_SHRINK_SEC) + 3;
 				double u0 = col / (double) PLATE_TILES, u1 = (col + 1) / (double) PLATE_TILES;
 				double v0 = row / (double) PLATE_TILES, v1 = (row + 1) / (double) PLATE_TILES;
-				pending.add(new Pending(atSec + OPEN_TILE_IN_AT, () -> {
+				int growAge = ticks(delay + OPEN_TILE_GROW_SEC) + 4;
+				int shrinkAge = ticks(delay + OPEN_TILE_SHRINK_SEC) + 4;
+				// 出现
+				pending.add(new Pending(atSec + OPEN_PLATE_IN_AT, () -> {
 					double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_COVER_H + dh, 0.2 + dv);
-					return tilePlate(COVER_BLOCK, q[0], q[1], q[2], age, OPEN_TILE_BLOCKS * 4.0,
-						u0, u1, v0, v1, delay, OPEN_TILE_SHRINK_SEC,
+					return tilePlate(COVER_BLOCK, q[0], q[1], q[2], growAge, OPEN_TILE_BLOCKS * 4.0,
+						u0, u1, v0, v1, delay, OPEN_TILE_GROW_SEC, true,
 						anchorTo(OPEN_AHEAD, OPEN_COVER_H + dh, 0.2 + dv, fx, fz, rx, rz));
 				}));
-				pending.add(new Pending(atSec + OPEN_TILE_IN_AT, () -> {
+				pending.add(new Pending(atSec + OPEN_PLATE_IN_AT, () -> {
 					double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_TEXT_H + dh, 0.2 + dv);
-					return tilePlate(TITLE_BLOCK, q[0], q[1], q[2], age, TEXT_BLOCKS / PLATE_TILES * 4.0,
-						u0, u1, v0, v1, delay, OPEN_TILE_SHRINK_SEC,
+					return tilePlate(TITLE_BLOCK, q[0], q[1], q[2], growAge, TEXT_BLOCKS / PLATE_TILES * 4.0,
+						u0, u1, v0, v1, delay, OPEN_TILE_GROW_SEC, true,
+						anchorTo(OPEN_AHEAD, OPEN_TEXT_H + dh, 0.2 + dv, fx, fz, rx, rz));
+				}));
+				// 消失（同一套栅格/顺序/时长，只把 grow 换成 shrink）
+				pending.add(new Pending(atSec + OPEN_TILE_OUT_AT, () -> {
+					double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_COVER_H + dh, 0.2 + dv);
+					return tilePlate(COVER_BLOCK, q[0], q[1], q[2], shrinkAge, OPEN_TILE_BLOCKS * 4.0,
+						u0, u1, v0, v1, delay, OPEN_TILE_SHRINK_SEC, false,
+						anchorTo(OPEN_AHEAD, OPEN_COVER_H + dh, 0.2 + dv, fx, fz, rx, rz));
+				}));
+				pending.add(new Pending(atSec + OPEN_TILE_OUT_AT, () -> {
+					double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_TEXT_H + dh, 0.2 + dv);
+					return tilePlate(TITLE_BLOCK, q[0], q[1], q[2], shrinkAge, TEXT_BLOCKS / PLATE_TILES * 4.0,
+						u0, u1, v0, v1, delay, OPEN_TILE_SHRINK_SEC, false,
 						anchorTo(OPEN_AHEAD, OPEN_TEXT_H + dh, 0.2 + dv, fx, fz, rx, rz));
 				}));
 			}
 		}
-		/**
-		 * ③ 点阵消散：封面/文案**消失之后**（3.10s 起）才开始的"自然而然退掉"，
-		 *    顺序与打印一致（左上 → 右下），全程几何缩放、不碰 alpha。
-		 */
+		/** ③ 点阵缩回去：封面/文案收完之后（3.00s）才开始，与长出来同类型（几何）。 */
 		for (int i = 0; !DBG_NO_DOTS && i < OPEN_DOT_BANDS; i++) {
-			double spawnAt = OPEN_DOT_DISSOLVE_AT + i * OPEN_DOT_DISSOLVE_SPAWN_STEP;
+			double spawnAt = OPEN_DOT_OUT_AT + i * OPEN_DOT_DISSOLVE_SPAWN_STEP;
 			int age = ticks(OPEN_DOT_END_AT - spawnAt) + 6;
 			String img = COVER_GRID_IMAGE + String.format("%02d", i) + ".png";
-			double t0 = spawnAt - OPEN_DOT_DISSOLVE_AT;
+			double t0 = spawnAt - OPEN_DOT_OUT_AT;
 			pending.add(new Pending(atSec + spawnAt, () -> {
 				double[] q = anchorPoint(world, OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H + OPEN_DOT_SHIFT_H, 0.2);
-				return dotBand(img, COVER_DPB, q[0], q[1], q[2], coverM, age, dotShrink(rx, rz, t0), dotLock);
+				return dotBand(img, COVER_DPB, q[0], q[1], q[2], coverM, age, dotShrink(t0), dotLock);
 			}));
 		}
 		NbmachinaMod.LOGGER.info("[styxshow] 开场卡片（{}）：起播 yaw {} 锚点 ({}, {}, {})，{} 格前方、点阵右偏 {} 格；{} 条点阵、退出拆 {}×{} 块",
@@ -923,9 +933,9 @@ public final class StyxShow {
 		cmds.add(coverPlate(-10.0, 115.0, ZC, 40, true, OPEN_PLATE_IN_SEC));
 		cmds.add(textPlate(-10.0, 119.9, ZC, 40, true, OPEN_PLATE_IN_SEC));
 		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, -14.0, 111.0, ZC - 4.0,
-			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, dotGrow(0.0, 1.0, 0.0), ""));
+			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, dotGrow(0.0), ""));
 		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, -14.0, 111.0, ZC - 8.0,
-			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, dotShrink(0.0, 1.0, 0.0), ""));
+			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, dotShrink(0.0), ""));
 		cmds.add(flareEdges(0.5, 110.5, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareRipple(0.5, 111.0, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.5, -5.5));
