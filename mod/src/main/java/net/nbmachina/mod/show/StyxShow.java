@@ -201,11 +201,15 @@ public final class StyxShow {
 	 * 点阵接棒用的素材与密度：**144px / dpb18 = 8 格**（与清晰板同尺寸），
 	 * 2.07 万颗（实测这个量级能稳定出图，192²=3.7 万颗时经常整批不画）。
 	 */
-	private static final String COVER_GRID_IMAGE = "styx-cover-192.png";
-	/** 192px ÷ 24 = 8 格（与清晰板同尺寸）；点距 1/24 格。 */
-	private static final double COVER_DPB = 24.0;
-	/** 点阵点尺寸：0.5 格 ≈ 12 个点距——把暗部像素也铺成实心，整张图才"完整"。 */
-	private static final double COVER_GRID_SIZE = 4.0;
+	/**
+	 * 点阵素材：**必须小**。2026-09-24 实测（同一会话并排对比）：
+	 * 192²=3.7 万颗、144²=2.07 万颗 都会**丢掉后面约 1/3 的行**（用户看到的"只有一半"就是这个），
+	 * 96²=9216 也偏多；**64²=4096 颗能整张出图**。所以点阵层统一用"少粒子 + 大点"：
+	 * 64px ÷ dpb8 = 8 格（与清晰板同尺寸），点尺寸 12/8 格 = 1.5 格 ≈ 12 个点距 → 暗部也铺实。
+	 */
+	private static final String COVER_GRID_IMAGE = "styx-cover-64.png";
+	private static final double COVER_DPB = 8.0;
+	private static final double COVER_GRID_SIZE = 12.0;
 	private static final double TITLE_DPB = 48.0, TITLE_W = 8.0;
 	private static final double SUB_DPB = 48.0, SUB_W = 256.0 / SUB_DPB;
 	/** 开场距离：整组浮在玩家眼前，跟着机位走（不再依赖"玩家正好飞到某个坐标"） */
@@ -507,11 +511,11 @@ public final class StyxShow {
 		double cy0 = ay, cy1 = ay + 4.9, cy2 = ay - 4.9;
 		// 点阵矩阵：平移列 = -半宽(格) × dpb（见 gridMatrix 注释）
 		String coverM = gridMatrix(rx, rz, -(COVER_W / 2) * COVER_DPB, -(COVER_W / 2) * COVER_DPB);
-		String titleM = gridMatrix(rx, rz, -0.5 * 64.0, -0.5 * 384.0);          // 384×64 px → 8×1.33 格
-		String subM = gridMatrix(rx, rz, -0.5 * 48.0, -0.5 * (256.0 / SUB_DPB) * SUB_DPB);
-		String[] images = {COVER_GRID_IMAGE, "title.png", "subtitle.png"};
-		double[] dpbs = {COVER_DPB, TITLE_DPB, SUB_DPB};
-		double[] dotSizes = {COVER_GRID_SIZE, 0.7, 0.7};
+		String titleM = gridMatrix(rx, rz, -0.5 * 16.0, -0.5 * 96.0);           // 96×16 px ÷ dpb12 → 8×1.33 格
+		String subM = gridMatrix(rx, rz, -0.5 * 12.0, -0.5 * 64.0);             // 64×12 px ÷ dpb8 → 8×1.5 格
+		String[] images = {COVER_GRID_IMAGE, "title-96.png", "subtitle-64.png"};
+		double[] dpbs = {COVER_DPB, 12.0, 8.0};
+		double[] dotSizes = {COVER_GRID_SIZE, 8.0, 8.0};   // 8.0 = 1 格 = 12 个点距
 		double[] cys = {cy0, cy1, cy2};
 		String[] matrices = {coverM, titleM, subM};
 		for (int i = 0; i < 3; i++) {
