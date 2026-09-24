@@ -149,6 +149,8 @@ public final class StyxShow {
 	private static final String COVER_BLOCK = "minecraft:jigsaw";
 	private static final String TITLE_BLOCK = "minecraft:bamboo_fence_gate";
 	private static final String SUB_BLOCK = "minecraft:conduit";
+	/** 点阵/碎块用的方块状态（硬边不透明白方块，ExParticle 会给它逐像素上色）。 */
+	private static final String COVER_BLOCK_STATE = "minecraft:block{block_state:\"minecraft:white_concrete\"}";
 	/** 封面 8 格见方（贴图 2048²）；size 的单位是 1/8 格，所以 8 格 → size=64。 */
 	private static final double COVER_W = 8.0;
 	private static final double PLATE_SIZE = COVER_W * 8.0;
@@ -171,9 +173,9 @@ public final class StyxShow {
 	 * </ol>
 	 */
 	private static final double COVER_PLATE_AT = 0.45;
-	private static final int COVER_PLATE_AGE = 45;
-	private static final double COVER_SCATTER_AT = 2.50;
-	private static final int COVER_SCATTER_AGE = 34;
+	private static final int COVER_PLATE_AGE = 50;      // → 2.95s 消失（点阵那时已经淡入完）
+	private static final double COVER_SCATTER_AT = 2.40; // 点阵提前 0.55s 淡入，接管时不掉亮度
+	private static final int COVER_SCATTER_AGE = 36;
 	private static final double COVER_DPB = 24.0;
 	private static final double TITLE_DPB = 48.0, TITLE_W = 8.0;
 	private static final double SUB_DPB = 48.0, SUB_W = 256.0 / SUB_DPB;
@@ -226,26 +228,31 @@ public final class StyxShow {
 	 * 自己从 t=0 起算，所以生成时刻由 {@code opening()} 用"延迟生成 + age 控寿命"来排。
 	 */
 	private static String coverGrid(double ax, double ay, double az, String matrix) {
-		String p = "clamp((t-((1-dy/8)*0.60))/0.70,0,1)";
+		// ⚠ 吹散进度**不要写 dy**：2026-09-24 实测带 `dy` 的表达式会让整批 image 粒子不渲染
+		//   （同一命令把 dy 项去掉就出图）。逐行错开的观感损失可以接受，稳定性优先。
+		String p = "clamp((t-0.35)/0.85,0,1)";
+		// ⚠ **点阵必须用 end_rod**：2026-09-24 二分实测——`minecraft:block` + 面向镜头的字面矩阵
+		//   **整段不出图**（同一命令换成 end_rod 就出，换成 "E4" 矩阵也出，但那是侧对镜头不能用）。
+		//   所以清晰板走 block+E4，点阵/吹散走 end_rod+字面矩阵，各走各的稳的那条。
 		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
 			+ " styx-cover-192.png 1.0 \"" + matrix + "\" " + fmt(COVER_DPB) + " 0 0 0 " + COVER_SCATTER_AGE + " "
-			+ "\"size=2.2; alpha=clamp(t/0.30,0,1)*(1-" + p + ");"
+			+ "\"size=2.6; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
 			+ " vx=0.12*" + p + "; vy=0.03*" + p + "\" 0.05";
 	}
 
 	private static String titleGrid(double ax, double ay, double az, String matrix) {
-		String p = "clamp((t-0.35)/0.75,0,1)";
+		String p = "clamp((t-0.30)/0.75,0,1)";
 		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
 			+ " title.png 1.0 \"" + matrix + "\" " + fmt(TITLE_DPB) + " 0 0 0 30 "
-			+ "\"size=0.7; alpha=clamp(t/0.30,0,1)*(1-" + p + ");"
+			+ "\"size=0.7; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
 			+ " vx=0.06*" + p + "\" 0.05";
 	}
 
 	private static String subtitleGrid(double ax, double ay, double az, String matrix) {
-		String p = "clamp((t-0.40)/0.75,0,1)";
+		String p = "clamp((t-0.35)/0.75,0,1)";
 		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
 			+ " subtitle.png 1.0 \"" + matrix + "\" " + fmt(SUB_DPB) + " 0 0 0 32 "
-			+ "\"size=0.7; alpha=clamp(t/0.30,0,1)*(1-" + p + ");"
+			+ "\"size=0.7; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
 			+ " vx=0.06*" + p + "\" 0.05";
 	}
 
