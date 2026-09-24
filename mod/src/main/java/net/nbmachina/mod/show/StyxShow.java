@@ -172,29 +172,40 @@ public final class StyxShow {
 	 *       旧版验证过的淡入+吹散表达式。</li>
 	 * </ol>
 	 */
-	private static final double COVER_PLATE_AT = 0.45;
-	private static final int COVER_PLATE_AGE = 50;      // → 2.95s 消失（点阵那时已经淡入完）
 	/**
-	 * 点阵**垫在清晰板背后**（用户 2026-09-24 口径："把点阵直接放在封面背后，动效相当于把两者结合起来"）：
+	 * 开场三件套时间表（0.4.0 优化版；用户口径："把点阵直接放在封面背后，动效相当于把两者结合起来"）。
+	 *
 	 * <pre>
-	 * +0.00s  静态点阵铺满（整张图，含暗部）→ 点阵是"底"
-	 * +0.45s  清晰板压上去（视觉上"对焦"）→ 两者叠在同一位置
-	 * +2.60s  再生成一份"炸开"副本：每颗点沿自身偏移方向飞散
-	 * +2.95s  清晰板到期 → 只剩点阵 + 正在飞散的点
-	 * +3.10s  静态点阵到期 → 点全部飞走
+	 * 0.00–0.45s  点阵淡入（整张图，含暗部）——点阵是"底"
+	 * 0.45/0.55/0.60s  清晰板逐个"对焦"压上去（封面→标题→副标题，错开 0.05s 更像运镜）
+	 * 2.70/2.80/2.85s  炸开副本起飞（每颗点沿相对画面中心的方向飞散）
+	 * 2.80/2.90/2.95s  点阵开始淡出（0.75s）——清晰板在 2.85/2.95/3.00s 到期让位，
+	 *                  此时点阵还有 ~93% 亮度，所以"板没了"这一下看不出跳变
+	 * 3.90s        第一颗音
 	 * </pre>
+	 *
+	 * 与上一版的差别：① 点阵补上淡入/淡出（不再硬生生出现/消失）；
+	 * ② 矩阵带平移列，`pos` 变成**画面中心**，炸开才是四周均匀散开而不是从角落吹；
+	 * ③ 点阵多生成一份（+0.10s）当"重试"，缓解实测里"整批不画"的偶发问题。
 	 */
-	private static final int COVER_GRID_AGE = 62;
-	private static final double COVER_BURST_AT = 2.60;
-	private static final int COVER_BURST_AGE = 20;
+	private static final double[] OPEN_PLATE_AT = {0.45, 0.55, 0.60};
+	private static final int OPEN_PLATE_AGE = 48;          // 0.45→2.85s / 0.55→2.95s / 0.60→3.00s
+	/** 点阵层出现时刻：比清晰板早 0.05s（先见点阵，再"对焦"成清晰图）。 */
+	private static final double OPEN_DOT_AT = 0.40;
+	/** 点阵层寿命（刻）：封面 66（3.3s）；标题/副标题 70/72（3.5/3.6s）。 */
+	private static final int[] OPEN_DOT_AGE = {66, 70, 72};
+	private static final double[] OPEN_BURST_AT = {2.70, 2.80, 2.85};
+	private static final double OPEN_BURST_K = 0.05;       // 每刻位移 = 相对中心的偏移 × k
+	private static final int OPEN_BURST_AGE = 20;          // 炸开副本寿命 1 秒
 	/**
 	 * 点阵接棒用的素材与密度：**144px / dpb18 = 8 格**（与清晰板同尺寸），
 	 * 2.07 万颗（实测这个量级能稳定出图，192²=3.7 万颗时经常整批不画）。
 	 */
-	private static final String COVER_GRID_IMAGE = "styx-cover-144.png";
-	private static final double COVER_DPB = 18.0;
-	/** 点阵点尺寸：0.66 格 ≈ 12 个点距——把暗部像素也铺成实心，整张图才"完整"。 */
-	private static final double COVER_GRID_SIZE = 5.3;
+	private static final String COVER_GRID_IMAGE = "styx-cover-192.png";
+	/** 192px ÷ 24 = 8 格（与清晰板同尺寸）；点距 1/24 格。 */
+	private static final double COVER_DPB = 24.0;
+	/** 点阵点尺寸：0.5 格 ≈ 12 个点距——把暗部像素也铺成实心，整张图才"完整"。 */
+	private static final double COVER_GRID_SIZE = 4.0;
 	private static final double TITLE_DPB = 48.0, TITLE_W = 8.0;
 	private static final double SUB_DPB = 48.0, SUB_W = 256.0 / SUB_DPB;
 	/** 开场距离：整组浮在玩家眼前，跟着机位走（不再依赖"玩家正好飞到某个坐标"） */
@@ -221,63 +232,58 @@ public final class StyxShow {
 	 * 点阵那段刻意保留旧版的 soft 精灵，因为它负责的是"碎开"而不是"看清"。
 	 */
 	private static String title(double cx, double cy, double cz) {
-		return plate(TITLE_BLOCK, cx, cy, cz, 48,
+		return plate(TITLE_BLOCK, cx, cy, cz, OPEN_PLATE_AGE,
 			"size=" + fmt(PLATE_SIZE) + "; light=1.0; alpha=1");
 	}
 
 	private static String subtitle(double cx, double cy, double cz) {
-		return plate(SUB_BLOCK, cx, cy, cz, 50,
+		return plate(SUB_BLOCK, cx, cy, cz, OPEN_PLATE_AGE,
 			"size=" + fmt(PLATE_SIZE) + "; light=1.0; alpha=1");
 	}
 
 	/**
 	 * 专辑封面：一整张贴图 8 格见方、正对镜头（billboard），**持有 0–2.0s**。
 	 *
-	 * <p>之后由 {@link #coverGrid} 的**点阵**接棒做逐像素吹散：两段在 1.9–2.7s 交叉，
-	 * 视觉上是"先看清 → 再碎开"，全程约 3.9s（第一颗音 3.917s）。
+	 * <p>它只是"面"：底下的点阵（{@link #dotted}）从 0s 就在，2.7s 起由 {@link #burst} 炸开，
+	 * 这张清晰板 2.85s 到期让位时点阵还有 ~93% 亮度，所以看不出跳变。
 	 */
 	private static String cover(double cx, double cy, double cz) {
-		return plate(COVER_BLOCK, cx, cy, cz, COVER_PLATE_AGE,
+		return plate(COVER_BLOCK, cx, cy, cz, OPEN_PLATE_AGE,
 			"size=" + fmt(PLATE_SIZE) + "; light=1.0; alpha=1");
 	}
 
 	/**
-	 * 点阵接棒体：**沿用旧版口径**（锚点=图像左下角、dpb/size/淡入+逐像素吹散表达式都是原来的），
-	 * 自己从 t=0 起算，所以生成时刻由 {@code opening()} 用"延迟生成 + age 控寿命"来排。
+	 * 点阵矩阵：竖直平面、正对镜头，**平移列让 {@code pos} 变成"画面中心"**。
+	 *
+	 * <p>平移量写在矩阵第 4 列，而 {@code pos = M·(col,row,0,1) / dpb}，所以平移量要按
+	 * "格 × dpb" 给。这样粒子表达式里的 {@code dx/dy/dz}（相对中心的初始偏移）才是以
+	 * **画面中心**为原点，炸开时朝四周均匀散开；否则中心是图像左下角，整张图会朝右上角吹。
 	 */
-	/** 点阵"底"：静态整张图（12 倍点距重叠 → 暗部也铺实）。 */
-	private static String coverGrid(double ax, double ay, double az, String matrix) {
-		// ⚠ **点阵必须用 end_rod**：2026-09-24 二分实测——`minecraft:block` + 面向镜头的字面矩阵
-		//   **整段不出图**（同一命令换成 end_rod 就出，换成 "E4" 矩阵也出，但那是侧对镜头不能用）。
-		//   所以清晰板走 block+E4，点阵/吹散走 end_rod+字面矩阵，各走各的稳的那条。
-		// ⚠ size 要给大（4.0 = 0.5 格 ≈ 12 个点距）：end_rod 精灵是软光点，点距 1/24 格时
-		//   **暗部像素几乎不发光**（用户 2026-09-24："点阵图不完整"——只剩中间那束花）。
-		//   12 倍重叠把暗部铺成实心之后，点阵观感才和清晰板接得上。
-		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " " + COVER_GRID_IMAGE + " 1.0 \"" + matrix + "\" " + fmt(COVER_DPB) + " 0 0 0 " + COVER_GRID_AGE + " "
-			+ "\"size=" + fmt(COVER_GRID_SIZE) + "; alpha=1\" 1.0";
+	private static String gridMatrix(double rx, double rz, double tyOff, double tzOff) {
+		return "(" + fmt(rx) + ",0,0,0,,0,1,0," + fmt(tyOff) + ",," + fmt(rz) + ",0,0," + fmt(tzOff)
+			+ ",,0,0,0,1)";
 	}
 
 	/**
-	 * 点阵"炸开"副本：每颗点沿自己相对锚点的方向飞出去（`(vx,vy,vz)=(dx,dy,dz)*k` 是旧版
-	 * 音符盒棱边用过、验证能跑的形式）。观感是"图从底部往上一层层被吹散"。
+	 * 点阵"底"：淡入 0.45s → 保持 → 与炸开同步淡出 0.75s。寿命给足，靠 alpha 归零而不是硬切。
+	 *
+	 * <p>⚠ 两点硬约束（2026-09-24 实测）：**必须用 {@code end_rod}**（`minecraft:block` + 面向镜头的
+	 * 字面矩阵整段不出图）；点的尺寸要给大（0.66 格 ≈ 12 个点距重叠），否则**暗部像素几乎不发光**，
+	 * 整张图只剩亮部（用户："点阵图不完整——上面没有图像"）。
 	 */
-	private static String coverGridBurst(double ax, double ay, double az, String matrix) {
-		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " " + COVER_GRID_IMAGE + " 1.0 \"" + matrix + "\" " + fmt(COVER_DPB) + " 0 0 0 " + COVER_BURST_AGE + " "
-			+ "\"size=" + fmt(COVER_GRID_SIZE) + "; alpha=1; (vx,vy,vz)=(dx,dy,dz)*0.045\" 1.0";
+	private static String dotted(String image, double dpb, double dotSize, double cx, double cy, double cz,
+	                             String matrix, int age) {
+		return "particlex image-matrix end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
+			+ " " + image + " 1.0 \"" + matrix + "\" " + fmt(dpb) + " 0 0 0 " + age
+			+ " \"size=" + fmt(dotSize) + "; alpha=1\" 1.0";
 	}
 
-	private static String titleGrid(double ax, double ay, double az, String matrix, int age, boolean burst) {
-		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " title.png 1.0 \"" + matrix + "\" " + fmt(TITLE_DPB) + " 0 0 0 " + age + " "
-			+ "\"size=1.1; alpha=1" + (burst ? "; (vx,vy,vz)=(dx,dy,dz)*0.045" : "") + "\" 1.0";
-	}
-
-	private static String subtitleGrid(double ax, double ay, double az, String matrix, int age, boolean burst) {
-		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " subtitle.png 1.0 \"" + matrix + "\" " + fmt(SUB_DPB) + " 0 0 0 " + age + " "
-			+ "\"size=1.1; alpha=1" + (burst ? "; (vx,vy,vz)=(dx,dy,dz)*0.045" : "") + "\" 1.0";
+	/** 炸开副本：每颗点沿自身相对**画面中心**的方向飞散（表达式形式沿用旧版棱边，已验证可跑）。 */
+	private static String burst(String image, double dpb, double dotSize, double cx, double cy, double cz,
+	                            String matrix) {
+		return "particlex image-matrix end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
+			+ " " + image + " 1.0 \"" + matrix + "\" " + fmt(dpb) + " 0 0 0 " + OPEN_BURST_AGE
+			+ " \"size=" + fmt(dotSize) + "; alpha=1; (vx,vy,vz)=(dx,dy,dz)*" + fmt(OPEN_BURST_K) + "\" 1.0";
 	}
 
 	/**
@@ -497,29 +503,38 @@ public final class StyxShow {
 		double rx = -fz, rz = fx;                         // 相机右 = f × up
 		// 位置：镜头前方 OPEN_DIST 格、眼位略上一点（镜头在音符盒上方平飞，所以整组都高于方块）
 		double ax = p.getX() + fx * OPEN_DIST, ay = p.getEyeY() + 0.5, az = p.getZ() + fz * OPEN_DIST;
-		// 一图一四边形：**位置就是画面中心**（billboard 自己正对镜头，不需要矩阵摆朝向）。
-		// 标题在封面上方 4.9 格、副标题在下方 4.9 格（封面半高 4 格 + 0.9 格间距），三者同平面。
-		// 清晰板**延迟到 +0.45~0.60s** 生成（前面那一小段由点阵淡入顶着），用 age 控寿命。
-		pending.add(new Pending(atSec + COVER_PLATE_AT, cover(ax, ay, az)));
-		pending.add(new Pending(atSec + 0.55, title(ax, ay + 4.9, az)));
-		pending.add(new Pending(atSec + 0.60, subtitle(ax, ay - 4.9, az)));
-		// 点阵接棒（+2.5s 起逐像素吹散）：锚点是**图像左下角**，位置按相机右/上向量退半格。
-		String matrix = "(" + fmt(rx) + ",0,0,0,,0,1,0,0,," + fmt(rz) + ",0,0,0,,0,0,0,1)";
-		double c = COVER_W / 2;
-		// 点阵"底"从 0s 就在（垫在清晰板背后），清晰板到期后由它接住画面。
-		pending.add(new Pending(atSec, coverGrid(ax - rx * c, ay - c, az - rz * c, matrix)));
-		pending.add(new Pending(atSec + COVER_BURST_AT,
-			coverGridBurst(ax - rx * c, ay - c, az - rz * c, matrix)));
-		double tx = ax - rx * (TITLE_W / 2), ty = ay + c + 0.8, tz = az - rz * (TITLE_W / 2);
-		double sx = ax - rx * (SUB_W / 2), sy = ay - c - 1.1, sz = az - rz * (SUB_W / 2);
-		pending.add(new Pending(atSec, titleGrid(tx, ty, tz, matrix, 70, false)));
-		pending.add(new Pending(atSec, subtitleGrid(sx, sy, sz, matrix, 72, false)));
-		pending.add(new Pending(atSec + COVER_BURST_AT + 0.25,
-			titleGrid(tx, ty, tz, matrix, COVER_BURST_AGE, true)));
-		pending.add(new Pending(atSec + COVER_BURST_AT + 0.35,
-			subtitleGrid(sx, sy, sz, matrix, COVER_BURST_AGE, true)));
+		// 三件套：封面在中间，标题在上 4.9 格、副标题在下 4.9 格；pos 都是**画面中心**。
+		double cy0 = ay, cy1 = ay + 4.9, cy2 = ay - 4.9;
+		// 点阵矩阵：平移列 = -半宽(格) × dpb（见 gridMatrix 注释）
+		String coverM = gridMatrix(rx, rz, -(COVER_W / 2) * COVER_DPB, -(COVER_W / 2) * COVER_DPB);
+		String titleM = gridMatrix(rx, rz, -0.5 * 64.0, -0.5 * 384.0);          // 384×64 px → 8×1.33 格
+		String subM = gridMatrix(rx, rz, -0.5 * 48.0, -0.5 * (256.0 / SUB_DPB) * SUB_DPB);
+		String[] images = {COVER_GRID_IMAGE, "title.png", "subtitle.png"};
+		double[] dpbs = {COVER_DPB, TITLE_DPB, SUB_DPB};
+		double[] dotSizes = {COVER_GRID_SIZE, 0.7, 0.7};
+		double[] cys = {cy0, cy1, cy2};
+		String[] matrices = {coverM, titleM, subM};
+		for (int i = 0; i < 3; i++) {
+			pending.add(new Pending(atSec + OPEN_DOT_AT,
+				dotted(images[i], dpbs[i], dotSizes[i], ax, cys[i], az, matrices[i], OPEN_DOT_AGE[i])));
+			pending.add(new Pending(atSec + OPEN_BURST_AT[i],
+				burst(images[i], dpbs[i], dotSizes[i], ax, cys[i], az, matrices[i])));
+			pending.add(new Pending(atSec + OPEN_PLATE_AT[i], plateFor(i, ax, cys[i], az)));
+		}
+		// 封面点阵再来一份当"重试"（两份只差 0.10s，视觉上只是略密一点）
+		pending.add(new Pending(atSec + OPEN_DOT_AT + 0.10, dotted(COVER_GRID_IMAGE, COVER_DPB,
+			COVER_GRID_SIZE, ax, cy0, az, coverM, OPEN_DOT_AGE[0])));
 		NbmachinaMod.LOGGER.info("[styxshow] 开场三件套：机位 yaw {} pitch {} → 锚点 ({}, {}, {})（{} 格外）",
 			fmt(p.getYaw()), fmt(p.getPitch()), fmt(ax), fmt(ay), fmt(az), fmt(OPEN_DIST));
+	}
+
+	/** 开场三件套的第 i 个清晰板（0=封面 1=标题 2=副标题）。 */
+	private static String plateFor(int i, double cx, double cy, double cz) {
+		return switch (i) {
+			case 0 -> cover(cx, cy, cz);
+			case 1 -> title(cx, cy, cz);
+			default -> subtitle(cx, cy, cz);
+		};
 	}
 
 	public static void stop(ServerWorld world) {
@@ -616,9 +631,14 @@ public final class StyxShow {
 		cmds.add(cover(-10.0, 115.0, ZC));
 		cmds.add(title(-10.0, 119.9, ZC));
 		cmds.add(subtitle(-10.0, 110.1, ZC));
-		cmds.add(coverGrid(-14.0, 111.0, ZC - 4.0, demoMatrix));
-		cmds.add(titleGrid(-14.0, 119.9, ZC - 4.0, demoMatrix, 60, false));
-		cmds.add(subtitleGrid(-14.0, 110.1, ZC - 1.3, demoMatrix, 60, false));
+		cmds.add(dotted(COVER_GRID_IMAGE, COVER_DPB, COVER_GRID_SIZE, -14.0, 111.0, ZC - 4.0,
+			gridMatrix(0.0, 1.0, -96.0, -96.0), 100));
+		cmds.add(burst(COVER_GRID_IMAGE, COVER_DPB, COVER_GRID_SIZE, -14.0, 111.0, ZC - 4.0,
+			gridMatrix(0.0, 1.0, -96.0, -96.0)));
+		cmds.add(dotted("title.png", TITLE_DPB, 1.1, -14.0, 119.9, ZC - 4.0,
+			gridMatrix(0.0, 1.0, -32.0, -192.0), 100));
+		cmds.add(dotted("subtitle.png", SUB_DPB, 1.1, -14.0, 110.1, ZC - 1.3,
+			gridMatrix(0.0, 1.0, -24.0, -128.0), 100));
 		cmds.add(flareEdges(0.5, 110.5, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareRipple(0.5, 111.0, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.5, -5.5));
