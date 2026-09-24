@@ -76,7 +76,7 @@ const textBlock = (out, lines) => {
     + `fontcolor=${l.color}:x=${l.x}:y=${l.y}`
     // 亮天空/白云下要读得清（用户 2026-09-24："轮廓线的方式更好一些"）：
     // 粗一点的实心底色描边当轮廓 + 一点偏移投影增加厚度感
-    + `:borderw=${l.border ?? 5}:bordercolor=black@0.85`
+    + `:borderw=${l.border ?? 6}:bordercolor=black@0.88`
     + `:shadowcolor=black@${l.shadow ?? 0.5}:shadowx=2:shadowy=3`
   ).join(',');
   run([
@@ -86,9 +86,10 @@ const textBlock = (out, lines) => {
   ]);
 };
 textBlock(path.join(blockTex, 'bamboo_fence_gate_particle.png'), [
-  { text: spaced(titleText), size: 124, color: 'white', x: 96, y: 330, font: fontBold, border: 2 },
-  { text: spaced(artistText), size: 72, color: 'white@0.94', x: 96, y: 504, font: fontMedium, border: 2 },
-  { text: arrangerText, size: 42, color: '#A9DEFF', x: 96, y: 604, font: font, border: 2, shadow: 0.5 },
+  // 轮廓宽度按字号给（1024² 贴图里 124px 字配 7px 轮廓 ≈ 字高 6%，投到 1600 宽屏上约 3px）
+  { text: spaced(titleText), size: 124, color: 'white', x: 96, y: 330, font: fontBold, border: 7 },
+  { text: spaced(artistText), size: 72, color: 'white@0.96', x: 96, y: 504, font: fontMedium, border: 5 },
+  { text: arrangerText, size: 42, color: '#BCE6FF', x: 96, y: 604, font: font, border: 3, shadow: 0.5 },
 ]);
 
 // 3) pack.mcmeta：1.21.10 的资源包格式是 69，且**必须**带 min_format / max_format
