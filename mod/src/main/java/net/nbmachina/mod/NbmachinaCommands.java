@@ -146,25 +146,82 @@ public final class NbmachinaCommands {
 								: "[nbmachina] 没有这个预设：" + name + "；" + net.nbmachina.mod.show.StyxShow.presetList()), false);
 							return ok ? 1 : 0;
 						})))
-				// M5-36：单参数微调
-				.then(CommandManager.literal("fx")
-					.executes(ctx -> {
-						ctx.getSource().sendFeedback(() -> Text.literal(
-							"[nbmachina] " + net.nbmachina.mod.show.StyxShow.fxReport()), false);
-						return 1;
-					})
-					.then(CommandManager.argument("key", StringArgumentType.word())
-						.then(CommandManager.argument("value", DoubleArgumentType.doubleArg())
+					// M5-36：单参数微调
+					.then(CommandManager.literal("fx")
+						.executes(ctx -> {
+							ctx.getSource().sendFeedback(() -> Text.literal(
+								"[nbmachina] " + net.nbmachina.mod.show.StyxShow.fxReport()), false);
+							return 1;
+						})
+						.then(CommandManager.argument("key", StringArgumentType.word())
+							.then(CommandManager.argument("value", DoubleArgumentType.doubleArg())
+								.executes(ctx -> {
+									String key = StringArgumentType.getString(ctx, "key");
+									double value = DoubleArgumentType.getDouble(ctx, "value");
+									boolean ok = net.nbmachina.mod.show.StyxShow.setFx(key, value);
+									ctx.getSource().sendFeedback(() -> Text.literal(ok
+										? "[nbmachina] " + key + " = " + value
+										: "[nbmachina] 没有这个参数：" + key + "；用 /nbm machine fx 看全部"), false);
+									return ok ? 1 : 0;
+								})))))
+					// M5-38：场景层（河 · 光幕 · 双螺旋 · 重音横波）—— `/nbm scene`
+					// ⚠ 挂在这里 = 挂在**根命令**下（machine 的 then 链在 fx 之前就闭合了，见 /nbm note、/nbm sustain 同样是根级）。
+					.then(CommandManager.literal("scene")
+						.executes(ctx -> {
+							ctx.getSource().sendFeedback(() -> Text.literal(
+								"[nbmachina] " + net.nbmachina.mod.show.StyxShow.sceneReport()), false);
+							return 1;
+						})
+						.then(CommandManager.literal("on").executes(ctx -> {
+							net.nbmachina.mod.show.StyxShow.setSceneOn(ctx.getSource().getWorld(), true);
+							ctx.getSource().sendFeedback(() -> Text.literal("[nbmachina] 场景层 → 开"), false);
+							return 1;
+						}))
+						.then(CommandManager.literal("off").executes(ctx -> {
+							net.nbmachina.mod.show.StyxShow.setSceneOn(ctx.getSource().getWorld(), false);
+							ctx.getSource().sendFeedback(() -> Text.literal("[nbmachina] 场景层 → 关（只留音符盒特效）"), false);
+							return 1;
+						}))
+						.then(CommandManager.literal("preset")
 							.executes(ctx -> {
-								String key = StringArgumentType.getString(ctx, "key");
-								double value = DoubleArgumentType.getDouble(ctx, "value");
-								boolean ok = net.nbmachina.mod.show.StyxShow.setFx(key, value);
-								ctx.getSource().sendFeedback(() -> Text.literal(ok
-									? "[nbmachina] " + key + " = " + value
-									: "[nbmachina] 没有这个参数：" + key + "；用 /nbm machine fx 看全部"), false);
-								return ok ? 1 : 0;
-							})))))
-			.then(CommandManager.literal("note")
+								ctx.getSource().sendFeedback(() -> Text.literal(
+									"[nbmachina] " + net.nbmachina.mod.show.StyxShow.scenePresetList()), false);
+								return 1;
+							})
+							// greedyString：预设名里有连字符（scene-full），word 参数读不到 "-"
+							.then(CommandManager.argument("name", StringArgumentType.greedyString())
+								.executes(ctx -> {
+									String name = StringArgumentType.getString(ctx, "name");
+									boolean ok = net.nbmachina.mod.show.StyxShow.setScenePreset(ctx.getSource().getWorld(), name);
+									ctx.getSource().sendFeedback(() -> Text.literal(ok
+										? "[nbmachina] 场景预设 → " + name
+										: "[nbmachina] 没有这个预设：" + name + "；"
+											+ net.nbmachina.mod.show.StyxShow.scenePresetList()), false);
+									return ok ? 1 : 0;
+								})))
+						// ⚠ 必须是**字面量 param**，不能直接把 key 挂在 scene 下：Brigadier 在
+						// "scene at 100" 这种输入上会让 word 参数先吃掉 "at"（于是变成设参数 at=100，静默不生效）。
+						.then(CommandManager.literal("param")
+							.then(CommandManager.argument("key", StringArgumentType.word())
+								.then(CommandManager.argument("value", DoubleArgumentType.doubleArg())
+									.executes(ctx -> {
+										String key = StringArgumentType.getString(ctx, "key");
+										double value = DoubleArgumentType.getDouble(ctx, "value");
+										boolean ok = net.nbmachina.mod.show.StyxShow.setSceneParam(key, value);
+										ctx.getSource().sendFeedback(() -> Text.literal(ok
+											? "[nbmachina] 场景参数 " + key + " = " + value + "（下一场生效；用 /nbm scene at <秒> 立刻重挂）"
+											: "[nbmachina] 没有这个参数：" + key + "；键名用下划线；用 /nbm scene 看全部"), false);
+										return ok ? 1 : 0;
+									}))))
+						.then(CommandManager.literal("at")
+							.then(CommandManager.argument("sec", DoubleArgumentType.doubleArg(0.0, 1000.0))
+								.executes(ctx -> {
+									double sec = DoubleArgumentType.getDouble(ctx, "sec");
+									String msg = net.nbmachina.mod.show.StyxShow.sceneAtReport(ctx.getSource().getWorld(), sec);
+									ctx.getSource().sendFeedback(() -> Text.literal("[nbmachina] " + msg), false);
+									return 1;
+								}))))
+				.then(CommandManager.literal("note")
 				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
 					.executes(ctx -> note(ctx, 1.0F, 1.0F))
 					.then(CommandManager.argument("volume", FloatArgumentType.floatArg(0.0F, 8.0F))

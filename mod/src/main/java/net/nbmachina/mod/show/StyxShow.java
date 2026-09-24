@@ -30,8 +30,6 @@ import net.nbmachina.mod.NbmachinaMod;
 public final class StyxShow {
 	private static final Gson GSON = new Gson();
 	private static final double ZC = 2.5;                    // 机器音轨轴（河心）
-	/** M5-4：河/螺旋暂缓（用户："其他地方先别做了，等后面一起设计"），只留音符盒特效 */
-	private static final boolean AMBIENT_ON = false;
 
 	/** 歌词数据模型：**只为解析 styxshow.json 保留**（该文件是剪辑层歌词渲染的输入），游戏内不再出画。 */
 	private record LyricChar(double t, String c, double z, double w, double dur) {
@@ -76,24 +74,6 @@ public final class StyxShow {
 	public static String status() {
 		return String.format("视效 %s；已发 %d 条命令，失败 %d 条（show.json 内置平移 %+.2fs；歌词只在剪辑层）",
 			active ? "**运行中**" : "停", sent, failed, doc == null ? 0 : doc.shiftSec);
-	}
-
-	// ───────────────────────── 命令模板（唯一来源） ─────────────────────────
-
-	private static String river() {
-		return "particlex tick-parameter end_rod 2 111.12 2.5 0.15 0.86 0.80 0.30 0 0 0 0 2400 "
-			+ "\"x,y,z=t,0.15*sin(t/4),sin(t/9)*1.2\" 0.0833 5 26";
-	}
-
-	/** 河面再加两条平行光带，让"河"从上方看是一整片而不是一条线 */
-	private static String riverLane(double dz) {
-		return "particlex tick-parameter end_rod 2 111.12 " + fmt(ZC + dz) + " 0.15 0.86 0.80 0.22 0 0 0 0 2400 "
-			+ "\"x,y,z=t,0.10*sin(t/3.4),sin(t/7)*1.6\" 0.0833 4 30";
-	}
-
-	private static String helix(double phase) {
-		return "particlex tick-polar-parameter end_rod 2 114.5 2.5 0.47 0.36 1.0 0.45 0 0 0 0 2400 "
-			+ "\"s1=t*0.62+" + phase + "; s2=1.5708; dis=4.2\" 0.12 3 40";
 	}
 
 	// ── 开场三件套：封面 + 标题 + 副标题（2026-09-24 v3：**一图一四边形**）────────────
@@ -744,6 +724,335 @@ public final class StyxShow {
 			+ rainbowExpr(phase, rate * 1.3, RAIN_BIAS, RAIN_SCALE) + "\" 1.0";
 	}
 
+	// ───────────────────────── 场景层：河 · 光幕 · 双螺旋 · 重音横波（0.10.0）─────────────────────────
+	//
+	// 三层各答一个问题（这是"按这首歌设计"的口径，别再堆第四种元素）：
+	//   · 河   = 我们在哪儿（空间）：贴水面的光流，前沿速度 = 播放头速度（0.4167 格/刻），永远不飘；
+	//   · 光幕 = 现在是哪儿（时间）：播放头处一片竖立的光雾，骑流推进，全片的视觉节拍器；
+	//   · 螺旋 = 这首歌有多用力（情绪）：绕河轴缠绕的双螺旋，只在中后段副歌出现。
+	// 配一条**重音横波**（141 个真实重音 → 河面横向推开一道光波），把鼓点变成看得见的东西。
+	//
+	// 三条硬口径（延续 §4）：① 剂量靠"数量 + 条数"，不靠把 alpha 压到看不见（开光影低 alpha 会 dither 成噪点）；
+	// ② 场景层常驻在**甲板顶面之上**（y ≥ 111.16），不埋在方块里；③ 场次切换只 `group remove` 自己那三组，
+	// 不打断正在扩散的音符盒心跳（重音横波是短命粒子，不需要组）。
+
+	/** 场景层总开关（`/nbm scene on|off`）。 */
+	private static boolean sceneOn = true;
+	/** 当前场次索引（-1 = 本场还没挂过）。 */
+	private static int sceneIdx = -1;
+	/** 上一次重挂光幕的时刻（秒）——光幕骑流靠速度推算，定期重挂抵消累积误差。 */
+	private static double curtainAt = -1e9;
+	/** 已消费到的重音下标（重音时间与谱面同一时间轴）。 */
+	private static int waveCursor = 0;
+	/** 已消费到的戏剧 cue 下标（目前只消费 Restart 三个点）。 */
+	private static int cueCursor = 0;
+
+	/**
+	 * 十场：时间轴 = 谱面/母版（与 `show/styx_helix.show.json` 同源，改场次先改那份）。
+	 *
+	 * <p>每场给三个元素的**剂量**（0..1，不是 alpha）：剂量只决定"几条 / 多密"，
+	 * alpha 由 {@link #SCENE_DEFAULTS} 里的 base × (0.55+0.45·剂量) 算 —— 安静段少而不虚，副歌多而实。
+	 * 基色（r,g,b）是场景层自己的"冥河夜色"，**故意不用音符盒那套霓虹彩虹**：
+	 * 音符盒是主角（彩虹流转），场景层是它脚下的河（青 → 蓝 → 紫 → 收尾暖金）。
+	 */
+	private record Scene(String id, double t0, double t1,
+	                     double river, double curtain, double helix,
+	                     double r, double g, double b) {
+	}
+
+	private static final Scene[] SCENES = {
+		new Scene("S0 序·空河", 0.00, 22.94, 0.20, 0.00, 0.00, 0.16, 0.62, 0.74),
+		new Scene("S1 A①·首句", 22.94, 39.67, 0.42, 0.30, 0.10, 0.20, 0.74, 0.82),
+		new Scene("S2 B①·乱钟", 39.67, 65.50, 0.34, 0.26, 0.18, 0.22, 0.60, 0.88),
+		new Scene("S3 副歌①", 65.50, 94.80, 0.70, 0.62, 0.75, 0.34, 0.78, 1.00),
+		new Scene("S4 间奏·落砂", 94.80, 116.40, 0.45, 0.40, 0.22, 0.20, 0.62, 0.78),
+		new Scene("S5 A②B②", 116.40, 141.50, 0.48, 0.48, 0.28, 0.26, 0.56, 0.90),
+		new Scene("S6 副歌②·空环", 141.50, 170.10, 0.72, 0.70, 0.80, 0.38, 0.72, 1.00),
+		new Scene("S7 C·淡入淡出", 170.10, 199.80, 0.34, 0.55, 0.45, 0.48, 0.42, 0.92),
+		new Scene("S8 大副歌·顶点", 199.80, 239.80, 0.80, 0.85, 0.90, 0.52, 0.80, 1.00),
+		new Scene("S9 终·新的一天", 239.80, 300.00, 0.40, 0.35, 0.15, 1.00, 0.78, 0.50),
+	};
+
+	/** 三个 Restart 点（母版时间）：全场重挂一次，读起来像"退回去重新亮起来"。 */
+	private static final double[] RESTARTS = {80.47, 154.54, 216.95};
+
+	/** 播放头位置：`x = a·t + b`（对 3044 个音位最小二乘，残差 rms 0.29 格）。 */
+	private static final double PH_A = 8.3341, PH_B = -32.784;
+
+	/** 场景层可调参数（`/nbm scene param <key> <value>`）。键名用下划线（Brigadier 的 word 参数不认点）。 */
+	private static final java.util.Map<String, Double> SCENE_PARAMS = new java.util.LinkedHashMap<>();
+	private static final java.util.Map<String, Double> SCENE_DEFAULTS = new java.util.LinkedHashMap<>();
+	static {
+		SCENE_DEFAULTS.put("river_base", 0.66);     // 河光带 alpha 基数
+		SCENE_DEFAULTS.put("river_gain", 1.0);      // 河光带总增益（0 = 关掉河）
+		SCENE_DEFAULTS.put("river_lead", 4.0);      // 河光前沿比播放头超前多少格
+		SCENE_DEFAULTS.put("curtain_base", 0.75);   // 光幕 alpha 基数
+		SCENE_DEFAULTS.put("curtain_gain", 1.0);
+		SCENE_DEFAULTS.put("helix_base", 0.70);     // 螺旋 alpha 基数
+		SCENE_DEFAULTS.put("helix_gain", 1.0);
+		SCENE_DEFAULTS.put("helix_radius", 8.0);    // 螺旋在 z 方向的半径（格）
+		SCENE_DEFAULTS.put("helix_height", 2.4);    // 螺旋在 y 方向的半径（格）
+		SCENE_DEFAULTS.put("accent_base", 0.62);    // 重音横波 alpha 基数
+		SCENE_DEFAULTS.put("accent_gain", 1.0);
+		SCENE_PARAMS.putAll(SCENE_DEFAULTS);
+	}
+
+	/** 场景层预设：对默认值的一组覆盖。 */
+	private static final java.util.Map<String, java.util.Map<String, Double>> SCENE_PRESETS = new java.util.LinkedHashMap<>();
+	static {
+		SCENE_PRESETS.put("scene-full", java.util.Map.of());                       // 默认：三层全开
+		SCENE_PRESETS.put("scene-still", java.util.Map.of(                          // 只留河 + 光幕（最"静"）
+			"helix_gain", 0.0, "accent_gain", 0.0));
+		SCENE_PRESETS.put("scene-dark", java.util.Map.of(                           // 只留一条暗河
+			"river.gain", 0.6, "curtain.gain", 0.0, "helix_gain", 0.0, "accent_gain", 0.0));
+		SCENE_PRESETS.put("scene-night", java.util.Map.of(                          // 河 + 螺旋，不要光幕与横波
+			"curtain_gain", 0.0, "accent_gain", 0.0));
+		SCENE_PRESETS.put("scene-off", java.util.Map.of(                            // 全关 = 只留音符盒特效
+			"river.gain", 0.0, "curtain.gain", 0.0, "helix_gain", 0.0, "accent_gain", 0.0));
+	}
+	private static String scenePresetName = "scene-full";
+
+	private static double sp(String key) {
+		Double v = SCENE_PARAMS.get(key);
+		return v == null ? 0.0 : v;
+	}
+
+	/** 河光带的 z 位置（按剂量取前 N 条：河心 → 低音侧 → 高音侧 → 两条加密）。 */
+	private static final double[] RIVER_LANES = {ZC, -6.5, 11.5, -2.0, 7.0};
+	/**
+	 * 河光带每刻发射几颗（= 光带密度；前沿速度必须 = step × cpt × 20 = 8.334 格/秒）。
+	 *
+	 * <p>0.10.0 首测（2026-09-25 01:41 截图）时 cpt=3 且**没写 size** → 默认点径（≈0.125 格）+
+	 * 沿 x 每 0.28 格一颗 = 一条几乎看不见的虚线。现在 cpt=6（点距 0.139 格）+ size=4（≈0.5 格）
+	 * → 相邻点互相压住，读出来才是"一条光带"。
+	 */
+	private static final int RIVER_CPT = 4;
+	/**
+	 * 河光带点径（size 单位 1/8 格 → 2.4 ≈ 0.3 格）。
+	 *
+	 * <p>0.10.0 第二轮实测（2026-09-25 01:57 截图）：size=4（0.5 格）在 5~10 格距离上会显出
+	 * `end_rod` 精灵本身的**十字/菱形轮廓** —— 近看是"一块块碎钻"而不是光。收小到 0.3 格、
+	 * 点距 0.104 格（cpt=4）→ 一片叠在一起的柔光，才是"河面在发光"。
+	 */
+	private static final double RIVER_SIZE = 2.4;
+	/** 螺旋光带点径（比河更粗一点，俯视时才是"带"而不是"线"）。 */
+	private static final double HELIX_SIZE = 2.6;
+	private static final double RIVER_STEP = PH_A / 20.0 / RIVER_CPT;   // = 0.138902 格/颗
+	/** 播放头每刻前进多少格（= 骑流元素的 vx）。 */
+	private static final double PH_PER_TICK = PH_A / 20.0;              // = 0.416705
+	private static final int RIVER_AGE = 80;                             // 4 秒 → 身后 ~33 格的光带
+
+	private static int sceneAt(double t) {
+		for (int i = SCENES.length - 1; i >= 0; i--) if (t >= SCENES[i].t0()) return i;
+		return 0;
+	}
+
+	private static double playheadX(double t) {
+		return PH_A * t + PH_B;
+	}
+
+	/** 剂量 → 数量（0..1 → 条数）；安静段就该"少"，不是"淡到看不见"。 */
+	private static int lanesFor(double dose) {
+		return dose >= 0.85 ? 5 : dose >= 0.60 ? 3 : dose >= 0.28 ? 2 : 1;
+	}
+
+	/**
+	 * ① 河光带：贴水面（甲板顶面 +0.16 格）的光流，粒子**沿 x 铺开、参数速度 = 播放头速度**，
+	 * 所以光带永远和音乐同一节拍前进；重挂时用 `begin` 把前沿接在当前播放头上，不跳。
+	 */
+	private static String riverBand(double z, double phase, double begin, double r, double g, double b, double alpha) {
+		return "particlex tick-parameter end_rod 0 111.16 " + fmt(z)
+			+ " " + fmt(r) + " " + fmt(g) + " " + fmt(b) + " " + fmt(alpha)
+			+ " 0 0 0 " + fmt(Math.max(0, begin)) + " 2400"
+			+ " \"x,y,z=t,0.07*sin(t/3.1+" + fmt(phase) + "),0.45*sin(t/8.5+" + fmt(phase) + "); size=" + fmt(RIVER_SIZE) + "\" "
+			+ fmt6(RIVER_STEP) + " " + RIVER_CPT + " " + RIVER_AGE
+			+ " \"alpha=" + fmt(alpha) + "*clamp(t/14,0,1); size=" + fmt(RIVER_SIZE) + "\" 1.0 styx_river";
+	}
+
+	// ② 光幕（"现在线"）：播放头处**三层横光带**叠成的一幕光 —— 贴水面最亮、往上两层递减，
+	//    每刻 `vx=PH_PER_TICK`（= 播放头速度）骑流推进，与音乐同速，是全片的"现在线"。
+	//
+	// 两轮实测（2026-09-25，别再走回头路）：
+	//   ① 第一版：`custom-normal` 在一个 0.3×4.4×25 的盒子里**一次撒 200 多颗** → 实机是
+	//      "一片漂浮的碎钻"（点距 2~3 格 ≫ 点径 0.63 格），不成幕；
+	//   ② 第二版：想用 `custom-conditional` 铺点距 0.5 格的体素网格 → 撞上条件族两个坑：
+	//      a) condition 写 `"null"` 会 NPE **并把客户端踢出世界**
+	//         （`CustomConditionalPayload.handle` 第 108 行的 `Objects.requireNonNull`）；
+	//      b) 换成恒真条件（`abs(x)<999`）后，**mod 自己那条 `dispatcher.parse` 仍判"未解析完"**，
+	//         而同一串命令走写文件通道却能出粒子 —— 同一个 dispatcher 两条路结论不一致，根因未定，
+	//         不值得再赌。结论：新元素只用**已验证过几百次**的命令族（`custom-normal` /
+	//         `tick-parameter` / `custom-parameter polar` / `image-matrix`）。
+	//
+	// 现在：一条命令 = 一层横带（薄在 y、满在 z），三层各自给 alpha。点距靠 count 控制
+	// （80 颗 / 25 格 ≈ 3 颗每格），飞行穿过时是"掠过三层光"，不会读成挡在音符盒前的实体板。
+	/** 光幕总高（格）：从甲板顶面上方 0.2 格起，往上 4.4 格。 */
+	private static final double CURTAIN_H = 4.4;
+	/** 每条横带撒几颗（25 格宽 / 80 颗 ≈ 3 颗每格，点径 0.63 格 → 连成一条光带）。 */
+	private static final int CURTAIN_BAND_COUNT = 80;
+
+	/** 光幕：返回三条命令（每条一层横带），调用方逐条发。 */
+	private static String[] curtain(double x, double r, double g, double b, double alpha) {
+		double[] levels = {0.10 * CURTAIN_H, 0.45 * CURTAIN_H, 0.80 * CURTAIN_H};   // 贴水面 → 中 → 高
+		double[] weights = {1.00, 0.66, 0.42};                                        // 越高越淡
+		String[] out = new String[levels.length];
+		for (int i = 0; i < levels.length; i++) {
+			double a = alpha * weights[i];
+			out[i] = "particlex custom-normal end_rod " + fmt(x) + " " + fmt(111.20 + levels[i]) + " " + fmt(ZC)
+				+ " \"size=3.0; cr,cg,cb=" + fmt(r) + "," + fmt(g) + "," + fmt(b) + "; alpha=" + fmt(a)
+				+ "; age=6000; light=1.0; gravity=0; friction=1.0\" 0.35 0.12 12.5 " + CURTAIN_BAND_COUNT
+				// 骑流 + 进场 0.6s 淡入 + 带宽呼吸
+				+ " \"vx=" + fmt6(PH_PER_TICK) + "; alpha=" + fmt(a) + "*clamp(t/12,0,1);"
+				+ " size=3.0*(0.85+0.15*sin(t/26+z*0.6))\" 1.0 styx_curtain";
+		}
+		return out;
+	}
+
+	/** 三层的定色：河 = 场次本色；光幕 = 往白里提（"现在线"该是白的）；螺旋 = 往紫里偏。 */
+	private static double[] tintRiver(Scene sc) {
+		return new double[]{sc.r(), sc.g(), sc.b()};
+	}
+
+	private static double[] tintCurtain(Scene sc) {
+		return new double[]{0.45 + 0.55 * sc.r(), 0.45 + 0.55 * sc.g(), 0.45 + 0.55 * sc.b()};
+	}
+
+	private static double[] tintHelix(Scene sc) {
+		return new double[]{sc.r() * 0.86, sc.g() * 0.58, Math.min(1.0, sc.b() * 1.02)};
+	}
+
+	/**
+	 * ③ 双螺旋：两条反相缠绕的光带（`z = R·sin(θ)`、`y = h·cos(θ)`，θ 随 x 推进），
+	 * 只有在副歌/顶点（剂量 ≥ 0.28）才挂。俯视机位看下去就是两道蛇形光在河面上交错前进。
+	 */
+	private static String helixBand(double phase, double begin, double r, double g, double b, double alpha,
+	                                double radius, double height) {
+		return "particlex tick-parameter end_rod 0 114 " + fmt(ZC)
+			+ " " + fmt(r) + " " + fmt(g) + " " + fmt(b) + " " + fmt(alpha)
+			+ " 0 0 0 " + fmt(Math.max(0, begin)) + " 2400"
+			+ " \"x,y,z=t," + fmt(height) + "*cos(t/9+" + fmt(phase) + "),"
+			+ fmt(radius) + "*sin(t/9+" + fmt(phase) + "); size=" + fmt(HELIX_SIZE) + "\" "
+			+ fmt6(PH_PER_TICK / 3.0) + " 3 84"
+			+ " \"alpha=" + fmt(alpha) + "*clamp(t/16,0,1); size=" + fmt(HELIX_SIZE) + "\" 1.0 styx_helix";
+	}
+
+	/**
+	 * ④ 重音横波：每个真实重音（141 个，来自力度）在播放头处向**河两侧**推开一道光波。
+	 * 不用圆环（用户 2026-09-24 明确删掉"重音大圆环"）—— 这里的形状是贴着水面向 ±z 推开的一条波。
+	 */
+	private static String accentWave(double x, double r, double g, double b, double alpha) {
+		return "particlex custom-normal end_rod " + fmt(x) + " 111.30 " + fmt(ZC)
+			+ " \"size=2.6; cr,cg,cb=" + fmt(r) + "," + fmt(g) + "," + fmt(b) + "; alpha=" + fmt(alpha)
+			+ "; age=24; light=1.0; gravity=0; friction=1.0;"
+			+ " vx=(random()-0.5)*0.06; vy=0.02+random()*0.05; vz=(random()-0.5)*0.24\" "
+			+ "0.5 0.12 3.0 44 \"size=2.6*exp(-1.5*t/24)\" 1.0";
+	}
+
+	/**
+	 * 挂一场：把三个组的旧粒子收掉，按本场剂量重挂。
+	 *
+	 * <p>⚠ 只在**场次边界 / Restart / 手动**调用。`group remove` 只动场景层自己的组名，
+	 * 不会碰到正在扩散的音符盒心跳（那是无组短命粒子）。
+	 */
+	private static void applyScene(ServerWorld world, double now, boolean force) {
+		int idx = sceneAt(now);
+		if (!force && idx == sceneIdx) return;
+		sceneIdx = idx;
+		Scene sc = SCENES[idx];
+		double front = playheadX(now) + sp("river_lead");
+		exec(world, "particlex group remove styx_river");
+		exec(world, "particlex group remove styx_curtain");
+		exec(world, "particlex group remove styx_helix");
+		double tone = 0.55 + 0.45 * sc.river();
+		double riverA = clamp(sp("river_base") * tone * sp("river_gain"), 0, 1);
+		double[] cr = tintRiver(sc), cc = tintCurtain(sc), ch = tintHelix(sc);
+		if (riverA > 0.02) {
+			int lanes = lanesFor(sc.river());
+			for (int i = 0; i < lanes; i++) {
+				double z = RIVER_LANES[i];
+				exec(world, riverBand(z, i * 1.7, front, cr[0], cr[1], cr[2], riverA));
+			}
+		}
+		double helixA = clamp(sp("helix_base") * tone * sp("helix_gain"), 0, 1);
+		if (sc.helix() >= 0.28 && helixA > 0.02) {
+			exec(world, helixBand(0.0, front, ch[0], ch[1], ch[2], helixA,
+				sp("helix_radius"), sp("helix_height")));
+			if (sc.helix() >= 0.60)
+				exec(world, helixBand(3.1416, front, ch[0], ch[1], ch[2], helixA * 0.85,
+					sp("helix_radius") * 0.86, sp("helix_height") * 1.05));
+		}
+		double curtainA = clamp(sp("curtain_base") * (0.55 + 0.45 * sc.curtain()) * sp("curtain_gain"), 0, 1);
+		if (curtainA > 0.02 && sc.curtain() >= 0.05) {
+			for (String c : curtain(front, cc[0], cc[1], cc[2], curtainA)) exec(world, c);
+			curtainAt = now;
+		}
+		NbmachinaMod.LOGGER.info("[styxshow] 场景层 → {}（{}-{}s；河 {} 条 α{} / 光幕 α{} / 螺旋 α{}，色 {}/{}/{}）",
+			sc.id(), fmt(sc.t0()), fmt(sc.t1()), lanesFor(sc.river()), fmt(riverA),
+			fmt(curtainA), fmt(helixA), fmt(sc.r()), fmt(sc.g()), fmt(sc.b()));
+	}
+
+	/** 场景层总报告（`/nbm scene`）。 */
+	public static String sceneReport() {
+		StringBuilder sb = new StringBuilder("场景层：" + (sceneOn ? "开" : "关")
+			+ "，当前 " + (sceneIdx >= 0 ? SCENES[sceneIdx].id() : "未挂")
+			+ "，预设 " + scenePresetName);
+		for (var e : SCENE_PARAMS.entrySet()) {
+			sb.append('\n').append(e.getKey()).append('=')
+				.append(fmt(e.getValue()))
+				.append(e.getValue().equals(SCENE_DEFAULTS.get(e.getKey())) ? "" : " *");
+		}
+		sb.append("\n（带 * = 与默认值不同；预设：" + String.join(" / ", SCENE_PRESETS.keySet()) + "）");
+		return sb.toString();
+	}
+
+	public static boolean sceneEnabled() {
+		return sceneOn;
+	}
+
+	/** 开关场景层；打开时立刻按当前时刻重挂。 */
+	public static void setSceneOn(ServerWorld world, boolean on) {
+		sceneOn = on;
+		if (!on) {
+			exec(world, "particlex group remove styx_river");
+			exec(world, "particlex group remove styx_curtain");
+			exec(world, "particlex group remove styx_helix");
+			sceneIdx = -1;
+		} else if (active) {
+			applyScene(world, showNow, true);
+		}
+	}
+
+	public static boolean setSceneParam(String key, double value) {
+		if (!SCENE_PARAMS.containsKey(key)) return false;
+		SCENE_PARAMS.put(key, value);
+		return true;
+	}
+
+	public static String scenePresetList() {
+		return "场景预设：" + String.join(" / ", SCENE_PRESETS.keySet()) + "（当前 " + scenePresetName + "）";
+	}
+
+	public static boolean setScenePreset(ServerWorld world, String name) {
+		java.util.Map<String, Double> p = SCENE_PRESETS.get(name);
+		if (p == null) return false;
+		SCENE_PARAMS.putAll(SCENE_DEFAULTS);
+		SCENE_PARAMS.putAll(p);
+		scenePresetName = name;
+		sceneOn = sp("river_gain") > 0.02 || sp("curtain_gain") > 0.02
+			|| sp("helix_gain") > 0.02;   // scene-off 预设：连开关一起关掉
+		if (active) applyScene(world, showNow, true);
+		return true;
+	}
+
+	/** `/nbm scene at <秒>`：按给定的谱面秒数直接挂对应场（不动机器，只动场景层）。 */
+	public static String sceneAtReport(ServerWorld world, double sec) {
+		applyScene(world, sec, true);
+		return "场景层按 " + fmt(sec) + "s 挂成 " + SCENES[sceneAt(sec)].id();
+	}
+
+	private static double clamp(double v, double lo, double hi) {
+		return v < lo ? lo : v > hi ? hi : v;
+	}
+
 	// ───────────────────────── 生命周期 ─────────────────────────
 
 	private static void load(Path gameDir) {
@@ -781,17 +1090,13 @@ public final class StyxShow {
 		failed = 0;
 		pending.clear();
 		accCursor = firstAtOrAfter(doc.accents, fromSec);
-
-		exec(world, river());
-		if (AMBIENT_ON) {
-			exec(world, riverLane(-8.0));
-			exec(world, riverLane(8.0));
-			exec(world, helix(0.0));
-			exec(world, helix(3.1416));
-		}
+		waveCursor = firstAtOrAfter(doc.accents, fromSec);
+		cueCursor = firstAtOrAfter(RESTARTS, fromSec);
+		sceneIdx = -1;
+		if (sceneOn) applyScene(world, fromSec, true);
 		if (fromSec < 3.5) opening(world, fromSec);
-		NbmachinaMod.LOGGER.info("[styxshow] 视效层启动：从 {}s 起（重音剩 {}；歌词改在剪辑层，不在游戏内出画）",
-			fromSec, doc.accents.length - accCursor);
+		NbmachinaMod.LOGGER.info("[styxshow] 视效层启动：从 {}s 起（重音剩 {}；场景层 {}；歌词改在剪辑层，不在游戏内出画）",
+			fromSec, doc.accents.length - accCursor, sceneOn ? "开" : "关");
 	}
 
 	/**
@@ -931,8 +1236,27 @@ public final class StyxShow {
 				}
 			}
 		}
-		// 歌词/译文粒子已按 2026-09-25 用户口径**整体移除**（改在剪辑层做，见类注释）；
-		// 重音"大圆环"也在 2026-09-24 删掉了：styxshow.json 里的 accents 数据保留但不出画。
+		// 歌词/译文粒子已按 2026-09-25 用户口径**整体移除**（改在剪辑层做，见类注释）。
+		if (!sceneOn) return;
+		// ① 场次切换：只动场景层自己那三组（音符盒心跳是无组短命粒子，不会被碰）
+		applyScene(world, now, false);
+		// ② 重音横波：把 141 个真实重音变成河面上"向两侧推开的一道波"
+		double accentA = clamp(sp("accent_base") * sp("accent_gain"), 0, 1);
+		if (accentA > 0.02) {
+			int guard = 0;
+			while (waveCursor < doc.accents.length && doc.accents[waveCursor] <= now && guard++ < 8) {
+				double at = doc.accents[waveCursor++];
+				Scene c = SCENES[sceneAt(at)];
+				exec(world, accentWave(playheadX(at), c.r(), c.g(), c.b(),
+					accentA * (0.55 + 0.45 * c.curtain())));
+			}
+		}
+		// ③ 三个 Restart（80.47 / 154.54 / 216.95）：全场重挂一次 —— 读起来像"退回去重新亮起来"
+		while (cueCursor < RESTARTS.length && RESTARTS[cueCursor] <= now) {
+			cueCursor++;
+			applyScene(world, now, true);
+			NbmachinaMod.LOGGER.info("[styxshow] Restart 重挂场景层（{}s）", fmt(now));
+		}
 	}
 
 	public static void noteFlare(ServerWorld world, int x, int y, int z, int midi, int velocity, boolean bass) {
@@ -1096,9 +1420,12 @@ public final class StyxShow {
 	/** 命令自检：每类模板各拿一条真去 Brigadier 解析（`/nbm machine showcheck`） */
 	public static String selfCheck(ServerCommandSource src) {
 		List<String> cmds = new ArrayList<>();
-		cmds.add(river());
-		cmds.add(riverLane(-8.0));
-		cmds.add(helix(0.0));
+		cmds.add(riverBand(ZC, 0.0, 0.0, 0.34, 0.78, 1.0, 0.42));
+		cmds.add(riverBand(ZC - 1.2, 1.7, 0.0, 0.34, 0.78, 1.0, 0.42));
+		java.util.Collections.addAll(cmds, curtain(0.0, 0.34, 0.78, 1.0, 0.75));
+		cmds.add(helixBand(0.0, 0.0, 0.34, 0.78, 1.0, 0.70, 8.0, 2.4));
+		cmds.add(helixBand(3.1416, 0.0, 0.34, 0.78, 1.0, 0.60, 6.9, 2.5));
+		cmds.add(accentWave(0.0, 0.34, 0.78, 1.0, 0.62));
 		cmds.add(coverPlate(-10.0, 115.0, ZC, 40, true, OPEN_TEXT_IN_SEC));
 		cmds.add(textPlate(-10.0, 119.9, ZC, 40, true, OPEN_TEXT_IN_SEC));
 		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, -14.0, 111.0, ZC - 4.0,
@@ -1127,8 +1454,12 @@ public final class StyxShow {
 				if (firstErr == null) firstErr = e.toString() + "  ←  " + c;
 			}
 		}
-		if (firstErr == null) return String.format("命令自检：%d/%d 条全部通过 ✓", ok, cmds.size());
-		return String.format("命令自检：%d/%d 条通过；第一条失败：%s", ok, cmds.size(), firstErr);
+		// 自检结果同时落日志：本机窗口经常被压在别的程序后面，聊天栏里的回执在自动化时读不到
+		String res = firstErr == null
+			? String.format("命令自检：%d/%d 条全部通过 ✓", ok, cmds.size())
+			: String.format("命令自检：%d/%d 条通过；第一条失败：%s", ok, cmds.size(), firstErr);
+		NbmachinaMod.LOGGER.info("[styxshow] {}", res);
+		return res;
 	}
 
 	// ── 工具 ──
@@ -1153,6 +1484,13 @@ public final class StyxShow {
 
 	private static String fmt(double v) {
 		String s = String.format("%.3f", v);
+		while (s.contains(".") && (s.endsWith("0") || s.endsWith("."))) s = s.substring(0, s.length() - 1);
+		return s.isEmpty() ? "0" : s;
+	}
+
+	/** 六位小数：给"每颗的步进"这种**累加量**用（三位小数会让光带每秒飘 1 厘米级 → 全曲飘一格）。 */
+	private static String fmt6(double v) {
+		String s = String.format("%.6f", v);
 		while (s.contains(".") && (s.endsWith("0") || s.endsWith("."))) s = s.substring(0, s.length() - 1);
 		return s.isEmpty() ? "0" : s;
 	}
