@@ -741,7 +741,8 @@ public final class StyxShow {
 				double delay = OPEN_TILE_STAGGER_SEC * (col + row);
 				double u0 = col / (double) PLATE_TILES, u1 = (col + 1) / (double) PLATE_TILES;
 				double v0 = row / (double) PLATE_TILES, v1 = (row + 1) / (double) PLATE_TILES;
-				int growAge = ticks(delay + OPEN_TILE_GROW_SEC) + 4;
+				// 出现那 16 块要**活到退场那一刻**（delay 只挪动"长出来"的时机，不影响寿命）
+				int growAge = ticks(OPEN_COVER_OUT_AT - OPEN_PLATE_IN_AT) + 4;
 				int shrinkAge = ticks(delay + OPEN_TILE_SHRINK_SEC) + 4;
 				// 出现
 				pending.add(new Pending(atSec + OPEN_PLATE_IN_AT, () -> {
