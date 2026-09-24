@@ -76,11 +76,14 @@ function opening(EYE, yaw) {
   const fx = -Math.sin(yaw), fz = Math.cos(yaw), rx = -fz, rz = fx;
   const ax = EYE[0] + fx * OPEN_DIST, ay = EYE[1] + 0.5, az = EYE[2] + fz * OPEN_DIST;
   const plane = (cx, w, h, tag) => {
-    for (let i = 0; i <= 40; i++) {          // 只画四边，够看位置与朝向
-      const us = -w / 2 + (i / 40) * w, vs = -h / 2 + (i / 40) * h;
-      for (const [du, dv] of [[us, -h/2], [us, h/2], [-w/2, vs], [w/2, vs]])
-        P.push({ k: tag, x: cx[0] + rx*du, y: cx[1] + dv, z: cx[2] + rz*du, dx: 0, dy: 0, dz: 0,
-          col: tag === "cover" ? [0.9, 0.9, 0.9] : [1, 1, 1], age: 0, life: 90, d: 1 });
+    // ⚠ 用**精灵覆盖格**（不是像素格）采样：封面点距 0.0625 格但精灵只有 0.25 格，
+    //    所以有效采样 ~4/格；这样"点太小→整片看不见/有洞"在预演里就能看出来。
+    const step = tag === "cover" ? 0.25 : 0.12;
+    for (let u = -w / 2; u <= w / 2 + 1e-6; u += step) {
+      for (let v = -h / 2; v <= h / 2 + 1e-6; v += step) {
+        P.push({ k: tag, x: cx[0] + rx*u, y: cx[1] + v, z: cx[2] + rz*u, dx: 0, dy: 0, dz: 0,
+          col: tag === "cover" ? [0.86, 0.88, 0.92] : [1, 1, 1], age: 0, life: 90, d: 1 });
+      }
     }
   };
   plane([ax, ay, az], 8, 8, "cover");

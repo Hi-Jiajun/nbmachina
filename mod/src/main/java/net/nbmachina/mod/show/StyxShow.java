@@ -160,7 +160,10 @@ public final class StyxShow {
 		String p = "clamp((t-(2+((1-dy/8)*1.05)))/0.65,0,1)";
 		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
 			+ " styx-cover-128.png 1.0 \"" + openingMatrix + "\" " + fmt(COVER_DPB) + " 0 0 0 90 "
-			+ "\"alpha=clamp(t/0.45,0,1)*(1-" + p + "); vx=0.12*" + p + "; vy=0.03*" + p + "\" 0.05";
+			// ⚠ **必须写 size**：封面点距 1/16=0.0625 格，而 end_rod 精灵又小又淡——
+			//   实测（2026-09-24 文件通道 A/B）不写 size 或只给 1.0 时，同样距离**整片看不见**，
+			//   看起来就是用户说的"封面缺画面"。size=2.0（0.25 格 ≈ 4× 点距）才有稳定可见的覆盖。
+			+ "\"size=2.0; alpha=clamp(t/0.45,0,1)*(1-" + p + "); vx=0.12*" + p + "; vy=0.03*" + p + "\" 0.05";
 	}
 
 	/**
