@@ -217,9 +217,9 @@ public final class StyxShow {
 	private static final double OPEN_COVER_OUT_SEC = 0.80;
 	private static final double OPEN_TEXT_OUT_AT = OPEN_COVER_OUT_AT;
 	private static final double OPEN_TEXT_OUT_SEC = OPEN_COVER_OUT_SEC;
-	/** 点阵分批生成：每 0.05s（1 刻）铺一条，12 条铺完 0.60-1.20s。 */
+	/** 点阵分批生成：每 0.075s 铺一条（"逐行打点"的打印感），12 条铺完 0.60-1.43s。 */
 	private static final double OPEN_DOT_SPAWN_AT = 0.60;
-	private static final double OPEN_DOT_SPAWN_STEP = 0.05;
+	private static final double OPEN_DOT_SPAWN_STEP = 0.075;
 	private static final int OPEN_DOT_BANDS = 12;
 	/** 点阵开始消散的时刻（所有条带同时开始，只是各自的 t 起点不同）与消散时长、每格半径的错开量。 */
 	private static final double OPEN_DOT_DISSOLVE_AT = OPEN_COVER_OUT_AT + OPEN_COVER_OUT_SEC;   // 3.10s
@@ -264,6 +264,12 @@ public final class StyxShow {
 	/** 卡片平面内偏移（格，沿 +z = 相机右）：封面在左、文案块在右，整组大致居中。 */
 	private static final double OPEN_COVER_H = -6.5;
 	private static final double OPEN_TEXT_H = 7.4;
+	/**
+	 * 点阵层相对封面的**右移量**（格）。用户 2026-09-24 口径："之前那种向右偏移逐行打点出来的点阵
+	 * 还蛮有感觉的……只是把点阵的图层放在文字和封面之后"——即点阵故意偏到封面右侧，
+	 * 但它必须**排在后层**：被封面和文字挡住的部分不显示，只在空白处铺开。
+	 */
+	private static final double OPEN_DOT_SHIFT_H = 6.5;
 	/**
 	 * 点阵比清晰板靠后多少格：交叉过渡靠"清晰板淡出露出点阵"，避免半透明叠色（开光影会变麻点）。
 	 * ⚠ 镜头从 −x 方向飞来，所以"更远"= **更大** 的 x：点阵要放在 {@code ax + OPEN_DOT_BACK}。
@@ -603,7 +609,7 @@ public final class StyxShow {
 		String coverLock = OPEN_SCREEN_ANCHOR ? anchorTo(OPEN_AHEAD, OPEN_COVER_H, 0.2, fx, fz, rx, rz) : "";
 		String textLock = OPEN_SCREEN_ANCHOR ? anchorTo(OPEN_AHEAD, OPEN_TEXT_H, 0.2, fx, fz, rx, rz) : "";
 		String dotLock = OPEN_SCREEN_ANCHOR
-			? anchorCloud(OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H, 0.2, fx, fz, rx, rz) : "";
+			? anchorCloud(OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H + OPEN_DOT_SHIFT_H, 0.2, fx, fz, rx, rz) : "";
 		// ① 两片清晰板：淡入一颗 + 到交叉点换成只淡出的新一颗（复合 clamp 实测整颗不渲染，见 plateFade）
 		pending.add(new Pending(atSec + OPEN_IN_AT[0], coverPlate(coverX, ay, coverZ, ticks(OPEN_COVER_OUT_AT - OPEN_IN_AT[0]),
 			true, OPEN_PLATE_IN_SEC, coverLock)));
@@ -619,8 +625,10 @@ public final class StyxShow {
 			double holdSec = OPEN_DOT_DISSOLVE_AT - spawnAt;
 			int age = ticks(OPEN_DOT_END_AT - spawnAt) + 6;
 			String img = COVER_GRID_IMAGE + String.format("%02d", i) + ".png";
+			// 发射位置 = 封面中心沿右向再偏 OPEN_DOT_SHIFT_H、沿前方再退 OPEN_DOT_BACK（只能被挡住，不能挡人）
 			pending.add(new Pending(atSec + spawnAt, dotBand(img, COVER_DPB, COVER_DOT_SIZE,
-				coverX + fx * OPEN_DOT_BACK, ay, coverZ + fz * OPEN_DOT_BACK, coverM, age, holdSec,
+				coverX + fx * OPEN_DOT_BACK + rx * OPEN_DOT_SHIFT_H, ay,
+				coverZ + fz * OPEN_DOT_BACK + rz * OPEN_DOT_SHIFT_H, coverM, age, holdSec,
 				OPEN_DOT_FADE_SEC, OPEN_DOT_STAGGER_SEC, dotLock)));
 		}
 		NbmachinaMod.LOGGER.info("[styxshow] 开场卡片（{}）：机位 yaw {} → 锚点 ({}, {}, {})，封面 ({}, {}, {}) 文案 ({}, {}, {})，{} 格前方，{} 条点阵",
