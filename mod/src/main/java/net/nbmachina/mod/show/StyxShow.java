@@ -75,6 +75,9 @@ public final class StyxShow {
 	private static boolean active = false;
 	private static int accCursor = 0;
 	private static int lineCursor = 0;
+	/** 开场"延迟生成"队列（视效层时间 → 命令）：用生成时刻 + age 控寿命，避免写动态 alpha 窗口。 */
+	private record Pending(double at, String cmd) {}
+	private static final List<Pending> pending = new ArrayList<>();
 	private static int sent = 0;
 	private static int failed = 0;
 	/** 歌词整体提前/延后（秒，正数 = 更晚出现）：现场微调用 `/nbm machine lyricoff <秒>` */
@@ -149,6 +152,31 @@ public final class StyxShow {
 	/** 封面 8 格见方（贴图 2048²）；size 的单位是 1/8 格，所以 8 格 → size=64。 */
 	private static final double COVER_W = 8.0;
 	private static final double PLATE_SIZE = COVER_W * 8.0;
+	/**
+	 * 接管时间表（2026-09-24 第三轮实测后定稿：**不再写动态 alpha 窗口**）：
+	 *
+	 * <pre>
+	 * +0.45s  清晰板生成（alpha=1 恒定，age=45 刻 → 2.70s 自动消失）
+	 * +2.50s  点阵生成（自己从 t=0 淡入 0.3s，然后逐像素吹散；age=34 刻 → 4.20s）
+	 * 3.917s  第一颗音
+	 * </pre>
+	 *
+	 * 两个坑（都是实机取证）：
+	 * <ol>
+	 *   <li>开光影时**半透明粒子会被渲染成抖动麻点**（alpha≈0.7 的封面整块变细密噪点，
+	 *       alpha=1 的同一张图干净）→ 清晰板必须整段 alpha=1，淡入淡出交给点阵；</li>
+	 *   <li>带 clamp 的**动态 alpha 窗口**在同一会话里时灵时不灵（同一串命令前一次能出、后一次全灭），
+	 *       所以改成"**用 age 控制存活时间**、靠时间点切换"，命令里只留 `size=…; alpha=1` 和
+	 *       旧版验证过的淡入+吹散表达式。</li>
+	 * </ol>
+	 */
+	private static final double COVER_PLATE_AT = 0.45;
+	private static final int COVER_PLATE_AGE = 45;
+	private static final double COVER_SCATTER_AT = 2.50;
+	private static final int COVER_SCATTER_AGE = 34;
+	private static final double COVER_DPB = 24.0;
+	private static final double TITLE_DPB = 48.0, TITLE_W = 8.0;
+	private static final double SUB_DPB = 48.0, SUB_W = 256.0 / SUB_DPB;
 	/** 开场距离：整组浮在玩家眼前，跟着机位走（不再依赖"玩家正好飞到某个坐标"） */
 	private static final double OPEN_DIST = 13.5;
 
@@ -165,36 +193,60 @@ public final class StyxShow {
 			+ " styx-1px.png 1.0 \"E4\" 1 0 0 0 " + age + " \"" + anim + "\" 1.0";
 	}
 
-	/** 主标题：淡入 0.5s → 2.9s 起淡出，同时沿机头方向轻微漂走 */
-	private static String title(double cx, double cy, double cz, double dx, double dz) {
-		String p = "clamp((t-2.9)/0.7,0,1)";
-		return plate(TITLE_BLOCK, cx, cy, cz, 90,
-			"size=" + fmt(PLATE_SIZE) + "; light=1.0;"
-				+ " alpha=clamp(t/0.5,0,1)*(1-" + p + ");"
-				+ " vx=" + fmt(dx * 0.06) + "*" + p + "; vz=" + fmt(dz * 0.06) + "*" + p);
+	/**
+	 * 主标题：清晰板 0–2.6s（淡入 0.5s → 2.6s 起淡出）。
+	 *
+	 * <p>2026-09-24 用户反馈"闪一下就没了"后，开场改成**两段接力**：
+	 * 前段用清晰四边形（清晰度=贴图分辨率），后段在 2.5s 交叉回点阵做逐像素吹散——
+	 * 点阵那段刻意保留旧版的 soft 精灵，因为它负责的是"碎开"而不是"看清"。
+	 */
+	private static String title(double cx, double cy, double cz) {
+		return plate(TITLE_BLOCK, cx, cy, cz, 48,
+			"size=" + fmt(PLATE_SIZE) + "; light=1.0; alpha=1");
 	}
 
-	private static String subtitle(double cx, double cy, double cz, double dx, double dz) {
-		String p = "clamp((t-3.0)/0.7,0,1)";
-		return plate(SUB_BLOCK, cx, cy, cz, 95,
-			"size=" + fmt(PLATE_SIZE) + "; light=1.0;"
-				+ " alpha=clamp((t-0.45)/0.5,0,1)*(1-" + p + ");"
-				+ " vx=" + fmt(dx * 0.06) + "*" + p + "; vz=" + fmt(dz * 0.06) + "*" + p);
+	private static String subtitle(double cx, double cy, double cz) {
+		return plate(SUB_BLOCK, cx, cy, cz, 50,
+			"size=" + fmt(PLATE_SIZE) + "; light=1.0; alpha=1");
 	}
 
 	/**
-	 * 专辑封面：一整张贴图 8 格见方，正对镜头（billboard）。
+	 * 专辑封面：一整张贴图 8 格见方、正对镜头（billboard），**持有 0–2.0s**。
 	 *
-	 * <p>动效（对齐用户"整体动效要连贯顺滑"的口径）：① 0–0.45s 淡入；
-	 * ② 1.9s 起边淡出边沿机头方向漂走、同时轻微放大一点点（1.06×）；③ 3.2s 前散尽。
-	 * 旧版"按行从上往下逐像素吹散"依赖点阵，一图一四边形后做不到逐像素，改为整体漂移 + 淡出。
+	 * <p>之后由 {@link #coverGrid} 的**点阵**接棒做逐像素吹散：两段在 1.9–2.7s 交叉，
+	 * 视觉上是"先看清 → 再碎开"，全程约 3.9s（第一颗音 3.917s）。
 	 */
-	private static String cover(double cx, double cy, double cz, double dx, double dz) {
-		String p = "clamp((t-1.9)/1.3,0,1)";
-		return plate(COVER_BLOCK, cx, cy, cz, 110,
-			"size=" + fmt(PLATE_SIZE) + "*(1+0.06*" + p + "); light=1.0;"
-				+ " alpha=clamp(t/0.45,0,1)*(1-" + p + ");"
-				+ " vx=" + fmt(dx * 0.09) + "*" + p + "; vz=" + fmt(dz * 0.09) + "*" + p);
+	private static String cover(double cx, double cy, double cz) {
+		return plate(COVER_BLOCK, cx, cy, cz, COVER_PLATE_AGE,
+			"size=" + fmt(PLATE_SIZE) + "; light=1.0; alpha=1");
+	}
+
+	/**
+	 * 点阵接棒体：**沿用旧版口径**（锚点=图像左下角、dpb/size/淡入+逐像素吹散表达式都是原来的），
+	 * 自己从 t=0 起算，所以生成时刻由 {@code opening()} 用"延迟生成 + age 控寿命"来排。
+	 */
+	private static String coverGrid(double ax, double ay, double az, String matrix) {
+		String p = "clamp((t-((1-dy/8)*0.60))/0.70,0,1)";
+		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
+			+ " styx-cover-192.png 1.0 \"" + matrix + "\" " + fmt(COVER_DPB) + " 0 0 0 " + COVER_SCATTER_AGE + " "
+			+ "\"size=2.2; alpha=clamp(t/0.30,0,1)*(1-" + p + ");"
+			+ " vx=0.12*" + p + "; vy=0.03*" + p + "\" 0.05";
+	}
+
+	private static String titleGrid(double ax, double ay, double az, String matrix) {
+		String p = "clamp((t-0.35)/0.75,0,1)";
+		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
+			+ " title.png 1.0 \"" + matrix + "\" " + fmt(TITLE_DPB) + " 0 0 0 30 "
+			+ "\"size=0.7; alpha=clamp(t/0.30,0,1)*(1-" + p + ");"
+			+ " vx=0.06*" + p + "\" 0.05";
+	}
+
+	private static String subtitleGrid(double ax, double ay, double az, String matrix) {
+		String p = "clamp((t-0.40)/0.75,0,1)";
+		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
+			+ " subtitle.png 1.0 \"" + matrix + "\" " + fmt(SUB_DPB) + " 0 0 0 32 "
+			+ "\"size=0.7; alpha=clamp(t/0.30,0,1)*(1-" + p + ");"
+			+ " vx=0.06*" + p + "\" 0.05";
 	}
 
 	/**
@@ -375,6 +427,7 @@ public final class StyxShow {
 		active = true;
 		sent = 0;
 		failed = 0;
+		pending.clear();
 		accCursor = firstAtOrAfter(doc.accents, fromSec);
 		lineCursor = 0;
 		while (lineCursor < doc.lines.size() && doc.lines.get(lineCursor).t() + lyricOffset < fromSec) lineCursor++;
@@ -386,7 +439,7 @@ public final class StyxShow {
 			exec(world, helix(0.0));
 			exec(world, helix(3.1416));
 		}
-		if (fromSec < 3.5) opening(world);
+		if (fromSec < 3.5) opening(world, fromSec);
 		NbmachinaMod.LOGGER.info("[styxshow] 视效层启动：从 {}s 起（重音剩 {} / 歌词剩 {} 行，整体平移 {:+}s）",
 			fromSec, doc.accents.length - accCursor, doc.lines.size() - lineCursor, lyricOffset);
 	}
@@ -399,7 +452,7 @@ public final class StyxShow {
 	 * 封面/标题整段缺失）；改成「眼位 + 朝向 × 13.5 格」后，无论从哪儿起播都在视野正中，
 	 * 三个元素的偏移量都沿相机上方向量算，因此**严格共面**（用户：封面和标题应该在同一平面）。
 	 */
-	private static void opening(ServerWorld world) {
+	private static void opening(ServerWorld world, double atSec) {
 		var players = world.getServer().getPlayerManager().getPlayerList();
 		if (players.isEmpty()) {
 			NbmachinaMod.LOGGER.info("[styxshow] 没有玩家 → 跳过开场三件套");
@@ -415,9 +468,19 @@ public final class StyxShow {
 		double ax = p.getX() + fx * OPEN_DIST, ay = p.getEyeY() + 0.5, az = p.getZ() + fz * OPEN_DIST;
 		// 一图一四边形：**位置就是画面中心**（billboard 自己正对镜头，不需要矩阵摆朝向）。
 		// 标题在封面上方 4.9 格、副标题在下方 4.9 格（封面半高 4 格 + 0.9 格间距），三者同平面。
-		exec(world, cover(ax, ay, az, fx, fz));
-		exec(world, title(ax, ay + 4.9, az, fx, fz));
-		exec(world, subtitle(ax, ay - 4.9, az, fx, fz));
+		// 清晰板**延迟到 +0.45~0.60s** 生成（前面那一小段由点阵淡入顶着），用 age 控寿命。
+		pending.add(new Pending(atSec + COVER_PLATE_AT, cover(ax, ay, az)));
+		pending.add(new Pending(atSec + 0.55, title(ax, ay + 4.9, az)));
+		pending.add(new Pending(atSec + 0.60, subtitle(ax, ay - 4.9, az)));
+		// 点阵接棒（+2.5s 起逐像素吹散）：锚点是**图像左下角**，位置按相机右/上向量退半格。
+		String matrix = "(" + fmt(rx) + ",0,0,0,,0,1,0,0,," + fmt(rz) + ",0,0,0,,0,0,0,1)";
+		double c = COVER_W / 2;
+		pending.add(new Pending(atSec + COVER_SCATTER_AT,
+			coverGrid(ax - rx * c, ay - c, az - rz * c, matrix)));
+		pending.add(new Pending(atSec + COVER_SCATTER_AT + 0.20,
+			titleGrid(ax - rx * (TITLE_W / 2), ay + c + 0.8, az - rz * (TITLE_W / 2), matrix)));
+		pending.add(new Pending(atSec + COVER_SCATTER_AT + 0.30,
+			subtitleGrid(ax - rx * (SUB_W / 2), ay - c - 1.1, az - rz * (SUB_W / 2), matrix)));
 		NbmachinaMod.LOGGER.info("[styxshow] 开场三件套：机位 yaw {} pitch {} → 锚点 ({}, {}, {})（{} 格外）",
 			fmt(p.getYaw()), fmt(p.getPitch()), fmt(ax), fmt(ay), fmt(az), fmt(OPEN_DIST));
 	}
@@ -431,6 +494,15 @@ public final class StyxShow {
 
 	public static void tick(ServerWorld world, double now) {
 		if (!active || doc == null) return;
+		if (!pending.isEmpty()) {
+			for (int i = pending.size() - 1; i >= 0; i--) {
+				Pending p = pending.get(i);
+				if (p.at() <= now) {
+					exec(world, p.cmd());
+					pending.remove(i);
+				}
+			}
+		}
 		double nowLyric = now - lyricOffset;
 		while (accCursor < doc.accents.length && doc.accents[accCursor] <= now) {
 			exec(world, accentRing(doc.accents[accCursor]));
@@ -503,9 +575,13 @@ public final class StyxShow {
 		cmds.add(river());
 		cmds.add(riverLane(-8.0));
 		cmds.add(helix(0.0));
-		cmds.add(cover(-10.0, 115.0, ZC, 1.0, 0.0));
-		cmds.add(title(-10.0, 119.9, ZC, 1.0, 0.0));
-		cmds.add(subtitle(-10.0, 110.1, ZC, 1.0, 0.0));
+		String demoMatrix = MATRICES[0];
+		cmds.add(cover(-10.0, 115.0, ZC));
+		cmds.add(title(-10.0, 119.9, ZC));
+		cmds.add(subtitle(-10.0, 110.1, ZC));
+		cmds.add(coverGrid(-14.0, 111.0, ZC - 4.0, demoMatrix));
+		cmds.add(titleGrid(-14.0, 119.9, ZC - 4.0, demoMatrix));
+		cmds.add(subtitleGrid(-14.0, 110.1, ZC - 1.3, demoMatrix));
 		cmds.add(flareEdges(0.5, 110.5, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareRipple(0.5, 111.0, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.5, -5.5));
