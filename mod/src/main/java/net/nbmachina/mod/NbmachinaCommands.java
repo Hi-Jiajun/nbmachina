@@ -156,7 +156,12 @@ public final class NbmachinaCommands {
 				.then(CommandManager.literal("lead")
 					.executes(ctx -> machineLead(ctx.getSource(), null))
 					.then(CommandManager.argument("ticks", IntegerArgumentType.integer(0, 20))
-						.executes(ctx -> machineLead(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "ticks"))))))
+						.executes(ctx -> machineLead(ctx.getSource(), IntegerArgumentType.getInteger(ctx, "ticks")))))
+				// M5-35：涟漪起伏开关（现场 A/B 用）：on = 带上下起伏（默认）、off = 纯平涟漪
+				.then(CommandManager.literal("ripplebob")
+					.executes(ctx -> machineRippleBob(ctx.getSource(), null))
+					.then(CommandManager.literal("on").executes(ctx -> machineRippleBob(ctx.getSource(), true)))
+					.then(CommandManager.literal("off").executes(ctx -> machineRippleBob(ctx.getSource(), false)))))
 			.then(CommandManager.literal("note")
 				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
 					.executes(ctx -> note(ctx, 1.0F, 1.0F))
@@ -281,6 +286,16 @@ public final class NbmachinaCommands {
 	private static int machineStop(ServerCommandSource source) {
 		net.nbmachina.mod.machine.NbmachinaMachine.stop(source.getWorld());
 		source.sendFeedback(() -> Text.literal("[nbmachina] 机器驱动：已停止"), true);
+		return 1;
+	}
+
+	/** M5-35：涟漪是否带上下起伏（现场 A/B 两个预设）。 */
+	private static int machineRippleBob(ServerCommandSource source, Boolean on) {
+		boolean value = on != null ? on : !net.nbmachina.mod.show.StyxShow.rippleBob();
+		net.nbmachina.mod.show.StyxShow.setRippleBob(value);
+		source.sendFeedback(() -> Text.literal("[nbmachina] 涟漪起伏：" + (value
+			? "开（水波带上下起伏）"
+			: "关（纯平涟漪）")), true);
 		return 1;
 	}
 

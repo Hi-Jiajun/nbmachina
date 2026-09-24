@@ -515,6 +515,14 @@ public final class StyxShow {
 	 * 漂移 0.10 → **0.16**（"让颜色有流动的感觉"）。
 	 */
 	private static final double NEON_WAVELEN = 9.0, NEON_DRIFT = 0.16;
+	/**
+	 * 彩虹的亮度口径：通道 = {@code RAIN_BIAS + RAIN_SCALE*(0.5+0.5*sin(...))}。
+	 * 0.8.8 初版用 0.18/0.78（通道上界 0.96）→ 三通道和为 1.7，比旧的 HSV val 0.58 亮一大截，
+	 * 实机被 Iris 泛光糊成一圈厚"甜甜圈"；收到 0.14/0.62（上界 0.76、和 ≈1.3）才恢复"细环"。
+	 */
+	private static final double RAIN_BIAS = 0.14, RAIN_SCALE = 0.62;
+	/** 涟漪是否带上下起伏（`/nbm machine ripplebob on|off`，现场 A/B 用）。 */
+	private static boolean rippleBob = true;
 	/** 粒子固定色（用户 v4 口径："粒子颜色就纯金色或者白色即可"）。 */
 	private static final String GOLD = "1.000,0.820,0.330", PLATINUM = "1.000,0.960,0.880";
 	/**
@@ -538,24 +546,6 @@ public final class StyxShow {
 		return "(0," + fmt(sx) + ",0," + fmt(-half * sx + offX * RING_DPB) + ",,0,0,0,0,,"
 			+ fmt(-sz) + ",0,0," + fmt(half * sz + offZ * RING_DPB) + ",,0,0,0,1)";
 	}
-	/** 颜色缩放（通道 ×f，钳到 1）：同一个音高用不同亮度区分棱框 / 表面光 / 水波 / 迸溅 / 火花。 */
-	private static String tint(String col, double f) {
-		String[] p = col.split(",");
-		double r = Math.min(1.0, Double.parseDouble(p[0]) * f);
-		double g = Math.min(1.0, Double.parseDouble(p[1]) * f);
-		double b = Math.min(1.0, Double.parseDouble(p[2]) * f);
-		return fmt(r) + "," + fmt(g) + "," + fmt(b);
-	}
-
-	/** 往白里拉 f（0..1）：参考 sonic-topography 的"snare = 锐白环、kick = 彩色环"两档口径，力度大的音更白更锐。 */
-	private static String whiten(String col, double f) {
-		String[] p = col.split(",");
-		double r = Double.parseDouble(p[0]) + (1.0 - Double.parseDouble(p[0])) * f;
-		double g = Double.parseDouble(p[1]) + (1.0 - Double.parseDouble(p[1])) * f;
-		double b = Double.parseDouble(p[2]) + (1.0 - Double.parseDouble(p[2])) * f;
-		return fmt(r) + "," + fmt(g) + "," + fmt(b);
-	}
-
 	/**
 	 * ① **12 条棱**（描边立方体）：从音符盒本体（1 格见方，半边长 0.5）起**等比例**往外扩
 	 * （`(vx,vy,vz)=(dx,dy,dz)*0.035` → 每刻 3.5%，近似等比），线本身就是"描边"——
@@ -568,13 +558,14 @@ public final class StyxShow {
 	 * <p>锚点给**方块中心**（y+0.5）：棱框就是方块本体那 12 条棱。0.7.9 曾把锚点抬到
 	 * y+1.5（顶面上方半格），整只框悬在方块上空一格 —— 用户要的是"体积从和音符盒一样大"。
 	 */
-	private static String flareEdges(double cx, double cy, double cz, String col) {
+	private static String flareEdges(double cx, double cy, double cz, double phase, double rate) {
 		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
-			+ " \"size=0.6; cr,cg,cb=" + col + "; alpha=1; age=22; light=1.0\" 0.5 0.5 0.5 "
+			+ " \"size=0.6; alpha=1; age=20; light=1.0\" 0.5 0.5 0.5 "
 			+ "\"abs(abs(x)-0.5)<0.01&abs(abs(y)-0.5)<0.01|abs(abs(x)-0.5)<0.01&abs(abs(z)-0.5)<0.01"
 			+ "|abs(abs(y)-0.5)<0.01&abs(abs(z)-0.5)<0.01\" 0.05 "
 			// v4：扩散系数 0.035 → 0.024（用户："音符盒的立方体扩散范围稍微小一点"）
-			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.024; size=0.6*(1-t/20)\" 1.0";
+			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.024; size=0.6*(1-t/20); "
+			+ rainbowExpr(phase, rate, RAIN_BIAS, RAIN_SCALE) + "\" 1.0";
 	}
 
 	/**
@@ -599,14 +590,15 @@ public final class StyxShow {
 	 * {@code 0.064*dx³} 让每颗沿自己的面法线慢慢往外飘 0.08 格 → 表面像"亮起来往外渗"。
 	 * 退场只缩 size、alpha 全程 1。
 	 */
-	private static String flareSurface(double cx, double cy, double cz, String col) {
+	private static String flareSurface(double cx, double cy, double cz, double phase, double rate) {
 		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
 			// v5（用户："面光要更透、更像一层薄光"）：size 1.75 → 1.05（点缩到 0.13 格，
 			// 在 0.125 格间距上刚好接触 → 能透出方块本身的贴图），并给 alpha 0.82 让它像"光膜"。
-			+ " \"size=1.05; cr,cg,cb=" + col + "; alpha=0.82; age=12; light=1.0\" 0.5 0.5 0.5 "
+			+ " \"size=1.05; alpha=0.82; age=12; light=1.0; " + rainbowExpr(phase, rate, RAIN_BIAS, RAIN_SCALE)
+			+ "\" 0.5 0.5 0.5 "
 			+ "\"abs(abs(x)-0.5)<0.01|abs(abs(z)-0.5)<0.01|abs(y-0.5)<0.01\" 0.125 "
 			+ "\"vx=0.040*dx*dx*dx; vy=0.040*dy*dy*dy; vz=0.040*dz*dz*dz; "
-			+ "size=1.05*(1-t/12); alpha=0.82*(1-t/12)\" 1.0";
+			+ "size=1.05*(1-t/12); alpha=0.82*(1-t/12); " + rainbowExpr(phase, rate, RAIN_BIAS, RAIN_SCALE) + "\" 1.0";
 	}
 
 	/**
@@ -636,15 +628,15 @@ public final class StyxShow {
 	 *
 	 * @param scale 出生半径缩放（1.0 = 素材原尺寸 0.63 格；只有预览才用 !=1）
 	 */
-	private static String flareRipple(double cx, double top, double cz, String col, Ripple r) {
+	private static String flareRipple(double cx, double top, double cz, double phase, double rate, Ripple r) {
 		return "particlex image-matrix end_rod " + fmt(cx) + " " + fmt(top) + " " + fmt(cz)
 			+ " ring.png 1.0 \"" + ringMatrix(r.sx(), r.sz(), r.offX(), r.offZ()) + "\" " + fmt(RING_DPB)
 			+ " 0 0 0 " + r.age()
 			// 扩散：`/(1+t/2.6)` → **一开始最快、随后迅速变慢**（用户 v5："粒子扩散速度从快到慢"）
 			+ " \"(vx,vy,vz)=(dx,dy,dz)/ddis*" + fmt(r.speed()) + "/(1+t/2.6); "
 			+ "vy=" + fmt(r.bobAmp()) + "*sin(t/" + fmt(r.bobPeriod()) + "+ds1*3+" + fmt(r.bobPhase()) + "); "
-			+ "size=" + fmt(r.size()) + "*exp(-2.2*t/" + r.age() + "); cr,cg,cb=" + col
-			+ "; alpha=" + fmt(r.alpha()) + "\" 1.0";
+			+ "size=" + fmt(r.size()) + "*exp(-2.2*t/" + r.age() + "); alpha=" + fmt(r.alpha()) + "; "
+			+ rainbowExpr(phase, rate, RAIN_BIAS, RAIN_SCALE) + "\" 1.0";
 	}
 
 	/**
@@ -712,11 +704,11 @@ public final class StyxShow {
 	 * <p>原版那颗（红石触发时由 `NoteBlock` 自己 spawn）仍会照常出现 —— 它是按音高上色的，
 	 * 和我们这颗霓虹色会叠在一起（用户看过 v4 的 4 颗版本后要求"只蹦一个"，所以这里收到 1 颗）。
 	 */
-	private static String flareNotes(double cx, double cy, double cz, String col) {
+	private static String flareNotes(double cx, double cy, double cz, double phase, double rate) {
 		return "particlex custom-normal minecraft:note " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
-			+ " \"size=2.4; cr,cg,cb=" + col + "; alpha=1; age=28; light=1.0; "
+			+ " \"size=2.4; alpha=1; age=28; light=1.0; " + rainbowExpr(phase, rate, RAIN_BIAS, RAIN_SCALE) + "; "
 			+ "vx=(random()-0.5)*0.06; vy=0.085; vz=(random()-0.5)*0.06\" "
-			+ "0.02 0.02 0.02 1 \"size=2.4*exp(-1.0*t/28)\" 1.0";
+			+ "0.02 0.02 0.02 1 \"size=2.4*exp(-1.0*t/28); " + rainbowExpr(phase, rate * 1.3, RAIN_BIAS, RAIN_SCALE) + "\" 1.0";
 	}
 
 	/**
@@ -1018,14 +1010,17 @@ public final class StyxShow {
 		double cx = x + 0.5, cz = z + 0.5;
 		double mid = by + 0.5;     // 音符盒中心
 		double top = by + 1.0;     // 音符盒顶面
-		// v4/v5 配色（用户口径："颜色不再按照音高来特定区分…彩色霓虹流转…粒子颜色就纯金色或者白色"）。
-		// v5：波长 26 → 9 格（"每一个音符盒尽量不一样"）＋漂移 0.10 → 0.16（"让颜色有流动的感觉"）。
-		String colEdge = neonColor(cx, showNow, 0.000);
-		String colFace = neonColor(cx, showNow, 0.045);
-		String colRing = neonColor(cx, showNow, 0.105);
-		exec(world, flareEdges(cx, mid, cz, colEdge));
+		// v6 配色（用户 2026-09-25："在单一音符盒就能做到它每次播放的音符颜色渐变，然后整体随之渐变流转"）：
+		// 不再预先把颜色算成 RGB，而是把**相位**交给 ExParticle 表达式 → 每颗粒子在自己的生命里持续渐变
+		// （见 rainbowExpr）。相位来自「方块位置 − 视效时刻」（相邻块/不同时刻不同色），
+		// 再给棱框/面光/涟漪各一个固定偏移 → 同一颗音内部也有层次。
+		double phEdge = neonPhase(cx, showNow, 0.000);
+		double phFace = neonPhase(cx, showNow, 0.045);
+		double phRing = neonPhase(cx, showNow, 0.105);
+		double rate = 0.10 + Math.random() * 0.06;   // 每颗音的变色速度也随机（0.10–0.16 rad/刻）
+		exec(world, flareEdges(cx, mid, cz, phEdge, rate));
 		// 面光：v5 按用户"要更透、更像一层薄光"整层重做（见 flareSurface 注释）
-		exec(world, flareSurface(cx, mid, cz, colFace));
+		exec(world, flareSurface(cx, mid, cz, phFace, rate * 1.15));
 		// 水波阵：贴着**音符盒顶面**荡开，每 0.16s 追一阵（0 / 0.16 / 0.32s）→ "像被流星砸中那样泛起波纹"。
 		// 机器在跑时用延迟队列错开（见 pulse()）；单独 /nbm machine flare 预览时没有"到点"这一说、
 		// 只能同刻出生，就换成"更大的出生半径"把阵与阵拉开（scale 1.0 / 1.45 / 1.9）。
@@ -1042,7 +1037,8 @@ public final class StyxShow {
 		// v5：0.75–1.30（0.09–0.16 格）——32px 环的点距是 1/20=0.05 格，这个尺寸下点会互相压住，
 		// 环线是连续的（0.55–1.05 时实机偏"串珠"）
 		double size0 = 0.75 + Math.random() * 0.55;
-		double bobAmp = 0.020 + Math.random() * 0.040;
+		// v6：起伏可关（`/nbm machine ripplebob off` = 纯平涟漪，用户要 A/B 的预设）
+		double bobAmp = rippleBob ? 0.020 + Math.random() * 0.040 : 0.0;
 		double bobT = 1.8 + Math.random() * 1.4;
 		double bobP = Math.random() * 6.2832;
 		double alpha0 = 0.80 + Math.random() * 0.20;
@@ -1052,15 +1048,15 @@ public final class StyxShow {
 		final double rkF = rk, bobAF = bobAmp, bobTF = bobT, bobPF = bobP, alphaF = alpha0;
 		final int ageF = age, wavesF = waves;
 		final boolean live = active;
-		pulse(world, 0.00, () -> flareRipple(cx, ringY, cz, colRing,
+		pulse(world, 0.00, () -> flareRipple(cx, ringY, cz, phRing, rate * 0.90,
 			new Ripple(sxF, szF, offXF, offZF, ageF, sizeF, rkF, bobAF, bobTF, bobPF, alphaF)));
 		if (wavesF >= 2)
-			pulse(world, 0.14 + Math.random() * 0.08, () -> flareRipple(cx, ringY, cz, whiten(colRing, 0.20),
+			pulse(world, 0.14 + Math.random() * 0.08, () -> flareRipple(cx, ringY, cz, phRing + 0.55, rate * 0.90,
 				new Ripple(live ? sxF * 1.12 : sxF * 1.45, live ? szF * 1.12 : szF * 1.45,
 					-offXF * 0.6, -offZF * 0.6, ageF + 3, sizeF * 0.88, rkF * 0.90,
 					bobAF * 1.2, bobTF * 1.12, bobPF + 1.1, alphaF * 0.95)));
 		if (wavesF >= 3)
-			pulse(world, 0.28 + Math.random() * 0.10, () -> flareRipple(cx, ringY, cz, whiten(colRing, 0.38),
+			pulse(world, 0.28 + Math.random() * 0.10, () -> flareRipple(cx, ringY, cz, phRing + 1.15, rate * 0.90,
 				new Ripple(live ? sxF * 1.26 : sxF * 1.90, live ? szF * 1.26 : szF * 1.90,
 					offXF * 0.4, offZF * 0.4, ageF + 6, sizeF * 0.78, rkF * 0.82,
 					bobAF * 1.4, bobTF * 1.25, bobPF + 2.2, alphaF * 0.90)));
@@ -1068,7 +1064,7 @@ public final class StyxShow {
 		exec(world, flareSparks(cx, top + 0.06, cz, GOLD, 22, 0.55, 0.34, 0.26));
 		exec(world, flareSparks(cx, top + 0.06, cz, PLATINUM, 8, 0.42, 0.22, 0.20));
 		exec(world, flareSplash(cx, top + 0.03, cz, PLATINUM));
-		exec(world, flareNotes(cx, top + 0.12, cz, colFace));
+		exec(world, flareNotes(cx, top + 0.12, cz, phFace, rate));
 	}
 
 	/**
@@ -1087,37 +1083,37 @@ public final class StyxShow {
 	}
 
 	/**
-	 * HSV → "r,g,b"（0..1）。
-	 *
-	 * <p>饱和度给足、亮度压一档：开光影（Iris）对粒子是加色/泛光式的，写亮的颜色会被洗成白
-	 * （2026-09-24 取证：sat 0.62 / val 0.75+ 在画面里就是一片白）。所以走"深一点的纯色"，
-	 * 中心由泛光自己提亮，颜色才立得住。
+	 * 霓虹**相位**（弧度）：方块沿河位置 ÷ 波长 − 视效时刻 × 漂移 + 相位偏移。
+	 * 波长 {@link #NEON_WAVELEN} 格、漂移 {@link #NEON_DRIFT} → 相邻方块不同色、色带沿河往回流。
 	 */
-	private static String hsvColor(double hue, double sat, double val) {
-		hue -= Math.floor(hue);
-		double c = val * sat, x = c * (1 - Math.abs((hue * 6) % 2 - 1)), m = val - c;
-		double r, g, b;
-		int k = (int) (hue * 6);
-		switch (k) {
-			case 0 -> { r = c; g = x; b = 0; }
-			case 1 -> { r = x; g = c; b = 0; }
-			case 2 -> { r = 0; g = c; b = x; }
-			case 3 -> { r = 0; g = x; b = c; }
-			case 4 -> { r = x; g = 0; b = c; }
-			default -> { r = c; g = 0; b = x; }
-		}
-		return fmt(r + m) + "," + fmt(g + m) + "," + fmt(b + m);
+	private static double neonPhase(double x, double now, double offset) {
+		return 6.2832 * (x / NEON_WAVELEN - now * NEON_DRIFT + offset);
 	}
 
 	/**
-	 * **霓虹流转**（用户 2026-09-24 口径："音符盒视觉特效的颜色不再按照音高来特定区分吧，
-	 * 弄成彩色霓虹流转流动，感觉会更好一些"）：色相 = 方块沿河位置 ÷ 波长 − 时间 × 漂移速度。
+	 * **一枚音自己的颜色渐变**（用户 2026-09-25："我希望在单一音符盒就能做到它每次播放的音符颜色渐变，
+	 * 然后整体随之渐变流转"）。
 	 *
-	 * <p>波长 {@link #NEON_WAVELEN} 格 → 一眼能看到 2~3 段色带；漂移让它**沿河往回流**，
-	 * 机位前飞时看着就是"彩虹在河上流"。相位偏移给同一颗音的棱框/表面/涟漪做渐变。
+	 * <p>做法：把颜色写进 ExParticle 的**逐刻表达式**，用三段相位差 2π/3 的正弦近似一条连续色环
+	 * （廉价 ISP 彩虹，省掉 HSV 分支）：`c = bias + scale*(0.5+0.5*sin(base + 2πk/3 + t*rate))`。
+	 * 其中 `t` 是**粒子自己的年龄（刻）** —— 所以同一颗音在它 0.6~1.5s 的生命里自己就在变色；
+	 * `base` 由方块位置与视效时刻给出 → 相邻方块、不同时刻又各不相同，整体呈"彩虹在河上流"。
+	 *
+	 * <p>{@code bias}/{@code scale} 压住亮度：三通道相位差 120°，任一时刻必有两路偏暗 → 天然高饱和；
+	 * 上界 0.96 不会整颗洗成白色（Iris 泛光会把纯白核心糊掉，2026-09-24 取证）。
 	 */
-	private static String neonColor(double x, double now, double phase) {
-		return hsvColor(x / NEON_WAVELEN - now * NEON_DRIFT + phase, 0.95, 0.58);
+	private static String rainbowExpr(double base, double rate, double bias, double scale) {
+		return "cr=" + fmt(bias) + "+" + fmt(scale) + "*(0.5+0.5*sin(" + fmt(base) + "+t*" + fmt(rate) + "));"
+			+ "cg=" + fmt(bias) + "+" + fmt(scale) + "*(0.5+0.5*sin(" + fmt(base + 2.0944) + "+t*" + fmt(rate) + "));"
+			+ "cb=" + fmt(bias) + "+" + fmt(scale) + "*(0.5+0.5*sin(" + fmt(base + 4.1888) + "+t*" + fmt(rate) + "))";
+	}
+
+	public static boolean rippleBob() {
+		return rippleBob;
+	}
+
+	public static void setRippleBob(boolean on) {
+		rippleBob = on;
 	}
 
 	/** 朝向探针（`/nbm machine textprobe`） */
@@ -1140,15 +1136,15 @@ public final class StyxShow {
 			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, dotGrow(0.0), ""));
 		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, -14.0, 111.0, ZC - 8.0,
 			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, dotShrink(0.0), ""));
-		cmds.add(flareEdges(0.5, 111.5, -5.5, "0.90,0.35,0.95"));
-		cmds.add(flareSurface(0.5, 111.5, -5.5, "0.35,0.90,0.95"));
-		cmds.add(flareRipple(0.5, 112.02, -5.5, "0.95,0.60,0.35",
+		cmds.add(flareEdges(0.5, 111.5, -5.5, 0.0, 0.12));
+		cmds.add(flareSurface(0.5, 111.5, -5.5, 0.6, 0.14));
+		cmds.add(flareRipple(0.5, 112.02, -5.5, 1.2, 0.11,
 			new Ripple(1.00, 1.00, 0.0, 0.0, 21, 0.75, 0.18, 0.035, 2.2, 0.0, 0.90)));
-		cmds.add(flareRipple(0.5, 112.02, -5.5, "0.35,0.90,0.95",
+		cmds.add(flareRipple(0.5, 112.02, -5.5, 1.8, 0.11,
 			new Ripple(1.12, 1.25, -0.1, 0.1, 27, 0.60, 0.14, 0.05, 2.6, 1.1, 0.85)));
 		cmds.add(flareSplash(0.5, 112.03, -5.5, PLATINUM));
 		cmds.add(flareSparks(0.5, 112.06, -5.5, GOLD, 22, 0.55, 0.34, 0.26));
-		cmds.add(flareNotes(0.5, 112.12, -5.5, "0.35,0.90,0.95"));
+		cmds.add(flareNotes(0.5, 112.12, -5.5, 0.6, 0.14));
 		LyricLine demo = new LyricLine(22.407, 24.457, 3.0, 10.0, "请不要让我就此死亡",
 			List.of(new LyricChar(22.407, "O", 0, 1.4, 0.23), new LyricChar(22.64, "k", 1.4, 1.4, 0.24)));
 		cmds.add(lyricChar(demo, demo.chars().get(0), 0));
@@ -1201,3 +1197,4 @@ public final class StyxShow {
 		return s.replace("\\", "\\\\").replace("\"", "\\\"");
 	}
 }
+
