@@ -1,6 +1,7 @@
 package net.nbmachina.mod;
 
 import com.mojang.brigadier.CommandDispatcher;
+import com.mojang.brigadier.arguments.DoubleArgumentType;
 import com.mojang.brigadier.arguments.FloatArgumentType;
 import com.mojang.brigadier.arguments.IntegerArgumentType;
 import com.mojang.brigadier.arguments.StringArgumentType;
@@ -161,7 +162,41 @@ public final class NbmachinaCommands {
 				.then(CommandManager.literal("ripplebob")
 					.executes(ctx -> machineRippleBob(ctx.getSource(), null))
 					.then(CommandManager.literal("on").executes(ctx -> machineRippleBob(ctx.getSource(), true)))
-					.then(CommandManager.literal("off").executes(ctx -> machineRippleBob(ctx.getSource(), false)))))
+					.then(CommandManager.literal("off").executes(ctx -> machineRippleBob(ctx.getSource(), false))))
+				// M5-36：特效预设（模块化参数组）
+				.then(CommandManager.literal("preset")
+					.executes(ctx -> {
+						ctx.getSource().sendFeedback(() -> Text.literal(
+							"[nbmachina] " + net.nbmachina.mod.show.StyxShow.presetList()), false);
+						return 1;
+					})
+					.then(CommandManager.argument("name", StringArgumentType.word())
+						.executes(ctx -> {
+							String name = StringArgumentType.getString(ctx, "name");
+							boolean ok = net.nbmachina.mod.show.StyxShow.setPreset(name);
+							ctx.getSource().sendFeedback(() -> Text.literal(ok
+								? "[nbmachina] 特效预设 → " + name
+								: "[nbmachina] 没有这个预设：" + name + "；" + net.nbmachina.mod.show.StyxShow.presetList()), false);
+							return ok ? 1 : 0;
+						})))
+				// M5-36：单参数微调
+				.then(CommandManager.literal("fx")
+					.executes(ctx -> {
+						ctx.getSource().sendFeedback(() -> Text.literal(
+							"[nbmachina] " + net.nbmachina.mod.show.StyxShow.fxReport()), false);
+						return 1;
+					})
+					.then(CommandManager.argument("key", StringArgumentType.word())
+						.then(CommandManager.argument("value", DoubleArgumentType.doubleArg())
+							.executes(ctx -> {
+								String key = StringArgumentType.getString(ctx, "key");
+								double value = DoubleArgumentType.getDouble(ctx, "value");
+								boolean ok = net.nbmachina.mod.show.StyxShow.setFx(key, value);
+								ctx.getSource().sendFeedback(() -> Text.literal(ok
+									? "[nbmachina] " + key + " = " + value
+									: "[nbmachina] 没有这个参数：" + key + "；用 /nbm machine fx 看全部"), false);
+								return ok ? 1 : 0;
+							})))))
 			.then(CommandManager.literal("note")
 				.then(CommandManager.argument("sound", IdentifierArgumentType.identifier())
 					.executes(ctx -> note(ctx, 1.0F, 1.0F))

@@ -510,12 +510,6 @@ public final class StyxShow {
 	 */
 	private static final double RING_DPB = 20.0;
 	/**
-	 * 霓虹流转：一个完整色环跨越多少格；以及色带每秒往回流多少"环"。
-	 * v5：波长 26 → **9 格**（用户"每一个音符盒尽量不一样"：音符盒间距 1~3 格，相邻两块能差 1/3 个色环），
-	 * 漂移 0.10 → **0.16**（"让颜色有流动的感觉"）。
-	 */
-	private static final double NEON_WAVELEN = 9.0, NEON_DRIFT = 0.16;
-	/**
 	 * 彩虹的亮度口径：通道 = {@code RAIN_BIAS + RAIN_SCALE*(0.5+0.5*sin(...))}。
 	 * 0.8.8 初版用 0.18/0.78（通道上界 0.96）→ 三通道和为 1.7，比旧的 HSV val 0.58 亮一大截，
 	 * 实机被 Iris 泛光糊成一圈厚"甜甜圈"；收到 0.14/0.62（上界 0.76、和 ≈1.3）才恢复"细环"。
@@ -523,6 +517,95 @@ public final class StyxShow {
 	private static final double RAIN_BIAS = 0.14, RAIN_SCALE = 0.62;
 	/** 涟漪是否带上下起伏（`/nbm machine ripplebob on|off`，现场 A/B 用）。 */
 	private static boolean rippleBob = true;
+
+	// ───────────────────────── 音符盒特效参数（模块化：预设 = 一组参数）─────────────────────────
+	/**
+	 * 所有可调参数。`/nbm machine fx` 看当前值、`/nbm machine fx <key> <value>` 现改、
+	 * `/nbm machine preset <name>` 一键切预设。
+	 *
+	 * <p>开关类参数用 0/1 表示（0=关、非 0=开）。默认值就是用户 2026-09-25 认可的那套效果。
+	 */
+	private static final java.util.Map<String, Double> FX = new java.util.LinkedHashMap<>();
+	private static final java.util.Map<String, Double> FX_DEFAULTS = new java.util.LinkedHashMap<>();
+	static {
+		FX_DEFAULTS.put("color.wave", 9.0);      // 一个完整色环跨多少格（越小相邻方块差得越多）
+		FX_DEFAULTS.put("color.drift", 0.16);    // 色带每秒往回流多少"环"
+		FX_DEFAULTS.put("color.rate", 0.13);     // 单颗音自身变色的角速度（rad/刻）
+		FX_DEFAULTS.put("color.jitter", 0.15);   // 每个方块自己的相位抖动（单位：环）→ 同时响的也不同色
+		FX_DEFAULTS.put("ripple.waves", 0.0);    // 0 = 每颗音随机 1~3 条；1/2/3 = 固定条数
+		FX_DEFAULTS.put("ripple.bob", 1.0);      // 涟漪是否带上下起伏
+		FX_DEFAULTS.put("ripple.speed", 0.20);   // 径向扩散基准速度
+		FX_DEFAULTS.put("ripple.scale", 1.0);    // 出生半径 / 尺寸整体缩放
+		FX_DEFAULTS.put("ripple.alpha", 0.90);   // 涟漪透明度（ARGB 的 A）
+		FX_DEFAULTS.put("ripple.gap", 0.16);     // 阵与阵的间隔（秒）
+		FX_DEFAULTS.put("surface.alpha", 0.82);  // 面光透明度（"薄光"）
+		FX_DEFAULTS.put("edge.spread", 0.024);   // 棱框每刻扩散系数
+		FX_DEFAULTS.put("spark.count", 22.0);    // 金色火星数量
+		FX_DEFAULTS.put("spark.size", 0.55);     // 金色火星大小
+		FX_DEFAULTS.put("note.count", 1.0);      // 每块蹦几个音符精灵
+		FX.putAll(FX_DEFAULTS);
+	}
+
+	/** 预设表：预设 = 对默认值的一组覆盖（没写到的键保持默认）。 */
+	private static final java.util.Map<String, java.util.Map<String, Double>> PRESETS = new java.util.LinkedHashMap<>();
+	static {
+		// 当前被用户认可的那套（0.8.9）——名字取"冥河霓虹"
+		PRESETS.put("styx-neon", java.util.Map.of());
+		// 同一套参数、只把涟漪的上下起伏关掉（环边缘更干净）
+		PRESETS.put("styx-flat", java.util.Map.of("ripple.bob", 0.0));
+		// 每块只出一条涟漪（用户想试的"单条"）
+		PRESETS.put("styx-solo", java.util.Map.of("ripple.waves", 1.0));
+		// 三条涟漪 + 平环：最"水"的一档
+		PRESETS.put("styx-choir", java.util.Map.of("ripple.waves", 3.0, "ripple.bob", 0.0));
+	}
+	private static String presetName = "styx-neon";
+
+	private static double fx(String key) {
+		Double v = FX.get(key);
+		return v == null ? 0.0 : v;
+	}
+
+	private static void applyPreset(String name) {
+		java.util.Map<String, Double> p = PRESETS.get(name);
+		if (p == null) return;
+		FX.putAll(FX_DEFAULTS);
+		FX.putAll(p);
+		presetName = name;
+		rippleBob = fx("ripple.bob") > 0.5;   // 兼容旧命令
+	}
+
+	public static String presetName() {
+		return presetName;
+	}
+
+	/** `/nbm machine fx`：把当前参数逐条列出来。 */
+	public static String fxReport() {
+		StringBuilder sb = new StringBuilder("音符盒特效参数（预设 " + presetName + "）：");
+		for (var e : FX.entrySet()) {
+			sb.append('\n').append(e.getKey()).append('=')
+				.append(fmt(e.getValue()))
+				.append(e.getValue().equals(FX_DEFAULTS.get(e.getKey())) ? "" : " *");
+		}
+		sb.append("\n（带 * = 与默认值不同；预设：" + String.join(" / ", PRESETS.keySet()) + "）");
+		return sb.toString();
+	}
+
+	public static boolean setFx(String key, double value) {
+		if (!FX.containsKey(key)) return false;
+		FX.put(key, value);
+		if ("ripple.bob".equals(key)) rippleBob = value > 0.5;
+		return true;
+	}
+
+	public static String presetList() {
+		return "预设：" + String.join(" / ", PRESETS.keySet()) + "（当前 " + presetName + "）";
+	}
+
+	public static boolean setPreset(String name) {
+		if (!PRESETS.containsKey(name)) return false;
+		applyPreset(name);
+		return true;
+	}
 	/** 粒子固定色（用户 v4 口径："粒子颜色就纯金色或者白色即可"）。 */
 	private static final String GOLD = "1.000,0.820,0.330", PLATINUM = "1.000,0.960,0.880";
 	/**
@@ -704,11 +787,12 @@ public final class StyxShow {
 	 * <p>原版那颗（红石触发时由 `NoteBlock` 自己 spawn）仍会照常出现 —— 它是按音高上色的，
 	 * 和我们这颗霓虹色会叠在一起（用户看过 v4 的 4 颗版本后要求"只蹦一个"，所以这里收到 1 颗）。
 	 */
-	private static String flareNotes(double cx, double cy, double cz, double phase, double rate) {
+	private static String flareNotes(double cx, double cy, double cz, double phase, double rate, int count) {
 		return "particlex custom-normal minecraft:note " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
 			+ " \"size=2.4; alpha=1; age=28; light=1.0; " + rainbowExpr(phase, rate, RAIN_BIAS, RAIN_SCALE) + "; "
 			+ "vx=(random()-0.5)*0.06; vy=0.085; vz=(random()-0.5)*0.06\" "
-			+ "0.02 0.02 0.02 1 \"size=2.4*exp(-1.0*t/28); " + rainbowExpr(phase, rate * 1.3, RAIN_BIAS, RAIN_SCALE) + "\" 1.0";
+			+ "0.02 0.02 0.02 " + Math.max(0, count) + " \"size=2.4*exp(-1.0*t/28); "
+			+ rainbowExpr(phase, rate * 1.3, RAIN_BIAS, RAIN_SCALE) + "\" 1.0";
 	}
 
 	/**
@@ -1014,10 +1098,13 @@ public final class StyxShow {
 		// 不再预先把颜色算成 RGB，而是把**相位**交给 ExParticle 表达式 → 每颗粒子在自己的生命里持续渐变
 		// （见 rainbowExpr）。相位来自「方块位置 − 视效时刻」（相邻块/不同时刻不同色），
 		// 再给棱框/面光/涟漪各一个固定偏移 → 同一颗音内部也有层次。
-		double phEdge = neonPhase(cx, showNow, 0.000);
-		double phFace = neonPhase(cx, showNow, 0.045);
-		double phRing = neonPhase(cx, showNow, 0.105);
-		double rate = 0.10 + Math.random() * 0.06;   // 每颗音的变色速度也随机（0.10–0.16 rad/刻）
+		// v7：相位同时带 z + 每块哈希抖动（用户："同一时间戳响的音符盒色彩似乎一致" —— 和弦是同 x 不同 z）
+		double jit = blockJitter(x, by, z);
+		double phEdge = neonPhase(cx, cz, showNow, 0.000, jit);
+		double phFace = neonPhase(cx, cz, showNow, 0.045, jit);
+		double phRing = neonPhase(cx, cz, showNow, 0.105, jit);
+		double rate = fx("color.rate") * (0.8 + Math.random() * 0.5);   // 每颗音的变色速度也随机
+		final double rateF = rate;
 		exec(world, flareEdges(cx, mid, cz, phEdge, rate));
 		// 面光：v5 按用户"要更透、更像一层薄光"整层重做（见 flareSurface 注释）
 		exec(world, flareSurface(cx, mid, cz, phFace, rate * 1.15));
@@ -1032,39 +1119,45 @@ public final class StyxShow {
 		double sz0 = 0.85 + Math.random() * 0.40;
 		double offX = (Math.random() - 0.5) * 0.36;
 		double offZ = (Math.random() - 0.5) * 0.36;
-		double rk = 0.16 + Math.random() * 0.10;      // v5 再放大一档 → 扩散范围更远
+		double rk = fx("ripple.speed") * (0.80 + Math.random() * 0.40);   // 扩散基准 × 随机
 		int age = 20 + (int) (Math.random() * 10);
 		// v5：0.75–1.30（0.09–0.16 格）——32px 环的点距是 1/20=0.05 格，这个尺寸下点会互相压住，
 		// 环线是连续的（0.55–1.05 时实机偏"串珠"）
-		double size0 = 0.75 + Math.random() * 0.55;
-		// v6：起伏可关（`/nbm machine ripplebob off` = 纯平涟漪，用户要 A/B 的预设）
-		double bobAmp = rippleBob ? 0.020 + Math.random() * 0.040 : 0.0;
+		double rScale = fx("ripple.scale");
+		double size0 = (0.75 + Math.random() * 0.55) * rScale;
+		// 起伏可关（`ripple.bob` / `/nbm machine ripplebob off`）
+		double bobAmp = fx("ripple.bob") > 0.5 ? 0.020 + Math.random() * 0.040 : 0.0;
 		double bobT = 1.8 + Math.random() * 1.4;
 		double bobP = Math.random() * 6.2832;
-		double alpha0 = 0.80 + Math.random() * 0.20;
-		int waves = 1 + (int) (Math.random() * 3);    // 1~3 阵；力度大补到 3 阵
-		if (velocity >= 90 && waves < 3) waves = 3;
-		final double sxF = sx0, szF = sz0, offXF = offX, offZF = offZ, sizeF = size0;
+		double alpha0 = fx("ripple.alpha") * (0.90 + Math.random() * 0.10);
+		// 涟漪条数：`ripple.waves` = 0 → 每颗音随机 1~3；= 1/2/3 → 固定（用户要的"单条"就写 1）
+		int wavesCfg = (int) Math.round(fx("ripple.waves"));
+		int waves = wavesCfg >= 1 ? Math.min(3, wavesCfg) : 1 + (int) (Math.random() * 3);
+		if (wavesCfg == 0 && velocity >= 90 && waves < 3) waves = 3;
+		double gap = Math.max(0.02, fx("ripple.gap"));
+		final double gapF = gap;
+		final double sxF = sx0 * rScale, szF = sz0 * rScale, offXF = offX, offZF = offZ, sizeF = size0;
 		final double rkF = rk, bobAF = bobAmp, bobTF = bobT, bobPF = bobP, alphaF = alpha0;
 		final int ageF = age, wavesF = waves;
 		final boolean live = active;
-		pulse(world, 0.00, () -> flareRipple(cx, ringY, cz, phRing, rate * 0.90,
+		pulse(world, 0.00, () -> flareRipple(cx, ringY, cz, phRing, rateF * 0.90,
 			new Ripple(sxF, szF, offXF, offZF, ageF, sizeF, rkF, bobAF, bobTF, bobPF, alphaF)));
 		if (wavesF >= 2)
-			pulse(world, 0.14 + Math.random() * 0.08, () -> flareRipple(cx, ringY, cz, phRing + 0.55, rate * 0.90,
+			pulse(world, gapF * 0.9 + Math.random() * 0.08, () -> flareRipple(cx, ringY, cz, phRing + 0.55, rateF * 0.90,
 				new Ripple(live ? sxF * 1.12 : sxF * 1.45, live ? szF * 1.12 : szF * 1.45,
 					-offXF * 0.6, -offZF * 0.6, ageF + 3, sizeF * 0.88, rkF * 0.90,
 					bobAF * 1.2, bobTF * 1.12, bobPF + 1.1, alphaF * 0.95)));
 		if (wavesF >= 3)
-			pulse(world, 0.28 + Math.random() * 0.10, () -> flareRipple(cx, ringY, cz, phRing + 1.15, rate * 0.90,
+			pulse(world, gapF * 1.8 + Math.random() * 0.10, () -> flareRipple(cx, ringY, cz, phRing + 1.15, rateF * 0.90,
 				new Ripple(live ? sxF * 1.26 : sxF * 1.90, live ? szF * 1.26 : szF * 1.90,
 					offXF * 0.4, offZF * 0.4, ageF + 6, sizeF * 0.78, rkF * 0.82,
 					bobAF * 1.4, bobTF * 1.25, bobPF + 2.2, alphaF * 0.90)));
 		// 金/白粒子（用户口径：火星金色、白闪点缀）+ 铂金水花 + 音符精灵（一颗，跟本块特效同色）
-		exec(world, flareSparks(cx, top + 0.06, cz, GOLD, 22, 0.55, 0.34, 0.26));
+		exec(world, flareSparks(cx, top + 0.06, cz, GOLD, (int) fx("spark.count"), fx("spark.size"), 0.34, 0.26));
 		exec(world, flareSparks(cx, top + 0.06, cz, PLATINUM, 8, 0.42, 0.22, 0.20));
 		exec(world, flareSplash(cx, top + 0.03, cz, PLATINUM));
-		exec(world, flareNotes(cx, top + 0.12, cz, phFace, rate));
+		int noteCount = Math.max(0, (int) Math.round(fx("note.count")));
+		if (noteCount > 0) exec(world, flareNotes(cx, top + 0.12, cz, phFace, rate, noteCount));
 	}
 
 	/**
@@ -1083,11 +1176,28 @@ public final class StyxShow {
 	}
 
 	/**
-	 * 霓虹**相位**（弧度）：方块沿河位置 ÷ 波长 − 视效时刻 × 漂移 + 相位偏移。
-	 * 波长 {@link #NEON_WAVELEN} 格、漂移 {@link #NEON_DRIFT} → 相邻方块不同色、色带沿河往回流。
+	 * 霓虹**相位**（弧度）：`(x/波长x + z/波长z − 时刻×漂移 + 偏移 + 每块抖动)` × 2π。
+	 *
+	 * <p>⚠ 2026-09-25 用户口径："同一时间戳响的音符盒的色彩似乎是一致的" —— 机器里的和弦
+	 * 正是 **同一个 x、不同 z**（实测 time=147.379 三颗：x=1196 / z=2,4,6）。
+	 * 所以相位里必须**同时带上 z**，再叠一个按方块坐标哈希出来的抖动
+	 * （{@link #blockJitter}）→ 同一刻响的和弦也是三个不同色，而且颜色仍沿着河连续渐变。
 	 */
-	private static double neonPhase(double x, double now, double offset) {
-		return 6.2832 * (x / NEON_WAVELEN - now * NEON_DRIFT + offset);
+	private static double neonPhase(double x, double z, double now, double offset, double jitter) {
+		return 6.2832 * (x / fx("color.wave") + z / (fx("color.wave") * 0.72)
+			- now * fx("color.drift") + offset + jitter * fx("color.jitter"));
+	}
+
+	/**
+	 * 每块自己的相位抖动（-1..1，确定性哈希）：同一 x 上的和弦、甚至同 x 同 z 的重复触发，
+	 * 颜色都不会撞在一起。哈希用经典 32 位混合常数，纯整数运算、跨平台稳定。
+	 */
+	private static double blockJitter(int x, int y, int z) {
+		int h = x * 73856093 ^ y * 19349663 ^ z * 83492791;
+		h ^= (h >>> 13);
+		h *= 0x5bd1e995;
+		h ^= (h >>> 15);
+		return (h & 0xFFFF) / 65535.0 * 2.0 - 1.0;
 	}
 
 	/**
@@ -1114,6 +1224,7 @@ public final class StyxShow {
 
 	public static void setRippleBob(boolean on) {
 		rippleBob = on;
+		FX.put("ripple.bob", on ? 1.0 : 0.0);   // 与 fx/preset 的同一份参数保持一致
 	}
 
 	/** 朝向探针（`/nbm machine textprobe`） */
@@ -1144,7 +1255,7 @@ public final class StyxShow {
 			new Ripple(1.12, 1.25, -0.1, 0.1, 27, 0.60, 0.14, 0.05, 2.6, 1.1, 0.85)));
 		cmds.add(flareSplash(0.5, 112.03, -5.5, PLATINUM));
 		cmds.add(flareSparks(0.5, 112.06, -5.5, GOLD, 22, 0.55, 0.34, 0.26));
-		cmds.add(flareNotes(0.5, 112.12, -5.5, 0.6, 0.14));
+		cmds.add(flareNotes(0.5, 112.12, -5.5, 0.6, 0.14, 1));
 		LyricLine demo = new LyricLine(22.407, 24.457, 3.0, 10.0, "请不要让我就此死亡",
 			List.of(new LyricChar(22.407, "O", 0, 1.4, 0.23), new LyricChar(22.64, "k", 1.4, 1.4, 0.24)));
 		cmds.add(lyricChar(demo, demo.chars().get(0), 0));
