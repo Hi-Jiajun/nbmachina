@@ -20,7 +20,7 @@
  *   node tools/render-plate-pack.mjs \
  *     --game "C:\\Program Files\\PCL2\\.minecraft\\versions\\1.21.10-Fabric 0.19.5" \
  *     --cover "C:\\Users\\me\\Music\\…\\cover.png" \
- *     --title "STYX HELIX" --subtitle "MYTH & ROID"
+ *     --title "STYX HELIX" --artist "MYTH & ROID" --arranger "Piano arrangement by Animenz"
  *
  * 之后在游戏里让资源包 styx-plates 生效（options.txt 的 resourcePacks 末尾加
  * "file/styx-plates"，或在"选项 → 资源包"里拖到右侧）。
@@ -40,8 +40,13 @@ if (!gameDir || !cover) {
   process.exit(1);
 }
 const titleText = args.get('title') ?? 'STYX HELIX';
-const subtitleText = args.get('subtitle') ?? 'MYTH & ROID';
-const font = args.get('font') ?? 'C\\:/Windows/Fonts/NotoSansSC-VF.ttf';
+const artistText = args.get('artist') ?? args.get('subtitle') ?? 'MYTH & ROID';
+const arrangerText = args.get('arranger') ?? 'Piano arrangement by Animenz';
+// 字体：Noto Sans SC 静态版（OFL，可商用）。VF 变量字体在 drawtext 里会落到 Light 字重，
+// 亮背景上很虚，所以曲名/作者改用 Bold / Medium 静态字体（2026-09-24 实机对比）。
+const font = args.get('font') ?? 'C\\:/Windows/Fonts/Noto Sans SC (TrueType).otf';
+const fontBold = args.get('fontBold') ?? 'C\\:/Windows/Fonts/Noto Sans SC Bold (TrueType).otf';
+const fontMedium = args.get('fontMedium') ?? 'C\\:/Windows/Fonts/Noto Sans SC Medium (TrueType).otf';
 
 const pack = path.join(gameDir, 'resourcepacks', 'styx-plates');
 const blockTex = path.join(pack, 'assets', 'minecraft', 'textures', 'block');
@@ -60,15 +65,31 @@ const esc = (s) => s.replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/:/g, '
 run(['-i', cover, '-vf', 'scale=2048:2048:flags=lanczos,unsharp=5:5:0.7', '-frames:v', '1',
   path.join(blockTex, 'jigsaw_top.png')]);
 
-// 2) 标题 / 副标题：1024² 方形贴图，文字居中、四周透明（quad 是正方形，靠透明留白控制视觉宽高比）
-const textPlate = (out, text, fontSize) => run([
-  '-f', 'lavfi', '-i', 'color=c=black@0.0:s=1024x1024:d=1,format=rgba',
-  '-vf', `drawtext=fontfile='${font}':text='${esc(text)}':fontsize=${fontSize}:fontcolor=white:`
-    + 'x=(w-text_w)/2:y=(h-text_h)/2:borderw=3:bordercolor=black@0.30',
-  '-frames:v', '1', out,
+// 2) 文本块（1024² 方形贴图）：三行左对齐的"内页文案"——曲名 / 作者 / 钢琴改编，
+//    四周透明（quad 是正方形，靠透明留白控制视觉宽高比）。
+//    排版（2026-09-24）：曲名最大、字距拉开；作者次之；改编行最小、用天青色调呼应冥河主题；
+//    标题下方一条细横线做分割。
+const spaced = (s) => [...s].join('\u2009');           // 细空格 = 手工字距
+const textBlock = (out, lines) => {
+  const chain = lines.map((l) =>
+    `drawtext=fontfile='${l.font}':text='${esc(l.text)}':fontsize=${l.size}:`
+    + `fontcolor=${l.color}:x=${l.x}:y=${l.y}`
+    // 亮天空下要读得清：细描边 + 偏移投影（0.6.x 那版细字重配 3px 描边显"脏"，
+    // 现在曲名/作者是 Bold/Medium，2px 描边反而干净且有轮廓）
+    + `:borderw=${l.border ?? 2}:bordercolor=black@0.55`
+    + `:shadowcolor=black@${l.shadow ?? 0.45}:shadowx=3:shadowy=4`
+  ).join(',');
+  run([
+    '-f', 'lavfi', '-i', 'color=c=black@0.0:s=1024x1024:d=1,format=rgba',
+    '-vf', `${chain},drawbox=x=96:y=486:w=250:h=3:color=white@0.45:t=fill`,
+    '-frames:v', '1', out,
+  ]);
+};
+textBlock(path.join(blockTex, 'bamboo_fence_gate_particle.png'), [
+  { text: spaced(titleText), size: 124, color: 'white', x: 96, y: 330, font: fontBold, border: 2 },
+  { text: spaced(artistText), size: 72, color: 'white@0.94', x: 96, y: 504, font: fontMedium, border: 2 },
+  { text: arrangerText, size: 42, color: '#A9DEFF', x: 96, y: 604, font: font, border: 2, shadow: 0.5 },
 ]);
-textPlate(path.join(blockTex, 'bamboo_fence_gate_particle.png'), titleText, 150);
-textPlate(path.join(blockTex, 'conduit.png'), subtitleText, 110);
 
 // 3) pack.mcmeta：1.21.10 的资源包格式是 69，且**必须**带 min_format / max_format
 //    （只写 pack_format 会被判"声明了比 64 新的版本却缺字段"直接拒绝加载，2026-09-24 实测）

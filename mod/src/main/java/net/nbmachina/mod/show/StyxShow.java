@@ -159,9 +159,16 @@ public final class StyxShow {
 	 * 实机取证：size=64 的板子在 13.5 格外量得 671px 宽，同帧里 6 格外 1×1 红石块量得 101px
 	 * → 板子 ≈ 15 格（不是过去以为的 8 格）。点阵那侧是 {@code 像素/dpb} 格，**没有这个 2 倍**。
 	 */
-	private static final double PLATE_BLOCKS = 16.0;
+	private static final double PLATE_BLOCKS = 12.0;
 	private static final double COVER_W = PLATE_BLOCKS;
+	/** 封面 12 格 → size=48（四边形 ≈ size/4 格）。 */
 	private static final double PLATE_SIZE = PLATE_BLOCKS * 4.0;
+	/**
+	 * 文案块 15 格（size=60）：贴图墨迹宽 89.6% → 可见文字 ≈13.4 格、曲名一行 ≈10.6 格，
+	 * 16 格外约占屏宽四分之一，读得清又不压过封面。
+	 */
+	private static final double TEXT_BLOCKS = 15.0;
+	private static final double TEXT_SIZE = TEXT_BLOCKS * 4.0;
 	/**
 	 * 接管时间表（2026-09-24 第三轮实测后定稿：**不再写动态 alpha 窗口**）：
 	 *
@@ -195,27 +202,30 @@ public final class StyxShow {
 	 * 标题/副标题整体后移 0.10s / 0.15s（避免三块一起动像"整体闪"）。
 	 * 上一版的"炸开副本"（点向外飞）按用户要求**删除**——现在全程没有位移，只有交叉过渡与淡出。
 	 */
-	// ── 开场时间线（秒；0.6.0「屏幕锁定」版）────────────────────────────────────────
+	// ── 开场时间线（秒；0.7.0「世界固定」版）────────────────────────────────────────
 	// ⚠ ExParticle 表达式里的 t 是**刻数**（命令末尾 step=1 → 每刻 +1），所以"秒"必须 ×20 才等于表达式里的时长。
-	//   0.5.1 把秒数直接写进表达式（clamp(t/0.45,…)）→ 淡入只花 0.45 刻 ≈ 一帧，用户看到的就是"闪一下就没了"。
-	// 0.00/0.10/0.15  清晰板淡入 0.45s
-	// 2.30            封面点阵就位（藏在清晰板后面 0.35 格，全程不透明）
-	// 2.35/2.45/2.50  清晰板淡出 0.70s → 露出点阵（交叉过渡，不做半透明叠色）
-	// 3.05→3.88       点阵从画面中心向外逐层淡出（消散）
-	// 3.917           第一颗音
-	private static final double[] OPEN_IN_AT = {0.00, 0.10, 0.15};
-	private static final double OPEN_PLATE_IN_SEC = 0.45;
-	private static final double[] OPEN_XFADE_AT = {2.30, 2.40, 2.45};
-	private static final double[] OPEN_PLATE_OUT_AT = {2.35, 2.45, 2.50};
-	private static final double OPEN_PLATE_OUT_SEC = 0.70;
-	/** 点阵自就位起保持不透明的时长（3.05s 开始消散）与消散时长、每格半径的错开量。 */
-	private static final double OPEN_DOT_HOLD_SEC = 0.75;
-	private static final double OPEN_DOT_FADE_SEC = 0.55;
-	private static final double OPEN_DOT_STAGGER_SEC = 0.05;
-	/** 点阵总寿命（刻的秒数）：消散在 3.88s 结束，3.9s 前必须全部消失。 */
-	private static final double OPEN_DOT_AGE_SEC = 1.80;
-	/** 三件套的竖直偏移（格，相对眼位）：封面在视线高度、标题在上 4.9 格、副标题在下 4.9 格。 */
-	private static final double[] OPEN_UP = {0.5, 5.4, -4.4};
+	// 0.00/0.12  封面 + 文案块淡入 0.70s
+	// 0.60-1.20  点阵分 12 条铺好（每条 768 颗，藏在封面后面 0.35 格，全程不透明）
+	// 2.35→3.05  封面淡出 0.70s → 露出点阵（交叉过渡，不做半透明叠色）
+	// 2.60→3.35  文案块随后淡出（让人多读一会儿）
+	// 3.05→3.90  点阵从画面中心向外逐层淡出（消散）
+	// 3.917      第一颗音
+	private static final double[] OPEN_IN_AT = {0.00, 0.12};
+	private static final double OPEN_PLATE_IN_SEC = 0.70;
+	private static final double OPEN_COVER_OUT_AT = 2.35;
+	private static final double OPEN_COVER_OUT_SEC = 0.70;
+	private static final double OPEN_TEXT_OUT_AT = 2.60;
+	private static final double OPEN_TEXT_OUT_SEC = 0.75;
+	/** 点阵分批生成：每 0.05s（1 刻）铺一条，12 条铺完 0.60-1.20s。 */
+	private static final double OPEN_DOT_SPAWN_AT = 0.60;
+	private static final double OPEN_DOT_SPAWN_STEP = 0.05;
+	private static final int OPEN_DOT_BANDS = 12;
+	/** 点阵开始消散的时刻（所有条带同时开始，只是各自的 t 起点不同）与消散时长、每格半径的错开量。 */
+	private static final double OPEN_DOT_DISSOLVE_AT = 3.05;
+	private static final double OPEN_DOT_FADE_SEC = 0.60;
+	private static final double OPEN_DOT_STAGGER_SEC = 0.03;
+	/** 点阵全部消失的时刻（< 第一颗音 3.917s）。 */
+	private static final double OPEN_DOT_END_AT = 3.92;
 	/**
 	 * 点阵素材：128px ÷ dpb8 = **16 格**（与清晰板同尺寸，见 {@link #PLATE_SIZE} 的实测说明）＝ 16384 颗。
 	 *
@@ -223,20 +233,31 @@ public final class StyxShow {
 	 * 用户看到的"只有一半 / 像个球"是**点太大糊成一团**（当时 1.5 格的点 = 12 个点距），
 	 * 加上镜头飞过去把世界坐标里的点阵甩出画面。所以现在是"高密度小点 + 屏幕锁定"。
 	 */
-	private static final String COVER_GRID_IMAGE = "styx-cover-128.png";
-	/** dpb = 素材像素 ÷ 目标格数：128px ÷ 16 格 = 8（点阵那侧没有 2 倍系数，见 PLATE_BLOCKS）。 */
-	private static final double COVER_DPB = 128.0 / PLATE_BLOCKS;
+	private static final String COVER_GRID_IMAGE = "styx-dot-b";   // styx-dot-b00..b11.png
+	/** dpb = 素材像素 ÷ 目标格数：96px ÷ 12 格 = 8（点阵那侧没有 2 倍系数，见 PLATE_BLOCKS）。 */
+	private static final double COVER_DPB = 96.0 / PLATE_BLOCKS;
 	/**
-	 * 点尺寸（1/8 格；渲染出来的四边形 ≈ size/4 格，见 {@link #PLATE_SIZE}）：点距 = 16 格 / 128 = 0.125 格
+	 * 点尺寸（1/8 格；渲染出来的四边形 ≈ size/4 格，见 {@link #PLATE_SIZE}）：点距 = 12 格 / 96 = 0.125 格
 	 * → size=0.5 时点正好相接。这里按像素亮度给尺寸（半调）：暗部 0.25（半格点距，看得见缝隙）、
 	 * 亮部 0.70（略重叠）→ 亮的密、暗的疏，图像结构清楚。
 	 */
 	private static final String COVER_DOT_SIZE = "0.25+0.45*((cr+cg+cb)/3)";
-	private static final double TITLE_DPB = 48.0, TITLE_W = 8.0;
-	private static final double SUB_DPB = 48.0, SUB_W = 256.0 / SUB_DPB;
-	/** 开场距离：整组浮在玩家眼前；屏幕锁定后镜头飞它也原地不动。 */
-	private static final double OPEN_DIST = 13.5;
-	/** 点阵比清晰板靠后一点：交叉过渡靠"清晰板淡出露出点阵"，避免半透明叠色（开光影会变麻点）。 */
+	/**
+	 * 开场卡片距离：**起播那一刻**在玩家前方 {@code OPEN_AHEAD} 格处钉一份，之后**永远不再动**
+	 * （2026-09-24 用户口径："封面固定在某个位置"，既不跟镜头跑、也不随飞行漂移）。
+	 *
+	 * <p>为什么按起播机位钉：起播时玩家的位置/朝向就是他这次运镜的起点（实测 `/nbm machine start`
+	 * 都在音轨起点、yaw −90），钉在"眼前 16 格"既保证构图居中，又不受他习惯飞多高影响。
+	 * 钉完就固定在世界里 → 镜头推进时卡片自然放大，是"运镜推近"的观感。
+	 */
+	private static final double OPEN_AHEAD = 16.0;
+	/** 卡片平面内偏移（格，沿 +z = 相机右）：封面在左、文案块在右，整组大致居中。 */
+	private static final double OPEN_COVER_H = -6.5;
+	private static final double OPEN_TEXT_H = 7.4;
+	/**
+	 * 点阵比清晰板靠后多少格：交叉过渡靠"清晰板淡出露出点阵"，避免半透明叠色（开光影会变麻点）。
+	 * ⚠ 镜头从 −x 方向飞来，所以"更远"= **更大** 的 x：点阵要放在 {@code ax + OPEN_DOT_BACK}。
+	 */
 	private static final double OPEN_DOT_BACK = 0.35;
 
 	/**
@@ -253,45 +274,20 @@ public final class StyxShow {
 	}
 
 	/**
-	 * 屏幕锁定：粒子每刻移动到「眼位 + 前×dist + 右×h + 上×v」——镜头飞到哪里板子跟到哪里，
-	 * 屏幕上看是**原地不动**的（用户 2026-09-24 口径：两个封面都不许动）。
+	 * 封面板（世界固定）：一颗 {@code minecraft:block} 粒子 = 整张专辑封面，只有 alpha 在动。
 	 *
-	 * <p>用 ExParticle 表达式的只读镜头变量（px/py/pz 眼位、fx/fz 水平前、rx/rz 水平右，见 ExParticle 的
-	 * {@code CameraRef}）。⚠ 这是**刻级**锁定：粒子每刻定位一次、镜头逐帧插值，高速运镜时会有一刻位移的
-	 * 跟拍抖动（13.5 格处最前约 3%），慢速运镜看不出来。
-	 *
-	 * <p>写成"目标 − 当前"（vx = 目标x − (cx+x)）而不是增量，天然自纠偏、不会累积漂移。
+	 * <p>历史：0.6.0 曾经用 ExParticle 的镜头变量把它**锁在屏幕上**跟着镜头跑，
+	 * 用户 2026-09-24 反馈"封面会随着我的人物移动而移动，我想让他固定在某个位置" → 0.7.0 改回
+	 * **固定世界坐标**（锚点见 {@link #OPEN_AHEAD}）。（ExParticle 的 px/fx/rx 变量留在那边，随时可用。）
 	 */
-	private static String lockTo(double dist, double h, double v) {
-		String right = h == 0 ? "" : "+rx*" + fmt(h);
-		String rightZ = h == 0 ? "" : "+rz*" + fmt(h);
-		return "vx=(px+fx*" + fmt(dist) + right + ")-(cx+x);"
-			+ "vy=(py+" + fmt(v) + ")-(cy+y);"
-			+ "vz=(pz+fz*" + fmt(dist) + rightZ + ")-(cz+z)";
+	private static String coverPlate(double cx, double cy, double cz, int age, boolean rising, double durSec) {
+		return plateFade(COVER_BLOCK, cx, cy, cz, age, "alpha=" + alphaSeg(rising, durSec));
 	}
 
-	/**
-	 * 点阵层的屏幕锁定：每颗点多一个"发射时记下的平面内偏移"（引擎逐粒子给的 {@code dx/dy/dz}），
-	 * 水平基向量取发射那次写进矩阵的相机右向 {@code (r0x,r0z)} → 镜头偏航时整片点阵跟着转。
-	 */
-	private static String lockCloud(double dist, double r0x, double r0z, double v) {
-		String h = "(" + fmt(r0x) + "*dx+" + fmt(r0z) + "*dz)";
-		return "vx=(px+fx*" + fmt(dist) + "+rx*" + h + ")-(cx+x);"
-			+ "vy=(py+" + fmt(v) + "+dy)-(cy+y);"
-			+ "vz=(pz+fz*" + fmt(dist) + "+rz*" + h + ")-(cz+z)";
-	}
-
-	/** 三件套的清晰板：位置由 {@code lock} 锁在屏幕上，只有 alpha 在动（{@code durSec} 是秒）。 */
-	private static String coverPlate(double cx, double cy, double cz, int age, boolean rising, double durSec, String lock) {
-		return plateFade(COVER_BLOCK, cx, cy, cz, age, "alpha=" + alphaSeg(rising, durSec) + "; " + lock);
-	}
-
-	private static String titlePlate(double cx, double cy, double cz, int age, boolean rising, double durSec, String lock) {
-		return plateFade(TITLE_BLOCK, cx, cy, cz, age, "alpha=" + alphaSeg(rising, durSec) + "; " + lock);
-	}
-
-	private static String subtitlePlate(double cx, double cy, double cz, int age, boolean rising, double durSec, String lock) {
-		return plateFade(SUB_BLOCK, cx, cy, cz, age, "alpha=" + alphaSeg(rising, durSec) + "; " + lock);
+	/** 文案块板（世界固定）：曲名 / 作者 / 钢琴改编三行，贴图见 tools/render-plate-pack.mjs。 */
+	private static String textPlate(double cx, double cy, double cz, int age, boolean rising, double durSec) {
+		return plate(TITLE_BLOCK, cx, cy, cz, age,
+			"size=" + fmt(TEXT_SIZE) + "; light=1.0; alpha=" + alphaSeg(rising, durSec));
 	}
 
 	/**
@@ -318,21 +314,22 @@ public final class StyxShow {
 	}
 
 	/**
-	 * 点阵层：全程**不透明**地在清晰板后面就位（交叉过渡 = 清晰板淡出把它露出来，不做半透明叠色），
+	 * 点阵层（世界固定）：全程**不透明**地躲在封面后面（交叉过渡 = 封面淡出把它露出来，不做半透明叠色），
 	 * 到 {@code holdSec} 之后从画面中心向外逐层淡出消散。
 	 *
 	 * <p>消散表达式：{@code alpha = 1-clamp((t-起始-半径×错开)/时长,0,1)} —— 依旧只有一个 clamp（见 alphaSeg）。
+	 * {@code holdSec} 由调用方按"绝对消散时刻 − 本批生成时刻"算，这样 12 条分批生成的条带是**同时**开始消散的。
 	 *
 	 * <p>⚠ 硬约束（2026-09-24 实测）：**必须用 {@code end_rod}**（{@code minecraft:block} + 面向镜头的
-	 * 字面矩阵整段不出图）；点必须小（点距 0.0625 格时 size≈0.5，1.5 格的"大点"会糊成一个球）。
+	 * 字面矩阵整段不出图）；点必须小（点距 0.125 格时 size≈0.5，1.5 格的"大点"会糊成一个球）。
 	 */
-	private static String dotCloud(String image, double dpb, String sizeExpr, double cx, double cy, double cz,
-	                               String matrix, int age, double holdSec, double fadeSec, double staggerSec, String lock) {
+	private static String dotBand(String image, double dpb, String sizeExpr, double cx, double cy, double cz,
+	                             String matrix, int age, double holdSec, double fadeSec, double staggerSec) {
 		double hold = holdSec * 20.0, fade = fadeSec * 20.0, stagger = staggerSec * 20.0;
 		String alpha = "1-clamp((t-" + fmt(hold) + "-ddis*" + fmt(stagger) + ")/" + fmt(fade) + ",0,1)";
 		return "particlex image-matrix end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
 			+ " " + image + " 1.0 \"" + matrix + "\" " + fmt(dpb) + " 0 0 0 " + age
-			+ " \"size=" + sizeExpr + "; alpha=" + alpha + "; " + lock + "\" 1.0";
+			+ " \"size=" + sizeExpr + "; alpha=" + alpha + "\" 1.0";
 	}
 
 	/**
@@ -543,12 +540,14 @@ public final class StyxShow {
 	}
 
 	/**
-	 * 开场：按**玩家当前机位**把「封面 + 标题 + 副标题」摆在眼前 13.5 格、正对镜头的竖直平面上，
-	 * 并且**每刻锁在屏幕上**（跟着镜头平移/转身，屏幕上原地不动）。
+	 * 开场：把「专辑封面 + 文案块（曲名 / 作者 / 钢琴改编）」摆成一组**固定在世界里**的竖直卡片，
+	 * 位置 = 音轨起点前方 {@link #OPEN_AHEAD} 格、河心、玩家起播时的眼高（见 {@link #OPEN_AHEAD}）。
 	 *
-	 * <p>历史：先钉死世界坐标 → 用户没飞到那儿就什么都看不见；改成"眼位 + 朝向 × 13.5 格"后位置对了，
-	 * 但**镜头一飞，世界坐标里的板子就被甩出画面**（2026-09-24 用户："清晰封面图还是在做移动"）。
-	 * 现在真正解决在 {@link #lockTo} / {@link #lockCloud}：发射位置只决定第一帧，之后每刻由表达式归位。
+	 * <p>版面（2026-09-24 用户口径）：封面在左、三行文案在右侧空白处；
+	 * 封面 12 格见方；文案块贴图 1024²，实际墨迹宽 79.3%（≈9.5 格），与封面同高居中。
+	 *
+	 * <p>历史：0.6.0 曾把它锁在屏幕上"跟着镜头"（用户："封面会随着我的人物移动而移动，我想让他固定在某个位置"）
+	 * → 0.7.0 起改回世界固定；镜头一路飞过去会自然放大，正好当"运镜推进"用。
 	 */
 	private static void opening(ServerWorld world, double atSec) {
 		var players = world.getServer().getPlayerManager().getPlayerList();
@@ -557,43 +556,44 @@ public final class StyxShow {
 			return;
 		}
 		ServerPlayerEntity p = players.get(0);
-		// 只用 yaw（**不带俯仰**）：用户口径 2026-09-24——封面/标题要"垂直于海平面、正对镜头"。
-		// 之前跟了 pitch → 画面整个后仰 12°；镜头是水平前飞的，后仰看起来就是歪的。
+		// 起播机位 → 前方 OPEN_AHEAD 格钉一份（只在此刻算一次；之后卡片固定在世界上）
 		double yaw = Math.toRadians(p.getYaw());
-		double fx = -Math.sin(yaw), fz = Math.cos(yaw);   // 水平朝向（已单位化）
-		double rx = -fz, rz = fx;                         // 相机右 = f × up
-		// 发射位置（只决定第一帧；之后由锁定表达式每刻归位）
-		double ax = p.getX() + fx * OPEN_DIST, az = p.getZ() + fz * OPEN_DIST;
-		double eyeY = p.getEyeY();
-		// 点阵矩阵：平移列 = -半宽(格) × dpb（见 gridMatrix 注释）
-		String coverM = gridMatrix(rx, rz, -(COVER_W / 2) * COVER_DPB, -(COVER_W / 2) * COVER_DPB);
-		for (int i = 0; i < 3; i++) {
-			// 清晰板：位置锁在屏幕上不动，只有两条 alpha 段（淡入一颗 + 到交叉点换成只淡出的新一颗）。
-			double cy = eyeY + OPEN_UP[i];
-			String lock = lockTo(OPEN_DIST, 0.0, OPEN_UP[i]);
-			int plateRiseAge = (int) Math.round((OPEN_PLATE_OUT_AT[i] - OPEN_IN_AT[i]) * 20);
-			pending.add(new Pending(atSec + OPEN_IN_AT[i],
-				plateFadeOf(i, ax, cy, az, plateRiseAge, true, OPEN_PLATE_IN_SEC, lock)));
-			pending.add(new Pending(atSec + OPEN_PLATE_OUT_AT[i],
-				plateFadeOf(i, ax, cy, az, 20, false, OPEN_PLATE_OUT_SEC, lock)));
+		double fx = -Math.sin(yaw), fz = Math.cos(yaw);   // 水平前
+		double rx = -fz, rz = fx;                         // 水平右
+		double ax = p.getX() + fx * OPEN_AHEAD, az = p.getZ() + fz * OPEN_AHEAD;
+		double ay = p.getEyeY() + 0.2;
+		// 卡片平面内偏移沿"右"方向：封面在左、文案块在右
+		double coverX = ax + rx * OPEN_COVER_H, coverZ = az + rz * OPEN_COVER_H;
+		double textX = ax + rx * OPEN_TEXT_H, textZ = az + rz * OPEN_TEXT_H;
+		// 点阵矩阵：素材 96px，中心平移 -48 px → /8 = -6 格；平面基向量 = 起播时的相机右向
+		String coverM = gridMatrix(rx, rz, -(96.0 / 2), -(96.0 / 2));
+		// ① 两片清晰板：淡入一颗 + 到交叉点换成只淡出的新一颗（复合 clamp 实测整颗不渲染，见 plateFade）
+		pending.add(new Pending(atSec + OPEN_IN_AT[0], coverPlate(coverX, ay, coverZ, ticks(OPEN_COVER_OUT_AT - OPEN_IN_AT[0]),
+			true, OPEN_PLATE_IN_SEC)));
+		pending.add(new Pending(atSec + OPEN_COVER_OUT_AT, coverPlate(coverX, ay, coverZ, ticks(0.6),
+			false, OPEN_COVER_OUT_SEC)));
+		pending.add(new Pending(atSec + OPEN_IN_AT[1], textPlate(textX, ay, textZ, ticks(OPEN_TEXT_OUT_AT - OPEN_IN_AT[1]),
+			true, OPEN_PLATE_IN_SEC)));
+		pending.add(new Pending(atSec + OPEN_TEXT_OUT_AT, textPlate(textX, ay, textZ, ticks(0.6),
+			false, OPEN_TEXT_OUT_SEC)));
+		// ② 点阵：12 条分批铺（每条 768 颗），藏在封面后面 0.35 格；3.05s 起同时从中心向外消散
+		for (int i = 0; i < OPEN_DOT_BANDS; i++) {
+			double spawnAt = OPEN_DOT_SPAWN_AT + i * OPEN_DOT_SPAWN_STEP;
+			double holdSec = OPEN_DOT_DISSOLVE_AT - spawnAt;
+			int age = ticks(OPEN_DOT_END_AT - spawnAt) + 6;
+			String img = COVER_GRID_IMAGE + String.format("%02d", i) + ".png";
+			pending.add(new Pending(atSec + spawnAt, dotBand(img, COVER_DPB, COVER_DOT_SIZE,
+				coverX + fx * OPEN_DOT_BACK, ay, coverZ + fz * OPEN_DOT_BACK, coverM, age, holdSec,
+				OPEN_DOT_FADE_SEC, OPEN_DOT_STAGGER_SEC)));
 		}
-		// 封面点阵：2.30s 在清晰板后面（+0.35 格）不透明就位，等清晰板淡出把它露出来，然后从中心向外消散。
-		int dotAge = (int) Math.round(OPEN_DOT_AGE_SEC * 20);
-		pending.add(new Pending(atSec + OPEN_XFADE_AT[0], dotCloud(COVER_GRID_IMAGE, COVER_DPB, COVER_DOT_SIZE,
-			ax, eyeY + OPEN_UP[0], az, coverM, dotAge,
-			OPEN_DOT_HOLD_SEC, OPEN_DOT_FADE_SEC, OPEN_DOT_STAGGER_SEC,
-			lockCloud(OPEN_DIST + OPEN_DOT_BACK, rx, rz, OPEN_UP[0]))));
-		NbmachinaMod.LOGGER.info("[styxshow] 开场三件套（屏幕锁定）：机位 yaw {} pitch {} → 发射锚点 ({}, {}, {})（{} 格外）",
-			fmt(p.getYaw()), fmt(p.getPitch()), fmt(ax), fmt(eyeY + OPEN_UP[0]), fmt(az), fmt(OPEN_DIST));
+		NbmachinaMod.LOGGER.info("[styxshow] 开场卡片（钉死后不动）：机位 yaw {} → 锚点 ({}, {}, {})，封面 ({}, {}, {}) 文案 ({}, {}, {})，{} 格前方，{} 条点阵",
+			fmt(p.getYaw()), fmt(ax), fmt(ay), fmt(az), fmt(coverX), fmt(ay), fmt(coverZ),
+			fmt(textX), fmt(ay), fmt(textZ), fmt(OPEN_AHEAD), OPEN_DOT_BANDS);
 	}
 
-	/** 开场三件套的第 i 个清晰板（0=封面 1=标题 2=副标题）。 */
-	private static String plateFadeOf(int i, double cx, double cy, double cz, int age, boolean rising, double dur, String lock) {
-		return switch (i) {
-			case 0 -> coverPlate(cx, cy, cz, age, rising, dur, lock);
-			case 1 -> titlePlate(cx, cy, cz, age, rising, dur, lock);
-			default -> subtitlePlate(cx, cy, cz, age, rising, dur, lock);
-		};
+	/** 秒 → 刻（表达式里的 t 是刻数）。 */
+	private static int ticks(double sec) {
+		return Math.max(1, (int) Math.round(sec * 20.0));
 	}
 
 	public static void stop(ServerWorld world) {
@@ -687,13 +687,10 @@ public final class StyxShow {
 		cmds.add(riverLane(-8.0));
 		cmds.add(helix(0.0));
 		String demoMatrix = MATRICES[0];
-		String demoLock = lockTo(OPEN_DIST, 0.0, 0.0);
-		cmds.add(coverPlate(-10.0, 115.0, ZC, 40, true, OPEN_PLATE_IN_SEC, demoLock));
-		cmds.add(titlePlate(-10.0, 119.9, ZC, 40, true, OPEN_PLATE_IN_SEC, demoLock));
-		cmds.add(subtitlePlate(-10.0, 110.1, ZC, 40, true, OPEN_PLATE_IN_SEC, demoLock));
-		cmds.add(dotCloud(COVER_GRID_IMAGE, COVER_DPB, COVER_DOT_SIZE, -14.0, 111.0, ZC - 4.0,
-			gridMatrix(0.0, 1.0, -(COVER_W / 2) * COVER_DPB, -(COVER_W / 2) * COVER_DPB), 40,
-			OPEN_DOT_HOLD_SEC, OPEN_DOT_FADE_SEC, OPEN_DOT_STAGGER_SEC, lockCloud(OPEN_DIST + OPEN_DOT_BACK, 0.0, 1.0, 0.0)));
+		cmds.add(coverPlate(-10.0, 115.0, ZC, 40, true, OPEN_PLATE_IN_SEC));
+		cmds.add(textPlate(-10.0, 119.9, ZC, 40, true, OPEN_PLATE_IN_SEC));
+		cmds.add(dotBand(COVER_GRID_IMAGE + "00.png", COVER_DPB, COVER_DOT_SIZE, -14.0, 111.0, ZC - 4.0,
+			gridMatrix(0.0, 1.0, -(96.0 / 2), -(96.0 / 2)), 40, 1.0, OPEN_DOT_FADE_SEC, OPEN_DOT_STAGGER_SEC));
 		cmds.add(flareEdges(0.5, 110.5, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareRipple(0.5, 111.0, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.5, -5.5));
