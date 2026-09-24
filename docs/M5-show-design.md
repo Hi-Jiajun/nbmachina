@@ -959,8 +959,10 @@ particlex image-matrix minecraft:block{block_state:"minecraft:jigsaw"} <x> <y> <
    * 每颗粒子的"中心"= **命令点**。0.7.9 把命令点放在**贴图左下角**，
      于是 `(vx,vy,vz)=(dx,dy,dz)*k` 把整圈一边膨胀一边以 ~6 格/秒斜着推走（环根本不在方块附近）。
      现在命令点 = 环心，`dx/dz` 才是半径方向；
-   * 矩阵平移量是在**除以 dpb 之后**才乘上去的（`pos = M·(像素/dpb)`），所以平移要写"格"
-     （11.5/15 = 0.7667），写像素值会把整圈丢到 11 格外去（第一版就是这么翻的）。
+   * 矩阵平移量的单位（**这条改过两次，以这次为准**）：ExParticle 侧是
+     `pos = M · matDiv((col, row, 0, 1), dpb)`，而 `matDiv` 把**整个向量（含齐次项 w=1）**都除以 dpb，
+     于是平移项也自动被除以 dpb —— 想居中（±0.7667 格）矩阵里必须写**像素值 ±11.5**。
+     写成"格"会让整圈偏 0.72 格（俯视实机量到的就是这个偏移）。
 
 ### 21.2 v3 一颗音放什么（0.8.1 现行）
 
@@ -996,3 +998,47 @@ pwsh _scratch-m3-39\gpu\record-flare.ps1 -MidiList "67,76,55" -X 0 -Y 110 -Z -6 
 ```
 
 * 录像抽帧一律先 `scale=...`/`crop` 降采样（AGENTS.md 的 413 事故口径），一轮 ≤4 张。
+
+## §22 音符盒特效 v3.1（0.8.3，2026-09-24 深夜）
+
+用户复看 0.8.1 后给的三条口径（原话）：
+**"最主要的一个问题，视效并没有在音符盒上，而是在音符盒下面去了(这是错的)，涟漪效果做的也不好，
+还有一个圆环的视效也是不符合要求的，把他去掉"**。
+
+### 22.1 第一根因：整组特效低了整整一格（in-world 取证）
+
+* 机器 `machine_map.csv` / `PendingVisual` 里的 `y=110` **不是音符盒**，音符盒在它**上一格**：
+  `NbmachinaMachine` 找音符盒用的是 `new BlockPos(n.x(), n.y() + 1, n.z())`，
+  实机探针也确认：`execute if block 0 111 -6 minecraft:note_block` 命中、y=110 不命中。
+* 0.8.1 的 `fireNote()` 直接把传进来的 y 当音符盒底 —— 于是棱框/表面光/涟漪全部低一格，
+  看起来就是"特效都在音符盒下面"。这一格差还会连带：涟漪跑到水面高度、棱框围住的是下面那块。
+* 修法：`fireNote()` 里按**方块状态** self-heal —— 先看 `(x,y,z)` 是不是 `note_block`，
+  不是就取 `y+1`。这样机器（传 map 的 y）和 `/nbm machine flare <midi> <x> <y> <z>`
+  （两种 y 写法）都能落对位置。
+
+### 22.2 重音大圆环删除
+
+旧的 `accentRing`（青色、`size=3.0`、半径荡到 ~5 格、alpha 0.5）按用户口径**整条删掉**
+（函数、`tick()` 里的投放、`showcheck` 样例一起去掉）。`styxshow.json` 里的 `accents` 数据保留但不再出画。
+→ `showcheck` 从 22 条变成 **21/21**，这是预期值。
+
+### 22.3 涟漪重调（参考两个音乐可视化项目）
+
+参考：`XxHuberrr/Mineradio-paused`（Electron 播放器，内含 sonic-topography 预设）与
+`yin-yizhen/sonic-topography`。真正能用的是后者 `CustomShaderMaterial.ts` 316–350 行的涟漪 shader：
+
+```glsl
+float waveRadius = timeSince * speed;      // 波前半径 = 时间 × 速度
+float d = dist - waveRadius;
+float rippleWave = exp(-d*d / width);      // 高斯环剖面（width 常量 → 环宽稳定）
+float fade = exp(-waveRadius / fadeDist);  // 幅度按**已传播距离**指数衰减
+```
+
+粒子做不了位移，所以按它的"两条曲线"来定参数：
+
+* 环宽稳定 → 用 `ring.png`（环带 8.4–10.4px，2px ≈ 0.13 格）而不是靠粒子大小撑宽度；
+* 指数衰减 → `size = s0*exp(-2.2*t/age)`（0.8.1 用的 `(1+0.9u)*pow(1-u,0.45)` 前段一直很粗，实机是甜甜圈）；
+* 扩散收窄 → `(vx,vy,vz)=(dx,dy,dz)/ddis*0.08/(1+t/3.5)`，
+  终态半径 ≈ 1.2 格（直径 ~2.4 格，0.8.1 是 3.8 格，"像甜甜圈"）；
+* 力度两档（抄它的 kick 彩环 / snare 白环）：`velocity≥90` 的第一阵拉白 35%，更锐。
+* 三阵仍是 `0 / 0.16 / 0.32s`（`Pending` 延迟队列）；贴的是**音符盒顶面 +0.02 格**，不再是水面。

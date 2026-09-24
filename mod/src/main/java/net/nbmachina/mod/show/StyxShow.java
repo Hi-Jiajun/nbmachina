@@ -517,26 +517,33 @@ public final class StyxShow {
 	 * 于是 `(dx,dy,dz)` 里全带着 +0.8/−0.8 格的角点偏置，`(vx,vy,vz)=(dx,dy,dz)*k`
 	 * 等于把整圈**一边膨胀一边以 ~6 格/秒斜着推走**。现在命令点 = 环心，`dx/dz` 才是真正的半径方向。
 	 *
-	 * <p>⚠ 单位坑（2026-09-24 实测）：ExParticle 侧是 `pos = M · (像素坐标/dpb)`，
-	 * 所以矩阵里的平移量**已经除以 dpb 了** → 平移要写"格"（11.5/15 = 0.7667），
-	 * 写像素值会把整圈挪到 11 格外去（第一版就是这么翻的）。
+	 * <p>⚠ 单位坑（2026-09-24 实测定论）：ExParticle 侧是 `pos = M · matDiv((col,row,0,1), dpb)`，
+	 * `matDiv` 把**整个向量（含齐次项 w=1）**都除以 dpb，于是平移项也自动被除以 dpb：
+	 * 想要 -0.7667 格的居中偏移，矩阵里就得写**像素值 -11.5**。
+	 * 写成"格"（-0.7667）会让整圈偏 0.72 格 —— 俯视实机量到的就是这个偏移。
 	 *
 	 * <p>scale 只给"预览"用：不开机器时三阵只能同刻出生，用不同半径错开（机器跑的时候是每阵晚 0.15s）。
 	 */
 	private static String ringMatrix(double scale) {
-		double half = 11.5 / RING_DPB;
+		double half = 11.5;   // 像素（会被 dpb 除掉）——见上面那条单位说明
 		return "(0," + fmt(scale) + ",0," + fmt(-half * scale) + ",,0,0,0,0,,"
 			+ fmt(-scale) + ",0,0," + fmt(half * scale) + ",,0,0,0,1)";
 	}
-	/** 水皮高度：水面实测在方块顶面下 ~0.12 格（水方块与音符盒同在 y=110 → 水面 110.875）。 */
-	private static final double RIPPLE_DROP = 0.02;
-
 	/** 颜色缩放（通道 ×f，钳到 1）：同一个音高用不同亮度区分棱框 / 表面光 / 水波 / 迸溅 / 火花。 */
 	private static String tint(String col, double f) {
 		String[] p = col.split(",");
 		double r = Math.min(1.0, Double.parseDouble(p[0]) * f);
 		double g = Math.min(1.0, Double.parseDouble(p[1]) * f);
 		double b = Math.min(1.0, Double.parseDouble(p[2]) * f);
+		return fmt(r) + "," + fmt(g) + "," + fmt(b);
+	}
+
+	/** 往白里拉 f（0..1）：参考 sonic-topography 的"snare = 锐白环、kick = 彩色环"两档口径，力度大的音更白更锐。 */
+	private static String whiten(String col, double f) {
+		String[] p = col.split(",");
+		double r = Double.parseDouble(p[0]) + (1.0 - Double.parseDouble(p[0])) * f;
+		double g = Double.parseDouble(p[1]) + (1.0 - Double.parseDouble(p[1])) * f;
+		double b = Double.parseDouble(p[2]) + (1.0 - Double.parseDouble(p[2])) * f;
 		return fmt(r) + "," + fmt(g) + "," + fmt(b);
 	}
 
@@ -609,13 +616,18 @@ public final class StyxShow {
 	 * 环贴图是连着的，只在环带上取像素，观感就是"一条水波线"；
 	 * 竖向下沉/起伏仍靠 `vy=0.045*sin(...)`（`ds1` = 该像素在环上的方位角）。
 	 *
+	 * <p>波形口径抄自参考项目 sonic-topography 的涟漪 shader（`CustomShaderMaterial.ts` 316-350 行）：
+	 * `waveRadius = t * speed`、剖面是 `exp(-d²/width)` 的高斯环、幅度按 `exp(-waveRadius/fadeDist)`
+	 * **指数衰减**。粒子做不了位移，就把"指数衰减"落在 size 上：`size = s0*exp(-1.8t/age)`
+	 * （上一版用 `(1+0.9u)*pow(1-u,0.45)` → 前段一直很粗，实机是一坨）。
+	 *
 	 * @param scale 出生半径缩放（1.0 = 素材原尺寸 0.63 格；只有预览才用 !=1）
 	 */
 	private static String flareRipple(double cx, double top, double cz, String col, double scale, int age, double size) {
 		return "particlex image-matrix end_rod " + fmt(cx) + " " + fmt(top) + " " + fmt(cz)
 			+ " ring.png 1.0 \"" + ringMatrix(scale) + "\" " + fmt(RING_DPB) + " 0 0 0 " + age
-			+ " \"(vx,vy,vz)=(dx,dy,dz)/ddis*0.17/(1+t/3.2); vy=0.045*sin(t/2.4+ds1*3); "
-			+ "size=" + fmt(size) + "*(1-t/" + age + "); cr,cg,cb=" + col + "; alpha=1\" 1.0";
+			+ " \"(vx,vy,vz)=(dx,dy,dz)/ddis*0.08/(1+t/3.5); vy=0.030*sin(t/2.2+ds1*3); "
+			+ "size=" + fmt(size) + "*exp(-2.2*t/" + age + "); cr,cg,cb=" + col + "; alpha=1\" 1.0";
 	}
 
 	/**
@@ -643,13 +655,6 @@ public final class StyxShow {
 			+ "vx=(random()-0.5)*0.12; vy=0.30+random()*0.32; vz=(random()-0.5)*0.12; "
 			+ "gravity=0.05; friction=0.98\" 0.12 0.05 0.12 16 "
 			+ "\"size=0.80*(1-t/15)\" 1.0";
-	}
-
-	private static String accentRing(double t) {
-		return "particlex custom-parameter polar end_rod " + fmt(PLAYHEAD_A * t + PLAYHEAD_B + 0.5) + " "
-			+ fmt(DECK_TOP + 0.18) + " " + fmt(ZC) + " 0 6.2832 "
-			+ "\"s1=t; s2=0; dis=0.6; size=3.0; cr,cg,cb=0.15,0.86,0.80; alpha=0.5; age=32; light=1.0\" 0.08 "
-			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.42/(1+t/6); alpha=0.5*(1-t/31)\" 1.0";
 	}
 
 	/**
@@ -909,10 +914,8 @@ public final class StyxShow {
 			}
 		}
 		double nowLyric = now - lyricOffset;
-		while (accCursor < doc.accents.length && doc.accents[accCursor] <= now) {
-			exec(world, accentRing(doc.accents[accCursor]));
-			accCursor++;
-		}
+		// 重音"大圆环"（旧 accentRing，青色 size 3.0 / 半径荡到 5 格）已按用户 2026-09-24 口径**删除**：
+		// "还有一个圆环的视效也是不符合要求的，把他去掉"。styxshow.json 里的 accents 数据保留但不再出画。
 		while (lineCursor < doc.lines.size() && doc.lines.get(lineCursor).t() <= nowLyric) {
 			LyricLine line = doc.lines.get(lineCursor++);
 			if (line.chars() != null) {
@@ -939,27 +942,35 @@ public final class StyxShow {
 	}
 
 	private static void fireNote(ServerWorld world, int x, int y, int z, int midi, int velocity, boolean bass) {
-		// 一切以**方块自己的 y** 为准（机器 map 里音符盒就在 y=110，方块占 110..111、顶面 111.0）。
-		// v3 锚点（2026-09-24，用户复看 0.7.9 后重定）：
-		//   · 棱框 / 表面光 都挂**方块中心**（y+0.5）——"体积从和音符盒一样大"才是用户要的；
-		//   · 水面/涟漪挂**水皮**（顶面下 0.02 格；水方块与音符盒同在 y=110 → 水面 110.875）。
-		// 0.7.9 把整组抬到 y+1.5，棱框悬空一格、涟漪和柔光仍是平铺面 —— 平铺面在
-		// "与海平面平行"的机位下会被压成一条线，这就是用户"其他效果都没看出来"的真因。
+		// ⚠ y 口径（2026-09-24 用户实机取证："视效跑到音符盒下面去了"）：
+		//   机器 `machine_map.csv` / `PendingVisual` 里的 y=110 **不是音符盒**，音符盒在它**上一格**
+		//   （in-world 验证：`execute if block 0 111 -6 minecraft:note_block` 命中，y=110 那格不命中）。
+		//   所以这里按**方块状态** self-heal：先看 (x,y,z)，不是音符盒就取 y+1。
+		//   预览命令 `/nbm machine flare <midi> [x y z]` 两种写法（map 的 y 或音符盒的 y）都能对。
+		int by = y;
+		if (!world.getBlockState(new net.minecraft.util.math.BlockPos(x, y, z))
+				.isOf(net.minecraft.block.Blocks.NOTE_BLOCK)) {
+			by = y + 1;
+		}
+		// v3.1 锚点：整组特效都长在**音符盒本体／顶面**上（不是水面、不是下一格）。
 		double cx = x + 0.5, cz = z + 0.5;
-		double mid = y + 0.5;      // 方块中心
-		double top = y + 1.0;      // 方块顶面
-		double water = top - RIPPLE_DROP;   // 水皮
+		double mid = by + 0.5;     // 音符盒中心
+		double top = by + 1.0;     // 音符盒顶面
 		String col = hueColor(midi, bass);
 		exec(world, flareEdges(cx, mid, cz, col));
 		exec(world, flareSurface(cx, mid, cz, tint(col, 1.05)));
-		// 水波阵：同一处落点、每 0.15s 追一阵雨（0 / 0.15 / 0.30s），一圈圈往外荡 → "阵阵涟漪"。
-		// 机器在跑时用延迟队列错开（见 pulse()）；单独 /nbm machine flare 预览时只能同刻出生，
-		// 就换成"更大的出生半径"把三阵拉开（scale 1.0 / 1.45 / 1.9）。
-		pulse(world, 0.00, () -> flareRipple(cx, water, cz, tint(col, 1.05), 1.00, 26, 1.10));
-		pulse(world, 0.15, () -> flareRipple(cx, water, cz, tint(col, 1.15), 1.45, 30, 1.00));
-		if (velocity >= 85)
-			pulse(world, 0.30, () -> flareRipple(cx, water, cz, tint(col, 1.25), 1.90, 34, 0.90));
-		exec(world, flareSplash(cx, water + 0.02, cz, tint(col, 1.30)));
+		// 水波阵：贴着**音符盒顶面**荡开，每 0.16s 追一阵（0 / 0.16 / 0.32s）→ "像被流星砸中那样泛起波纹"。
+		// 机器在跑时用延迟队列错开（见 pulse()）；单独 /nbm machine flare 预览时没有"到点"这一说、
+		// 只能同刻出生，就换成"更大的出生半径"把阵与阵拉开（scale 1.0 / 1.45 / 1.9）。
+		final double ringY = top + 0.02;
+		// 力度大 = 更白更锐（参考 sonic-topography 的 snare 白环 / kick 彩环两档）
+		final String ring0 = velocity >= 90 ? whiten(tint(col, 1.05), 0.35) : tint(col, 1.05);
+		final boolean live = active;
+		pulse(world, 0.00, () -> flareRipple(cx, ringY, cz, ring0, 1.00, 20, 0.80));
+		pulse(world, 0.16, () -> flareRipple(cx, ringY, cz, tint(col, 1.15), live ? 1.00 : 1.45, 24, 0.70));
+		if (velocity >= 100)
+			pulse(world, 0.32, () -> flareRipple(cx, ringY, cz, tint(col, 1.25), live ? 1.00 : 1.90, 28, 0.60));
+		exec(world, flareSplash(cx, top + 0.03, cz, tint(col, 1.30)));
 		exec(world, flareSparks(cx, top + 0.05, cz, tint(col, 1.20)));
 	}
 
@@ -1033,7 +1044,6 @@ public final class StyxShow {
 		cmds.add(flareRipple(0.5, 110.98, -5.5, "0.90,0.95,1.00", 1.90, 34, 0.90));
 		cmds.add(flareSplash(0.5, 110.98, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.05, -5.5, "0.90,0.95,1.00"));
-		cmds.add(accentRing(3.917));
 		LyricLine demo = new LyricLine(22.407, 24.457, 3.0, 10.0, "请不要让我就此死亡",
 			List.of(new LyricChar(22.407, "O", 0, 1.4, 0.23), new LyricChar(22.64, "k", 1.4, 1.4, 0.24)));
 		cmds.add(lyricChar(demo, demo.chars().get(0), 0));
