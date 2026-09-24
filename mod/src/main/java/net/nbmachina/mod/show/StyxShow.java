@@ -75,8 +75,16 @@ public final class StyxShow {
 	private static boolean active = false;
 	private static int accCursor = 0;
 	private static int lineCursor = 0;
-	/** 开场"延迟生成"队列（视效层时间 → 命令）：用生成时刻 + age 控寿命，避免写动态 alpha 窗口。 */
-	private record Pending(double at, String cmd) {}
+	/**
+	 * 开场"延迟生成"队列（视效层时间 → 命令）。
+	 *
+	 * <p>⚠ 命令是**到点才拼**的（{@link java.util.function.Supplier}），不是开场时算好：粒子被创建的那一刻
+	 * 会落在命令给的世界坐标上，而锚定表达式要**下一刻**才把它搬到"眼位 + 起播方向×距离"处；
+	 * 中间这一帧的渲染位置是"出生点 → 锚定目标"的插值。要是出生点还用**起播瞬间**的机位算，
+	 * 飞行一段之后每颗新粒子都会先闪在几格甚至十几格之外再归位——点阵"打点时闪烁"、
+	 * 封面板"最后左右抖动"都是这个（2026-09-24 定位）。所以出生点必须**按当前眼位现算**。
+	 */
+	private record Pending(double at, java.util.function.Supplier<String> cmd) {}
 	private static final List<Pending> pending = new ArrayList<>();
 	private static int sent = 0;
 	private static int failed = 0;
@@ -205,42 +213,49 @@ public final class StyxShow {
 	// ── 开场时间线（秒；0.7.4「点阵先打印 → 清板压上 → 一起缩没」版）──────────────────
 	// ⚠ ExParticle 表达式里的 t 是**刻数**（命令末尾 step=1 → 每刻 +1），所以"秒"必须 ×20 才等于表达式里的时长。
 	//
-	// 0.00→0.60  点阵**原地**从左上角打印到右下角（点阵与封面同轴，打印顺序 = 对角线扫描）
-	// 0.60→1.20  点阵整张晾着（打印完的定格，给用户看清点阵）
-	// 1.20→1.90  清晰封面压在点阵上淡入（点阵同时在背后被挡住）
-	// 2.00       第一拨点阵整批到期消失（此时封面已完全挡住它 → 看不见任何闪动）
-	// 1.25→1.95  文案块淡入
-	// 2.60→3.40  封面 + 文案淡出；**第二拨点阵**（同轴、同图）在背后原地缩成 0 → 一起消失
+	// 0.00→0.70  封面 + 文案**同时**淡入（用户口径："封面和文字应该同时出现"）
+	// 0.75→1.45  点阵**从左上角打印到右下角**（每颗点按自己的对角坐标错开长出来；点阵比封面右偏 6.5 格、后 0.35 格）
+	// 1.45→2.30  定格（点阵只在封面右侧露出来）
+	// 2.30→3.09  封面 + 文案拆成 4×4 块、按对角顺序缩没（用户口径："消失动画要自然/灵动"）
+	// 3.10       第一拨点阵整批到期、第二拨（同图同位）接上 → 3.10→3.86 逐颗缩没（"随之自然消失"）
 	// 3.917      第一颗音
 	//
 	// 为什么会有"两拨点阵"：单个表达式里**两个 clamp 相乘的复合式实测整颗粒子不渲染**
 	// （2026-09-24 实机对照：单 clamp 正常、clamp*clamp 全灭），所以"长出来"和"缩回去"
 	// 必须拆成两批粒子，各自只带一个 clamp。
-	/** 封面/文案淡入起点（文案晚 0.05s，避免两块像一块）。 */
-	private static final double OPEN_COVER_IN_AT = 1.20;
-	private static final double OPEN_TEXT_IN_AT = 1.25;
+	/** 封面 + 文案**同一时刻**淡入（用户口径："封面和文字应该同时出现"）。 */
+	private static final double OPEN_PLATE_IN_AT = 0.00;
 	private static final double OPEN_PLATE_IN_SEC = 0.70;
-	/** 封面与文案**同一时刻、同样时长**淡出（用户 2026-09-24："点阵也要和封面文字同时消失"）。 */
-	private static final double OPEN_COVER_OUT_AT = 2.60;
+	/** 封面与文案**同一时刻**开始退场（拆块溶解，见 {@link #tilePlate}）。 */
+	private static final double OPEN_COVER_OUT_AT = 2.30;
 	private static final double OPEN_COVER_OUT_SEC = 0.80;
 	private static final double OPEN_TEXT_OUT_AT = OPEN_COVER_OUT_AT;
 	private static final double OPEN_TEXT_OUT_SEC = OPEN_COVER_OUT_SEC;
-	/** 第一拨点阵（打印）：12 条**斜带**在 0.00→0.44s 生成，每颗点按自己的对角坐标错开长出来。 */
-	private static final double OPEN_DOT_PRINT_SPAWN_AT = 0.00;
+	/** 退场拆块：4×4 块（每块 3 格见方），对角顺序、0.09s/步，每块再花 0.25s 缩到 0。 */
+	private static final int PLATE_TILES = 4;
+	private static final double OPEN_TILE_BLOCKS = PLATE_BLOCKS / PLATE_TILES;
+	private static final double OPEN_TILE_STAGGER_SEC = 0.09;
+	private static final double OPEN_TILE_SHRINK_SEC = 0.25;
+	/** 16 块一起在 2.28s 出生（比整板退场早 0.02s，交接时画面是完整的）。 */
+	private static final double OPEN_TILE_IN_AT = OPEN_COVER_OUT_AT - 0.02;
+	/** 第一拨点阵（打印）：12 条**斜带**在 0.75→1.19s 生成，每颗点按自己的对角坐标错开长出来。 */
+	private static final double OPEN_DOT_PRINT_SPAWN_AT = 0.75;
 	private static final double OPEN_DOT_PRINT_SPAWN_STEP = 0.040;
-	/** 第一拨点阵的到期时刻（封面 1.90s 已完全不透明，整批直接到期不会看到闪）。 */
-	private static final double OPEN_DOT_PRINT_END_AT = 2.00;
-	/** 第二拨点阵（消散）：2.60s 生成（与封面淡出同时），缩到 0，3.40s 前收干净。 */
-	private static final double OPEN_DOT_DISSOLVE_AT = OPEN_COVER_OUT_AT;
+	/** 第一拨点阵的到期时刻（= 第二拨生成的时刻；两拨同图同位，交接看不见缝）。 */
+	private static final double OPEN_DOT_PRINT_END_AT = 3.12;
+	/** 第二拨点阵（消散）：封面/文案收完之后（3.10s）才开始，缩到 0，3.86s 前收干净。 */
+	private static final double OPEN_DOT_DISSOLVE_AT = 3.10;
 	private static final double OPEN_DOT_DISSOLVE_SPAWN_STEP = 0.020;
 	private static final int OPEN_DOT_BANDS = 12;
 	/** 斜向扫描速度（秒/格）：对角跨度 24 格 → 打印 0.48s、消散 0.36s。 */
 	private static final double OPEN_DOT_PRINT_SEC_PER_BLOCK = 0.020;
 	private static final double OPEN_DOT_PRINT_RISE_SEC = 0.12;
 	private static final double OPEN_DOT_DISSOLVE_SEC_PER_BLOCK = 0.015;
-	private static final double OPEN_DOT_DISSOLVE_FALL_SEC = 0.44;
+	private static final double OPEN_DOT_DISSOLVE_FALL_SEC = 0.40;
 	/** 点阵全部消失的时刻（< 第一颗音 3.917s）。 */
-	private static final double OPEN_DOT_END_AT = 3.40;
+	private static final double OPEN_DOT_END_AT = 3.86;
+	/** 起播机位（fire 时取不到玩家就用它）与起播朝向常量。 */
+	private static double eye0X, eye0Y, eye0Z, dirFx, dirFz, dirRx, dirRz;
 	/** 诊断开关（默认关）：`-Dstyx.nodots=true` 只放封面/文案，`-Dstyx.noplates=true` 只放点阵。 */
 	private static final boolean DBG_NO_DOTS = Boolean.getBoolean("styx.nodots");
 	private static final boolean DBG_NO_PLATES = Boolean.getBoolean("styx.noplates");
@@ -290,12 +305,11 @@ public final class StyxShow {
 	 * 还蛮有感觉的……只是把点阵的图层放在文字和封面之后"——即点阵故意偏到封面右侧，
 	 * 但它必须**排在后层**：被封面和文字挡住的部分不显示，只在空白处铺开。
 	 *
-	 * <p>2026-09-24 第二轮修正 → <b>改回 0（与封面同轴）</b>：偏右 6.5 格时，封面淡出过程中会
-	 * 同时看到"封面残影 + 右边 6.5 格处的同一张点阵图"，两层内容错位 → 用户看到的就是
-	 * "封面最后出现左右抖动"。同轴之后：打印就是"这张图自己从左上一路打印到右下"，
-	 * 淡出就是"封面原地化成点阵、点阵再缩没"，全程没有第二个错位的副本。
+	 * <p>2026-09-24 第二轮先按"抖动来自错位副本"的猜测改成 0；用户复看后明确
+	 * <b>"点阵需要右偏才对，那才是我希望的效果"</b> → 恢复 6.5。
+	 * 抖动真因见 {@link #Pending} 的说明（新粒子出生点用了旧机位），与偏移量无关。
 	 */
-	private static final double OPEN_DOT_SHIFT_H = 0.0;
+	private static final double OPEN_DOT_SHIFT_H = 6.5;
 	/**
 	 * 点阵比清晰板靠后多少格：交叉过渡靠"清晰板淡出露出点阵"，避免半透明叠色（开光影会变麻点）。
 	 * ⚠ 镜头从 −x 方向飞来，所以"更远"= **更大** 的 x：点阵要放在 {@code ax + OPEN_DOT_BACK}。
@@ -436,6 +450,27 @@ public final class StyxShow {
 	 */
 	private static String plateFade(String block, double cx, double cy, double cz, int age, String anim) {
 		return plate(block, cx, cy, cz, age, "size=" + fmt(PLATE_SIZE) + "; light=1.0; " + anim);
+	}
+
+	/**
+	 * **拆块板**（0.7.5 退场用）：一颗粒子只画贴图的一个矩形块。
+	 *
+	 * <p>取景窗走 ExParticle 的 {@code u0/u1/v0/v1}（归一化，默认 0,1,0,1 = 整张）——这是这次给
+	 * ExParticle Fabric 侧新加的变量，落点是 {@code TerrainParticleMixin} 的 UV 覆写。
+	 *
+	 * <p>为什么不是淡出：开光影时 alpha<1 的板子暗部会整块消失（§16.1 实测），画面像"中途换了一张"。
+	 * 拆块后每块**全程 alpha=1**，只把 {@code size} 缩到 0 —— 观感是"画面碎成方块、一块块退掉"，
+	 * 既不依赖 alpha，也不会被引擎丢粒子。
+	 */
+	private static String tilePlate(String block, double cx, double cy, double cz, int age, double size,
+	                                double u0, double u1, double v0, double v1, double delaySec,
+	                                double shrinkSec, String lock) {
+		double delay = Math.max(0.0, delaySec * 20.0);
+		double shrink = Math.max(1.0, shrinkSec * 20.0);
+		String anim = "size=" + fmt(size) + "*(1-clamp((t-" + fmt(delay) + ")/" + fmt(shrink) + ",0,1)); light=1.0; alpha=1"
+			+ "; u0=" + fmt(u0) + "; u1=" + fmt(u1) + "; v0=" + fmt(v0) + "; v1=" + fmt(v1)
+			+ (lock.isEmpty() ? "" : "; " + lock);
+		return plate(block, cx, cy, cz, age, anim);
 	}
 
 	/**
@@ -651,15 +686,19 @@ public final class StyxShow {
 			return;
 		}
 		ServerPlayerEntity p = players.get(0);
-		// 起播机位 → 前方 OPEN_AHEAD 格钉一份（只在此刻算一次；之后卡片固定在世界上）
+		// 起播机位/朝向：方向常量（fx/fz/rx/rz）决定版面朝向，眼位只做"取不到玩家"时的兜底
 		double yaw = Math.toRadians(p.getYaw());
 		double fx = -Math.sin(yaw), fz = Math.cos(yaw);   // 水平前
 		double rx = -fz, rz = fx;                         // 水平右
+		eye0X = p.getX();
+		eye0Y = p.getEyeY();
+		eye0Z = p.getZ();
+		dirFx = fx;
+		dirFz = fz;
+		dirRx = rx;
+		dirRz = rz;
 		double ax = p.getX() + fx * OPEN_AHEAD, az = p.getZ() + fz * OPEN_AHEAD;
 		double ay = p.getEyeY() + 0.2;
-		// 卡片平面内偏移沿"右"方向：封面在左、文案块在右
-		double coverX = ax + rx * OPEN_COVER_H, coverZ = az + rz * OPEN_COVER_H;
-		double textX = ax + rx * OPEN_TEXT_H, textZ = az + rz * OPEN_TEXT_H;
 		// 点阵矩阵：素材 96px，中心平移 -48 px → /8 = -6 格；平面基向量 = 起播时的相机右向
 		String coverM = gridMatrix(rx, rz, -(96.0 / 2), -(96.0 / 2));
 		// 屏幕锚定（0.7.1）：把卡片每刻搬到「眼位 + 起播方向×距离 + 起播右向×版面偏移」→ 屏幕上不动
@@ -667,49 +706,101 @@ public final class StyxShow {
 		String textLock = OPEN_SCREEN_ANCHOR ? anchorTo(OPEN_AHEAD, OPEN_TEXT_H, 0.2, fx, fz, rx, rz) : "";
 		String dotLock = OPEN_SCREEN_ANCHOR
 			? anchorCloud(OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H + OPEN_DOT_SHIFT_H, 0.2, fx, fz, rx, rz) : "";
-		// 点阵发射位置 = 封面中心再沿前方退 OPEN_DOT_BACK（0.35 格）→ 永远在封面后层
-		double dotX = coverX + fx * OPEN_DOT_BACK + rx * OPEN_DOT_SHIFT_H;
-		double dotZ = coverZ + fz * OPEN_DOT_BACK + rz * OPEN_DOT_SHIFT_H;
-		// ① 第一拨点阵：12 条斜带分批生成，每颗点按自己的对角坐标错开长出来（= 左上 → 右下的打印）
+		// ① 点阵：12 条斜带分批生成，每颗点按自己的对角坐标错开长出来（= 左上 → 右下的打印）
+		//    点阵整体比封面**右偏 OPEN_DOT_SHIFT_H 格、后 0.35 格**（用户口径：那个错位观感是要的）
 		for (int i = 0; !DBG_NO_DOTS && i < OPEN_DOT_BANDS; i++) {
 			double spawnAt = OPEN_DOT_PRINT_SPAWN_AT + i * OPEN_DOT_PRINT_SPAWN_STEP;
 			int age = ticks(OPEN_DOT_PRINT_END_AT - spawnAt) + 2;
 			String img = COVER_GRID_IMAGE + String.format("%02d", i) + ".png";
-			pending.add(new Pending(atSec + spawnAt, dotBand(img, COVER_DPB, dotX, ay, dotZ, coverM, age,
-				dotGrow(rx, rz, spawnAt), dotLock)));
+			double t0 = spawnAt;
+			pending.add(new Pending(atSec + spawnAt, () -> {
+				double[] q = anchorPoint(world, OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H + OPEN_DOT_SHIFT_H, 0.2);
+				return dotBand(img, COVER_DPB, q[0], q[1], q[2], coverM, age, dotGrow(rx, rz, t0), dotLock);
+			}));
 		}
-		// ② 两片清晰板：淡入一颗 + 到交叉点换成只淡出的新一颗（复合 clamp 实测整颗不渲染，见 plateFade）
+		// ② 封面 + 文案：**同一时刻**淡入（用户口径："封面和文字应该同时出现"）
 		if (!DBG_NO_PLATES) {
-			pending.add(new Pending(atSec + OPEN_COVER_IN_AT, coverPlate(coverX, ay, coverZ, ticks(OPEN_COVER_OUT_AT - OPEN_COVER_IN_AT),
-				true, OPEN_PLATE_IN_SEC, coverLock)));
-			pending.add(new Pending(atSec + OPEN_COVER_OUT_AT, coverPlate(coverX, ay, coverZ, ticks(0.6),
-				false, OPEN_COVER_OUT_SEC, coverLock)));
-			pending.add(new Pending(atSec + OPEN_TEXT_IN_AT, textPlate(textX, ay, textZ, ticks(OPEN_TEXT_OUT_AT - OPEN_TEXT_IN_AT),
-				true, OPEN_PLATE_IN_SEC, textLock)));
-			pending.add(new Pending(atSec + OPEN_TEXT_OUT_AT, textPlate(textX, ay, textZ, ticks(0.6),
-				false, OPEN_TEXT_OUT_SEC, textLock)));
+			int inAge = ticks(OPEN_COVER_OUT_AT - OPEN_PLATE_IN_AT);
+			pending.add(new Pending(atSec + OPEN_PLATE_IN_AT, () -> {
+				double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_COVER_H, 0.2);
+				return coverPlate(q[0], q[1], q[2], inAge, true, OPEN_PLATE_IN_SEC, coverLock);
+			}));
+			pending.add(new Pending(atSec + OPEN_PLATE_IN_AT, () -> {
+				double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_TEXT_H, 0.2);
+				return textPlate(q[0], q[1], q[2], inAge, true, OPEN_PLATE_IN_SEC, textLock);
+			}));
+			/*
+			 * 退出：**拆成 4×4 块、按对角顺序一块块缩没**（0.7.5，用户口径："消失动画不自然/灵动"）。
+			 * 为什么不用 alpha：开光影时 alpha<1 的板子暗部会整块消失（见 §16.1 实测），画面像"换了一张"。
+			 * 拆块后每块全程 alpha=1，只靠 size 缩到 0 —— 观感是"画面碎成方块、从左上往右下退掉"。
+			 */
+			for (int tile = 0; tile < PLATE_TILES * PLATE_TILES; tile++) {
+				int col = tile % PLATE_TILES, row = tile / PLATE_TILES;
+				double dh = (col - (PLATE_TILES - 1) / 2.0) * OPEN_TILE_BLOCKS;
+				double dv = ((PLATE_TILES - 1) / 2.0 - row) * OPEN_TILE_BLOCKS;
+				double delay = OPEN_TILE_STAGGER_SEC * (col + row);
+				// 16 块**同时**在场（比整板晚 0.02s 出生，保证交接时画面是完整的），
+				// 各自按 delay 开始缩 → 观感才是"这块退了、其余还在"的逐块溶解。
+				int age = ticks(delay + OPEN_TILE_SHRINK_SEC) + 3;
+				double u0 = col / (double) PLATE_TILES, u1 = (col + 1) / (double) PLATE_TILES;
+				double v0 = row / (double) PLATE_TILES, v1 = (row + 1) / (double) PLATE_TILES;
+				pending.add(new Pending(atSec + OPEN_TILE_IN_AT, () -> {
+					double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_COVER_H + dh, 0.2 + dv);
+					return tilePlate(COVER_BLOCK, q[0], q[1], q[2], age, OPEN_TILE_BLOCKS * 4.0,
+						u0, u1, v0, v1, delay, OPEN_TILE_SHRINK_SEC,
+						anchorTo(OPEN_AHEAD, OPEN_COVER_H + dh, 0.2 + dv, fx, fz, rx, rz));
+				}));
+				pending.add(new Pending(atSec + OPEN_TILE_IN_AT, () -> {
+					double[] q = anchorPoint(world, OPEN_AHEAD, OPEN_TEXT_H + dh, 0.2 + dv);
+					return tilePlate(TITLE_BLOCK, q[0], q[1], q[2], age, TEXT_BLOCKS / PLATE_TILES * 4.0,
+						u0, u1, v0, v1, delay, OPEN_TILE_SHRINK_SEC,
+						anchorTo(OPEN_AHEAD, OPEN_TEXT_H + dh, 0.2 + dv, fx, fz, rx, rz));
+				}));
+			}
 		}
-		/*
-		 * ③ 第二拨点阵：封面开始淡出的同一刻（2.30s）在它背后原地生成同一张点阵图，然后按对角顺序
-		 *    "往回缩"到 0 —— 观感就是"清晰封面化回点阵、点阵再缩没"，和文字一起在 3.10s 前收干净。
-		 *    与封面同轴（OPEN_DOT_SHIFT_H = 0）是关键：错位副本正是"封面最后左右抖动"的来源。
+		/**
+		 * ③ 点阵消散：封面/文案**消失之后**（3.10s 起）才开始的"自然而然退掉"，
+		 *    顺序与打印一致（左上 → 右下），全程几何缩放、不碰 alpha。
 		 */
 		for (int i = 0; !DBG_NO_DOTS && i < OPEN_DOT_BANDS; i++) {
 			double spawnAt = OPEN_DOT_DISSOLVE_AT + i * OPEN_DOT_DISSOLVE_SPAWN_STEP;
 			int age = ticks(OPEN_DOT_END_AT - spawnAt) + 6;
 			String img = COVER_GRID_IMAGE + String.format("%02d", i) + ".png";
-			pending.add(new Pending(atSec + spawnAt, dotBand(img, COVER_DPB, dotX, ay, dotZ, coverM, age,
-				dotShrink(rx, rz, spawnAt - OPEN_DOT_DISSOLVE_AT), dotLock)));
+			double t0 = spawnAt - OPEN_DOT_DISSOLVE_AT;
+			pending.add(new Pending(atSec + spawnAt, () -> {
+				double[] q = anchorPoint(world, OPEN_AHEAD + OPEN_DOT_BACK, OPEN_COVER_H + OPEN_DOT_SHIFT_H, 0.2);
+				return dotBand(img, COVER_DPB, q[0], q[1], q[2], coverM, age, dotShrink(rx, rz, t0), dotLock);
+			}));
 		}
-		NbmachinaMod.LOGGER.info("[styxshow] 开场卡片（{}）：机位 yaw {} → 锚点 ({}, {}, {})，封面 ({}, {}, {}) 文案 ({}, {}, {})，{} 格前方，{} 条点阵",
-			OPEN_SCREEN_ANCHOR ? "屏幕锚定、只显现/消失" : "世界固定",
-			fmt(p.getYaw()), fmt(ax), fmt(ay), fmt(az), fmt(coverX), fmt(ay), fmt(coverZ),
-			fmt(textX), fmt(ay), fmt(textZ), fmt(OPEN_AHEAD), OPEN_DOT_BANDS);
+		NbmachinaMod.LOGGER.info("[styxshow] 开场卡片（{}）：起播 yaw {} 锚点 ({}, {}, {})，{} 格前方、点阵右偏 {} 格；{} 条点阵、退出拆 {}×{} 块",
+			OPEN_SCREEN_ANCHOR ? "屏幕锚定·出生点按当前眼位现算" : "世界固定",
+			fmt(p.getYaw()), fmt(ax), fmt(ay), fmt(az), fmt(OPEN_AHEAD), fmt(OPEN_DOT_SHIFT_H),
+			OPEN_DOT_BANDS, PLATE_TILES, PLATE_TILES);
 	}
 
 	/** 秒 → 刻（表达式里的 t 是刻数）。 */
 	private static int ticks(double sec) {
 		return Math.max(1, (int) Math.round(sec * 20.0));
+	}
+
+	/**
+	 * 出一份"**当前**眼位 + 起播方向×dist + 起播右向×h、高度 = 当前眼高 + v"的世界坐标，
+	 * 给粒子当**出生点**用（{@link Pending} 的说明：出生点必须现算，否则新粒子会先在旧机位闪一下）。
+	 * 拿不到玩家（理论上不会）就退回起播机位。
+	 */
+	private static double[] anchorPoint(ServerWorld world, double dist, double h, double v) {
+		double ex = eye0X, ey = eye0Y, ez = eye0Z;
+		var players = world.getServer().getPlayerManager().getPlayerList();
+		if (!players.isEmpty()) {
+			ServerPlayerEntity p = players.get(0);
+			ex = p.getX();
+			ey = p.getEyeY();
+			ez = p.getZ();
+		}
+		return new double[]{
+			ex + dirFx * dist + dirRx * h,
+			ey + v,
+			ez + dirFz * dist + dirRz * h};
 	}
 
 	/**
@@ -751,7 +842,7 @@ public final class StyxShow {
 			for (int i = pending.size() - 1; i >= 0; i--) {
 				Pending p = pending.get(i);
 				if (p.at() <= now) {
-					exec(world, p.cmd());
+					exec(world, p.cmd().get());
 					pending.remove(i);
 				}
 			}
