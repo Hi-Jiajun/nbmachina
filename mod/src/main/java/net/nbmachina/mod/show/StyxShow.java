@@ -172,8 +172,8 @@ public final class StyxShow {
 	/** 柔光/涟漪的预渲染素材参数（16px / 24px，见 `_scratch-m3-80/render-show-pngs.mjs`） */
 	private static final double GLOW_DPB = 8.0, GLOW_R = 16.0 / GLOW_DPB / 2;   // 直径 2 格
 	private static final double RING_DPB = 15.0, RING_R = 24.0 / RING_DPB / 2;  // 直径 1.6 格
-	/** 逐字点尺寸：四边形 ≈ 笔画宽（4×点距），实机对照 1.0 偏散、2.5 偏糊 */
-	private static final double LYRIC_SIZE = 32.0 / GLYPH_DPB;
+	/** 逐字点尺寸：四边形 ≈ 笔画宽（≈0.17 格）。实机对照：1.0 偏散、2.5 偏糊，1.4 最锐 */
+	private static final double LYRIC_SIZE = 1.4;
 
 	private static String flareEdges(double cx, double cy, double cz, String col) {
 		return "particlex custom-conditional end_rod " + fmt(cx) + " " + fmt(cy) + " " + fmt(cz)
@@ -205,8 +205,8 @@ public final class StyxShow {
 	}
 
 	/** 余辉：弹过的音留一小块低透明色斑（2.5s），让"颜色沿着河往下传"看起来是流动的 */
-	private static String flareTrail(double cx, double cz, String col) {
-		return "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(DECK_TOP + 1.02) + " " + fmt(cz)
+	private static String flareTrail(double cx, double top, double cz, String col) {
+		return "particlex custom-normal end_rod " + fmt(cx) + " " + fmt(top) + " " + fmt(cz)
 			+ " \"size=6; cr,cg,cb=" + col + "; alpha=0.10; age=50; light=1.0\" 0.05 0.01 0.05 3 "
 			+ "\"alpha=0.10*(1-t/49)\" 1.0";
 	}
@@ -218,9 +218,9 @@ public final class StyxShow {
 	 * 换成逐像素带 alpha 的环图后，`(vx,vy,vz)=(dx,dy,dz)*k` 是**等比放大**（半径按 (1+k)^t 指数长），
 	 * 环始终连续，1.3s 内从 0.8 格推到 ~2.3 格并淡出。
 	 */
-	private static String flareRipple(double cx, double cz, String col) {
+	private static String flareRipple(double cx, double top, double cz, String col) {
 		// 平铺矩阵 (0,1,0,0,,0,0,0,0,,-1,0,0,0,,0,0,0,1)：v→+x、u→−z ⇒ 锚点要 (+x, +z) 各退 R
-		return "particlex image-matrix end_rod " + fmt(cx - RING_R) + " " + fmt(DECK_TOP + 1.03) + " " + fmt(cz + RING_R)
+		return "particlex image-matrix end_rod " + fmt(cx - RING_R) + " " + fmt(top) + " " + fmt(cz + RING_R)
 			+ " ring.png 1.0 \"" + FLAT_MATRIX + "\" " + fmt(RING_DPB) + " 0 0 0 26 "
 			// 环带的柔和度同样现算：r 用粒子自己的初始偏移长度，峰在 0.65 格、σ≈0.12 格
 			+ "\"(vx,vy,vz)=(dx,dy,dz)*0.055; size=0.7; cr,cg,cb=" + col
@@ -255,11 +255,9 @@ public final class StyxShow {
 		return "particlex image-matrix end_rod " + fmt(x) + " " + fmt(LYRIC_Y) + " " + fmt(z) + " " + file
 			+ " 1.0 \"" + MATRICES[matrixIndex] + "\" " + fmt(GLYPH_DPB / fit) + " 0 0 0 "
 			+ Math.max(1, (int) Math.round((line.end() - c.t() + 0.8) * 20))
-			// ① 骑流：vx = 播放头速度，整行像船一样跟着河走；② 浮动：AMLL 的 y±0.07 正弦
-			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; vy=0.004*cos(t/20*1.15+" + fmt(index * 1.7) + "); "
-			// ③ 弹性缩放（AMLL spring 的近似）：刚亮起放大 22%，3 刻衰减 → 落在锐利的 1.4
-			+ "size=" + fmt(LYRIC_SIZE) + "*(1+0.22*exp(-t/3)); "
-			// ④ 唱到哪亮到哪：未唱 = 冥河青的暗调，唱过 = 苍白色（颜色也随音高微调见 hueColor）
+			// ① 骑流：vx = 播放头速度，整行像船一样跟着河走（**不加 vy 浮动**：用户要"码平、别错位"）
+			+ " \"vx=" + fmt(PLAYHEAD_A / 20.0) + "; size=" + fmt(LYRIC_SIZE) + "; "
+			// ② 唱到哪亮到哪：未唱 = 冥河青的暗调，唱过 = 苍白色
 			+ "cr,cg,cb=lerp(clamp(t/" + d + ",0,1),0.20,0.93),lerp(clamp(t/" + d + ",0,1),0.28,0.98),"
 			+ "lerp(clamp(t/" + d + ",0,1),0.32,1.0); alpha=0.34+0.66*clamp(t/" + d + ",0,1)\" 1.0";
 	}
@@ -374,23 +372,21 @@ public final class StyxShow {
 			return;
 		}
 		ServerPlayerEntity p = players.get(0);
-		double yaw = Math.toRadians(p.getYaw()), pitch = Math.toRadians(p.getPitch());
-		double fx = -Math.sin(yaw) * Math.cos(pitch);
-		double fy = -Math.sin(pitch);
-		double fz = Math.cos(yaw) * Math.cos(pitch);
-		double rl = Math.hypot(fz, fx);
-		if (rl < 1e-4) rl = 1;
-		double rx = -fz / rl, rz = fx / rl;                            // 相机右 = f × up
-		double ux = -rz * fy, uy = rz * fx - rx * fz, uz = rx * fy;    // 相机上 = r × f
-		openingMatrix = "(" + fmt(rx) + "," + fmt(ux) + ",0,0,," + 0 + "," + fmt(uy) + ",0,0,,"
-			+ fmt(rz) + "," + fmt(uz) + ",0,0,,0,0,0,1)";
-		double ax = p.getX() + fx * OPEN_DIST, ay = p.getEyeY() + fy * OPEN_DIST, az = p.getZ() + fz * OPEN_DIST;
+		// 只用 yaw（**不带俯仰**）：用户口径 2026-09-24——封面/标题要"垂直于海平面、正对镜头"。
+		// 之前跟了 pitch → 画面整个后仰 12°；镜头是水平前飞的，后仰看起来就是歪的。
+		double yaw = Math.toRadians(p.getYaw());
+		double fx = -Math.sin(yaw), fz = Math.cos(yaw);   // 水平朝向（已单位化）
+		double rx = -fz, rz = fx;                         // 相机右 = f × up
+		openingMatrix = "(" + fmt(rx) + ",0,0,0,,0,1,0,0,," + fmt(rz) + ",0,0,0,,0,0,0,1)";
+		// 位置：镜头前方 OPEN_DIST 格、眼位略上一点（镜头在音符盒上方平飞，所以整组都高于方块）
+		double ax = p.getX() + fx * OPEN_DIST, ay = p.getEyeY() + 0.5, az = p.getZ() + fz * OPEN_DIST;
 		double c = COVER_W / 2;
-		exec(world, cover(ax - rx * c - ux * c, ay - uy * c, az - rz * c - uz * c));
+		// 竖直平面：上方向就是世界 +y，所以上下的偏移直接加在 y 上（不再跟俯仰角）
+		exec(world, cover(ax - rx * c, ay - c, az - rz * c));
 		double tu = c + 0.8;
-		exec(world, title(ax - rx * TITLE_W / 2 + ux * tu, ay + uy * tu, az - rz * TITLE_W / 2 + uz * tu));
+		exec(world, title(ax - rx * TITLE_W / 2, ay + tu, az - rz * TITLE_W / 2));
 		double su = c + 1.1;
-		exec(world, subtitle(ax - rx * SUB_W / 2 - ux * su, ay - uy * su, az - rz * SUB_W / 2 - uz * su));
+		exec(world, subtitle(ax - rx * SUB_W / 2, ay - su, az - rz * SUB_W / 2));
 		NbmachinaMod.LOGGER.info("[styxshow] 开场三件套：机位 yaw {} pitch {} → 锚点 ({}, {}, {})（{} 格外）",
 			fmt(p.getYaw()), fmt(p.getPitch()), fmt(ax), fmt(ay), fmt(az), fmt(OPEN_DIST));
 	}
@@ -426,14 +422,18 @@ public final class StyxShow {
 
 	public static void noteFlare(ServerWorld world, int x, int y, int z, int midi, int velocity, boolean bass) {
 		if (!active) return;
-		// 方块中心 = (x+.5, y+.5, z+.5)：棱边描的是**方块本体**（旧版写 y+1.5，整圈框浮在方块上方一格）
-		double cx = x + 0.5, cy = y + 0.5, cz = z + 0.5;
+		// 一切以**方块自己的 y** 为准（机器 map 里音符盒就在 y=110，顶面 111.0）：
+		// 旧版涟漪写死在 DECK_TOP+1.03=112.03 —— 比顶面高一格，水面一涨就整条沉进去，
+		// 用户 2026-09-24 反馈"涟漪没做到每个音符盒上 / 特效跑到方块下方一格"就是这个。
+		double cx = x + 0.5, cz = z + 0.5;
+		double cy = y + 0.5;          // 方块中心（描边框贴着方块本体）
+		double top = y + 1.0;         // 方块顶面
 		String col = hueColor(midi, bass);
-		exec(world, flareGlow(cx, cy + 0.1, cz, col));
-		exec(world, flareRipple(cx, cz, col));
 		exec(world, flareEdges(cx, cy, cz, col));
-		exec(world, flareTrail(cx, cz, col));
-		if (velocity >= 90) exec(world, flareSparks(cx, cy + 0.45, cz));
+		exec(world, flareGlow(cx, top + 0.45, cz, col));   // 柔光：顶面上方 0.45 格（镜头在方块上方平飞）
+		exec(world, flareRipple(cx, top, cz, col));        // 涟漪：正好铺在顶面
+		exec(world, flareTrail(cx, top + 0.02, cz, col));
+		if (velocity >= 90) exec(world, flareSparks(cx, top + 0.5, cz));
 	}
 
 	/**
@@ -475,8 +475,8 @@ public final class StyxShow {
 		cmds.add(cover(-10.0, 115.0, ZC));
 		cmds.add(title(-10.0, 119.5, ZC));
 		cmds.add(subtitle(-10.0, 111.0, ZC));
-		cmds.add(flareEdges(0.5, 111.5, -5.5, "0.90,0.95,1.00"));
-		cmds.add(flareRipple(0.5, -5.5, "0.90,0.95,1.00"));
+		cmds.add(flareEdges(0.5, 110.5, -5.5, "0.90,0.95,1.00"));
+		cmds.add(flareRipple(0.5, 111.0, -5.5, "0.90,0.95,1.00"));
 		cmds.add(flareSparks(0.5, 111.5, -5.5));
 		cmds.add(accentRing(3.917));
 		LyricLine demo = new LyricLine(22.407, 24.457, 3.0, 10.0, "请不要让我就此死亡",
