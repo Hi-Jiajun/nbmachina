@@ -176,7 +176,14 @@ public final class StyxShow {
 	private static final int COVER_PLATE_AGE = 50;      // → 2.95s 消失（点阵那时已经淡入完）
 	private static final double COVER_SCATTER_AT = 2.40; // 点阵提前 0.55s 淡入，接管时不掉亮度
 	private static final int COVER_SCATTER_AGE = 36;
-	private static final double COVER_DPB = 24.0;
+	/**
+	 * 点阵接棒用的素材与密度：**144px / dpb18 = 8 格**（与清晰板同尺寸），
+	 * 2.07 万颗（实测这个量级能稳定出图，192²=3.7 万颗时经常整批不画）。
+	 */
+	private static final String COVER_GRID_IMAGE = "styx-cover-144.png";
+	private static final double COVER_DPB = 18.0;
+	/** 点阵点尺寸：0.66 格 ≈ 12 个点距——把暗部像素也铺成实心，整张图才"完整"。 */
+	private static final double COVER_GRID_SIZE = 5.3;
 	private static final double TITLE_DPB = 48.0, TITLE_W = 8.0;
 	private static final double SUB_DPB = 48.0, SUB_W = 256.0 / SUB_DPB;
 	/** 开场距离：整组浮在玩家眼前，跟着机位走（不再依赖"玩家正好飞到某个坐标"） */
@@ -234,9 +241,12 @@ public final class StyxShow {
 		// ⚠ **点阵必须用 end_rod**：2026-09-24 二分实测——`minecraft:block` + 面向镜头的字面矩阵
 		//   **整段不出图**（同一命令换成 end_rod 就出，换成 "E4" 矩阵也出，但那是侧对镜头不能用）。
 		//   所以清晰板走 block+E4，点阵/吹散走 end_rod+字面矩阵，各走各的稳的那条。
+		// ⚠ size 要给大（4.0 = 0.5 格 ≈ 12 个点距）：end_rod 精灵是软光点，点距 1/24 格时
+		//   **暗部像素几乎不发光**（用户 2026-09-24："点阵图不完整"——只剩中间那束花）。
+		//   12 倍重叠把暗部铺成实心之后，点阵观感才和清晰板接得上。
 		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
-			+ " styx-cover-192.png 1.0 \"" + matrix + "\" " + fmt(COVER_DPB) + " 0 0 0 " + COVER_SCATTER_AGE + " "
-			+ "\"size=2.6; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
+			+ " " + COVER_GRID_IMAGE + " 1.0 \"" + matrix + "\" " + fmt(COVER_DPB) + " 0 0 0 " + COVER_SCATTER_AGE + " "
+			+ "\"size=" + fmt(COVER_GRID_SIZE) + "; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
 			+ " vx=0.12*" + p + "; vy=0.03*" + p + "\" 0.05";
 	}
 
@@ -244,7 +254,7 @@ public final class StyxShow {
 		String p = "clamp((t-0.30)/0.75,0,1)";
 		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
 			+ " title.png 1.0 \"" + matrix + "\" " + fmt(TITLE_DPB) + " 0 0 0 30 "
-			+ "\"size=0.7; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
+			+ "\"size=1.1; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
 			+ " vx=0.06*" + p + "\" 0.05";
 	}
 
@@ -252,7 +262,7 @@ public final class StyxShow {
 		String p = "clamp((t-0.35)/0.75,0,1)";
 		return "particlex image-matrix end_rod " + fmt(ax) + " " + fmt(ay) + " " + fmt(az)
 			+ " subtitle.png 1.0 \"" + matrix + "\" " + fmt(SUB_DPB) + " 0 0 0 32 "
-			+ "\"size=0.7; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
+			+ "\"size=1.1; alpha=clamp(t/0.20,0,1)*(1-" + p + ");"
 			+ " vx=0.06*" + p + "\" 0.05";
 	}
 
