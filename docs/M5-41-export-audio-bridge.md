@@ -79,3 +79,28 @@ node tools/nbm-export-audio.mjs --replay <回放.zip> --audio build/master_v2/st
   两者内容同源（同一套谱面/采样/力度），但成片那份**没有设备与回环的损耗**。
 * `Record Audio` 关掉时 Flashback 不建音频流（`AsyncFFmpegVideoWriter` 里写死），所以导出时必须勾上它 —— 本地配置已预置 `recordAudio=true / stereoAudio=true / audioCodec=FLAC`。
 * 若以后要"录游戏内实际听到的那一份"，把 `/nbmc rec` 的 WAV 填进 `export_audio.json` 即可（同一条桥）。
+
+## 6. 2026-09-25 14:18 导出崩溃取证（M5-43）
+
+用户反馈"导出渲染快完了但是崩溃了"，错误报告 `错误报告-2026-9-25_14.18.25.zip`。
+
+**① 表层异常是二次异常，真正的失败被吞了。**
+崩溃报告：`java.lang.IllegalStateException: Cannot encode after finish()` @ `AsyncFFmpegVideoWriter.encodeHdr`。
+代码里编码线程/缩放线程一旦抛异常，只把异常塞进 `threadedError` 并置 finish 旗标；上层下一次 `encodeHdr`
+检查旗标就直接抛这句——**原始异常从未打印**（日志里 FFmpeg 只有启动那 34 行 info，之后什么都没有）。
+修法（已进补丁版）：编码/缩放线程的 catch 里 `Flashback.LOGGER.error("…thread failed", t)`，
+且上层把 `threadedError` 作为 cause 抛出（`Video writer stopped early: …`）。
+
+**② 系统侧：提交内存被打满，机器随后硬重置。**
+崩溃报告：`Virtual memory max 196265 MiB / used 194074 MiB`（= 提交上限 191.7 GB、已用 189.5 GB）。
+对照本机历次崩溃：9-19 71.5/89.8、9-20 50.3/93.9、9-24 73.1/93.9 —— 这次是**上限翻倍且顶满**；
+页面文件当时被自动涨到 **144 GB**（现在 52 GB）。事件日志：14:17:12 游戏崩，14:18:51 系统非正常关机
+（Kernel-Power 41，`BugcheckCode=0`，无 minidump）→ 硬挂/断电式，不是蓝屏。
+⇒ 导出 42 分钟里提交内存涨了约 120 GB（≈47 MB/s）。嫌疑：导出通路（HDR 取帧 66 MB 原生缓冲）、
+或 Distant Horizons（其配置里自带 out-of-memory 警告，本次镜头飞 2000+ 格、DH 持续加载 LOD）、或其它进程。
+
+**③ 工具**：`tools/export-watch.ps1`（另外开一个终端跑，每 10s 记提交内存/页面文件/显存/磁盘/游戏工作集/句柄，CSV 留档）。
+下一步：先做 60 秒短导出 + 监控，看提交内存增速，再决定是修泄漏还是分段导出（74→1975 / 1975→3876 / 3876→5828，最后 `-c copy` 拼接）。
+
+**④ 顺带确认**：这次的音频桥是好的 —— 日志 `[nbmachina] 导出音频桥已接管：回放 3.700s 起、48000Hz / 2ch`，
+FFmpeg 报告 `Audio: pcm_s24le, 48000 Hz, stereo, s32, 2304 kb/s`，`bitrate max/min/avg: 0/0/288000000`（用的是最大码率档）。
