@@ -14,7 +14,8 @@
 //   node tools/nbm-camera-plan.mjs --offset 3.3458 # 手给偏移（默认读 export_audio.json）
 //
 // 方案的每个点：{ sec: 谱面秒, lag: 相机落后播放头几格, y, z, yaw, pitch, label }
-// 相机 x = clamp(8.3341·sec − 32.784, −60, 2333) − lag（谱面末尾之后播放头钉在 2333）。
+// 相机 x = clamp(8.3341·sec − 32.784, −60, 2333) − lag（谱面末尾之后播放头钉在 2333）；
+// 想写死某个 x（例如开场"完全静止"）就直接给 `x`，想硬静止就给 `hold: true`（插值类型 HOLD）。
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -35,9 +36,15 @@ const LAST_NOTE_SEC = 283.858; // 最后一颗音
 
 /** 内置方案：段落边界（来自 build/dynamics-sections.json + M5 十场表）与音乐节点。 */
 const PLAN = [
-  { sec: 0.00, lag: 26, y: 121.5, z: 2.5, yaw: -90, pitch: 3.4, label: '开场·空河（卡片锚屏）' },
-  { sec: 6.00, lag: 25, y: 119.2, z: 2.0, yaw: -90, pitch: 3.2, label: '开场·缓降' },
-  { sec: 14.00, lag: 23, y: 117.6, z: 2.5, yaw: -90, pitch: 2.0, label: '进入巡航' },
+  // 开场：卡片 0.00 淡入（封面 0.35s / 文字 0.70s）→ 2.30s 起淡出 → **3.00s 完全消失**。
+  // 用户在 2026-09-25 明确要求"封面和文字消失之前不要前进"（锚屏卡片跟着眼位重算，镜头一动就抖），
+  // 所以 0 → 3.20s 机位**完全不动**（HOLD），之后再缓加速追回巡航滞后。
+  { sec: 0.00, x: -58.784, y: 119.0, z: 2.5, yaw: -90, pitch: 0.0, hold: true, label: '开场·静止（卡片淡入→淡出）' },
+  { sec: 3.20, x: -58.784, y: 119.0, z: 2.5, yaw: -90, pitch: 0.0, label: '卡片已消失·起步' },
+  { sec: 6.00, lag: 45, y: 119.5, z: 2.5, yaw: -90, pitch: 3.0, label: '加速追回（约 11 格/秒）' },
+  { sec: 10.00, lag: 34, y: 118.2, z: 2.5, yaw: -90, pitch: 2.5, label: '继续收拢滞后' },
+  { sec: 14.00, lag: 27, y: 117.4, z: 2.5, yaw: -90, pitch: 2.0, label: '进入巡航' },
+  { sec: 18.00, lag: 23, y: 117.0, z: 2.5, yaw: -90, pitch: 1.8, label: '巡航稳定' },
   { sec: 22.94, lag: 21, y: 116.8, z: 2.5, yaw: -90, pitch: 1.6, label: 'S1 首句' },
   { sec: 29.00, lag: 20, y: 116.6, z: -2.5, yaw: -90, pitch: 1.4, label: 'A① 内侧偏航' },
   { sec: 34.00, lag: 19, y: 117.0, z: -4.0, yaw: -93, pitch: 1.6, label: '长句·微转' },
@@ -96,9 +103,10 @@ if (offset === null) {
 }
 
 const rows = PLAN.map((k) => {
-  const x = playheadX(k.sec) - k.lag;
+  const x = k.x !== undefined ? k.x : playheadX(k.sec) - k.lag;
   // 播放头相对画面中心的下移角（度）：半垂直 FOV ≈21.5°（FOV 70、16:9），>19° 就会掉出画面
-  const theta = Math.atan2(k.y - 111.0, Math.max(1, k.lag)) * 180 / Math.PI;
+  const lag = k.x !== undefined ? Math.max(1, playheadX(k.sec) - k.x) : k.lag;
+  const theta = Math.atan2(k.y - 111.0, Math.max(1, lag)) * 180 / Math.PI;
   return { ...k, x, tick: Math.round((k.sec + offset) * 20), drop: theta - k.pitch };
 });
 
@@ -152,7 +160,8 @@ const newTrack = {
   keyframeType: 'CAMERA',
   keyframesByTick: Object.fromEntries(rows.map((r) => [String(r.tick), {
     position: [Number(r.x.toFixed(6)), Number(r.y.toFixed(6)), Number(r.z.toFixed(6))],
-    yaw: r.yaw, pitch: r.pitch, roll: 0, type: 'camera', interpolation_type: 'SMOOTH',
+    yaw: r.yaw, pitch: r.pitch, roll: 0, type: 'camera',
+    interpolation_type: r.hold ? 'HOLD' : 'SMOOTH',
   }])),
   enabled: true,
   customColour: track?.customColour ?? 0,
