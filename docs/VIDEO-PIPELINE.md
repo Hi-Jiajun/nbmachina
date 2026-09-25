@@ -195,3 +195,23 @@ pwsh -File tools/flashback-lossless/build-patch.ps1 `
 注意：Flashback 的许可是 *Do not redistribute / All rights reserved*，所以仓库里**只有我们自己的
 补丁脚本**（`build-patch.ps1`、`diff-bytecode.mjs`、`verify-audio.mjs`、`AudioCodecHarness.java`、
 intermediary stub 与 README），没有任何 Flashback 源码或 jar。
+
+---
+
+## 10. M5-41 · 导出音频桥：音乐怎么进 Flashback 成片（2026-09-25 定稿）
+
+上面 §9 的"挂音频轨 → 回环抓音"路线**实测不成立**：Flashback 的 `Record Audio` 抓的是原版 SoundEngine 设备的
+`SOFTLoopback`，而 nbmachina 的引擎走**自有 OpenAL 设备**，所以导出的 PCM 轨是**整条静音**（2026-09-25 `StyxHelix.mkv`：
+音轨存在、逐样本 0、volumedetect -91 dB；9-24 那条"验收过"的成片也是静音，当时只验了编码格式）。
+
+现在走**导出音频桥**（补丁版 Flashback + mod 反射注册），细节与取证见 `docs/M5-41-export-audio-bridge.md`：
+
+1. 打包/装机：`tools/flashback-lossless/apply-fb-audiobridge.mjs` → `gradlew build` → `assemble-fb-jar.ps1`
+   （产物 sha256 `7E1ABA3D…`）；mod 侧 `nbmachina-0.10.3.jar`；
+2. 配音轨（自动算偏移，不用手量）：
+   `node tools/nbm-export-audio.mjs --replay <回放.zip> --audio build/master_v2/styx_master_v2_48k24bit.wav`
+3. Flashback 回放中心导出：容器 **MKV**、勾 **Record Audio**、编码 **FLAC** 或 **PCM 24-bit**
+   （`recordAudio` 关掉时 Flashback 不建音频流，桥写不进去）；
+4. 成片音轨校验：`ffprobe … -select_streams a:0` + `ffmpeg -af volumedetect`（要看到真实电平，不能是 -91 dB）。
+
+离线逐样本对账：`tools/flashback-lossless/ExportAudioHarness.java`（五个窗口最大误差 ≤1.16e-10 = 与母版字节一致）。

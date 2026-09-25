@@ -43,6 +43,20 @@ public final class NbmachinaScheduler {
 		return queued;
 	}
 
+	/**
+	 * M5-41 · 清空待发队列。回放中心里 seek 时，Flashback 会**从快照重新快进**整段回放，
+	 * 于是我们会收到"整首歌"的补发 payload；不清队列的话它们会照排程一路播出来
+	 * （用户实测：点时间轴 → 音乐从头又放一遍 + 叠加 → 越来越卡）。
+	 */
+	public static int clear() {
+		synchronized (QUEUE) {
+			int n = QUEUE.size();
+			QUEUE.clear();
+			QUEUE.notifyAll();
+			return n;
+		}
+	}
+
 	public static int ran() {
 		return ran;
 	}

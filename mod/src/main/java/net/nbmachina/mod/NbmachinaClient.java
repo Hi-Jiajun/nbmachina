@@ -25,6 +25,7 @@ import net.minecraft.text.Text;
 import net.minecraft.util.math.MathHelper;
 
 import net.nbmachina.mod.audio.NbmachinaAudio;
+import net.nbmachina.mod.audio.NbmExportAudio;
 import net.nbmachina.mod.audio.NbmachinaInstruments;
 import net.nbmachina.mod.audio.NbmachinaRecorder;
 import net.nbmachina.mod.audio.NbmachinaSamples;
@@ -57,6 +58,14 @@ public final class NbmachinaClient implements ClientModInitializer {
 	/** M3-76：客户端刻计数（写进录音 json，用于和回放轴核账） */
 	private static volatile long clientTick = 0L;
 
+	/** M5-41：回放跳转保护 —— 回放服务器 seek 时会从起点快进重放，我们会收到整首歌的补发。 */
+	private static long burstWindowStart = 0L;
+	private static int burstCount = 0;
+	private static volatile boolean catchUp = false;
+	private static double lastSeenScoreSec = 0.0;
+	private static int skippedCatchUp = 0;
+	private static int skippedLate = 0;
+
 	/** M3-76：录音输出目录：`<gameDir>/nbmachina/recordings/`（与采样/谱面同级的 nbmachina 目录） */
 	private static java.nio.file.Path recDir() {
 		return FabricLoader.getInstance().getGameDir().resolve("nbmachina").resolve("recordings");
@@ -68,6 +77,8 @@ public final class NbmachinaClient implements ClientModInitializer {
 		NbmachinaInstruments.loadVoices();   // M3-30：音色覆盖表（config/nbmachina/voices.json）
 		NbmachinaAudio.start();
 		NbmachinaRecorder.LOG = (s) -> NbmachinaMod.LOGGER.info(s);   // M3-76：录音器日志走 Fabric logger
+		// M5-41：导出音频桥 —— 把无损音轨**直接混进 Flashback 的导出成片**（未装补丁版 Flashback 时静默跳过）
+		NbmExportAudio.register();
 		// M3-76：**回放开始录制 → 我们的录音也从那一刻起算**（ReplayMod 的聊天键 `replaymod.chat.recordingstarted`
 		// 是 TranslatableText，直接按 key 判定，不依赖语言；Flashback 的键名做兼容匹配）。
 		// 这样 WAV 的 t=0 == 回放时间轴的 t=0 → 出片时 offset 恒为 0。
@@ -101,14 +112,53 @@ public final class NbmachinaClient implements ClientModInitializer {
 			// 需要先把"机器起播锚点"记下来（machine_sync 包给的 fromSec + 本地接收时刻）。
 			Runnable play = () -> NbmachinaAudio.play(payload.instrument(), payload.voice(), payload.midi(),
 				payload.velocity(), payload.durMs(), payload.x(), payload.y(), payload.z());
+
+			// ---- M5-41：回放快进/跳转保护 ----------------------------------------------------
+			// Flashback 的 seek = 回到快照再快进重放，于是 payload 会以几十~几百倍的速度补发。
+			// 正常演奏 ~11 颗/秒；一秒内超过 80 颗就判定"正在快进"：清空排程、这一段不发声，
+			// 等快进结束再把锚点重新对准当前谱面位置 —— 音乐从跳转点继续，而不是从头叠一遍。
+			long now = System.nanoTime();
+			if (now - burstWindowStart > 1_000_000_000L) {
+				if (catchUp && burstCount < 80) {
+					catchUp = false;
+					anchorNanos = now;
+					anchorScoreSec = lastSeenScoreSec;
+					int dropped = NbmachinaScheduler.clear();
+					NbmachinaMod.LOGGER.info("[nbmachina] 回放快进结束：锚点对准谱面 {}s（快进期间丢掉 {} 颗补发，清掉排程 {} 条）",
+						String.format("%.2f", anchorScoreSec), skippedCatchUp, dropped);
+					skippedCatchUp = 0;
+				}
+				burstWindowStart = now;
+				burstCount = 0;
+			}
+			burstCount++;
+			if (catchUp) {
+				lastSeenScoreSec = Math.max(lastSeenScoreSec, payload.scoreTimeSec());
+				skippedCatchUp++;
+				return;
+			}
+			if (burstCount > 80) {
+				catchUp = true;
+				lastSeenScoreSec = payload.scoreTimeSec();
+				int dropped = NbmachinaScheduler.clear();
+				NbmachinaMod.LOGGER.info("[nbmachina] 检测到回放快进：暂停发声，等快进结束再对齐（清掉排程 {} 条）", dropped);
+				skippedCatchUp++;
+				return;
+			}
+
 			if (payload.scoreTimeSec() > 0 && anchorScoreSec >= 0) {
 				long target = anchorNanos + Math.round((payload.scoreTimeSec() - anchorScoreSec) * 1e9);
-				if (target > System.nanoTime()) {
+				if (target > now) {
 					net.nbmachina.mod.audio.NbmachinaScheduler.at(target, play);
 					scheduledCount++;
 					// M3-92：**排程之后**才预热，而且丢给专用预热线程（解码不再加在派发路径上）
 					NbmachinaAudio.prewarmNoteAsync(payload.instrument(), payload.voice(), payload.midi(),
 						payload.velocity(), payload.durMs());
+					return;
+				}
+				// 迟到超过 200ms 的音直接丢：它们只可能来自补发/卡顿，播出来就是"错音"
+				if (now - target > 200_000_000L) {
+					skippedLate++;
 					return;
 				}
 			}
@@ -141,12 +191,23 @@ public final class NbmachinaClient implements ClientModInitializer {
 								IntegerArgumentType.getInteger(ctx, "count"))))))
 				// M3-76：游戏内无损录音（48k/24bit 立体声 WAV + 锚点 json）——给 ReplayMod / Flashback 出片用。
 				// 一般不用手打：ReplayMod/Flashback 一按录制，聊天栏那条消息会**自动触发开录**（t=0 对齐回放轴）。
-				.then(ClientCommandManager.literal("rec")
-					.executes(ctx -> recStatus(ctx.getSource()))
-					.then(ClientCommandManager.literal("status").executes(ctx -> recStatus(ctx.getSource())))
-					.then(ClientCommandManager.literal("start")
-						.executes(ctx -> recStart(ctx.getSource(), "manual")))
-					.then(ClientCommandManager.literal("stop").executes(ctx -> recStop(ctx.getSource()))))
+					.then(ClientCommandManager.literal("rec")
+						.executes(ctx -> recStatus(ctx.getSource()))
+						.then(ClientCommandManager.literal("status").executes(ctx -> recStatus(ctx.getSource())))
+						.then(ClientCommandManager.literal("start")
+							.executes(ctx -> recStart(ctx.getSource(), "manual")))
+						.then(ClientCommandManager.literal("stop").executes(ctx -> recStop(ctx.getSource()))))
+					// M5-41：导出音轨（Flashback 补丁版的导出音频桥读 <游戏目录>/nbmachina/export_audio.json）
+					.then(ClientCommandManager.literal("exportaudio")
+						.executes(ctx -> {
+							ctx.getSource().sendFeedback(Text.literal("[nbmachina] 导出音轨：" + NbmExportAudio.status()));
+							return 1;
+						})
+						.then(ClientCommandManager.literal("reload").executes(ctx -> {
+							NbmExportAudio.reload();
+							ctx.getSource().sendFeedback(Text.literal("[nbmachina] 导出音轨：" + NbmExportAudio.status()));
+							return 1;
+						})))
 				.then(ClientCommandManager.literal("instruments")
 					.executes(ctx -> list(ctx.getSource(), null))
 					.then(ClientCommandManager.argument("filter", StringArgumentType.word())
