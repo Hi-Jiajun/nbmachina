@@ -70,3 +70,67 @@
 | **开始/结束 Tick** | 起 **67**、止 **5828** | 音乐 0s = tick 67（封面 0.35s 起淡入）；回放末尾 5828 |
 | 封装/编码 | MKV + H265(HEVC) + hevc_nvenc | 10-bit 只有 hevc_nvenc / av1_nvenc 可用（自带 ffmpeg 没有 libx265） |
 | 音频 | 录制音频 ✓ + 立体声 ✓ + PCM 24-bit + 48 kHz | `AsyncFFmpegVideoWriter` 只在 `recordAudio=true` 时建音频流；导出音频桥写的就是这条流 |
+
+## 5. HDR10 静态元数据 + 全片峰值实测（2026-09-25，0.10.2 那版导出）
+
+**背景**：`2026-09-25T15_04_28.mkv`（4K120 / HEVC Main10 / bt2020+PQ / PCM 24bit48k / 278 Mbps）**没有 HDR10 静态元数据**
+（`stream_side_data` 为空）。原因：`hdr-tag.mjs` 只写 colour primaries / transfer / matrix / range；
+而 ffmpeg 8.1 的 `hevc_metadata` bsf **根本没有**这两个选项（实测报 `Option 'mastering_display' not found`）。
+
+### 5.1 全片峰值（逐帧，全分辨率）
+
+| 指标 | 值 | 位置 |
+|---|---|---|
+| **MaxCLL** | **867 nits**（真码值 753） | t=88.225s |
+| **MaxFALL**（线性帧均） | **84 nits** | t≈234s（帧均非常稳：p50 75.6 / p90 78.4 / p99 81.1） |
+| 每帧峰值分位数 | p99.9 773 / p99 725 / p90 674 / **p50 633 nits** | — |
+
+峰值最高的 12 帧（nits）：88.225→867、244.025→858、88.758/108.808/279.150→832、108.792/142.958/163.075→823、93.858/118.675/163.842/163.875→814。
+
+测量口径：34,525 帧**逐帧全分辨率** `signalstats` 取 YMAX（约 8 分钟）；MaxFALL 另跑一遍 1 fps 的 raw `gray10le`
+在 node 里用 PQ→线性 LUT 算**线性光均值**（前 3 帧全像素精确校验，其余按 8 像素步长抽样）。
+
+### 5.2 三个换算坑（都踩过，别再踩）
+
+1. **`signalstats` 在这条 pc 全范围流上输出的是"折算过的值"**：它按 limited(16..235@8bit) 口径报，
+   不是 10-bit 真码值。反算：`true = (s/4 - 16) / 219 × 1023`。
+   交叉验证：peak 帧 raw 753/752 ↔ signalstats 709/708（误差 <1 码）。
+   **把 signalstats 的值直接当码值过 PQ 会把峰值低估 33%**（582 → 867 nits）。
+2. **量 HDR 别用 `format=gray`**（8-bit，会再丢一档），要用 `gray10le`。
+3. **降采样会漏峰值**：1280×720 邻域采样比全分辨率低 0–13 码（≈10% nits）。量 MaxCLL 必须全分辨率。
+
+### 5.3 无损注入 HDR10 静态元数据（新工具 `tools/hdr10-sei.mjs`）
+
+往裸 HEVC 里插 prefix SEI（payload 137 mastering_display + 144 content_light_level），**每个 PPS 后插一个** →
+每个 IRAP 前都有，跳转任意位置都读得到。**像素完全不动**。
+
+```bash
+ffmpeg -i in.mkv -an -c:v copy -f hevc - \
+  | node tools/hdr10-sei.mjs --cll 867,84 --master 1000 \
+  | ffmpeg -r 120 -f hevc -i - -c copy -f mp4 tmp_v.mp4
+ffmpeg -i tmp_v.mp4 -i in.mkv -map 0:v -map 1:a -c copy \
+  -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc -color_range pc out.mkv
+# 校验：
+ffprobe -v error -select_streams v:0 -show_entries frame_side_data=side_data_type \
+  -read_intervals "%+#1" -of default=nw=1 out.mkv   # 应出现 Mastering display metadata + Content light level metadata
+```
+
+* ⚠ 中间那步 MP4 不能省：裸 HEVC 没有时间戳，**Matroska 复用器会直接拒绝**（`Can't write packet with unknown timestamp`）。
+* 本次成品 `2026-09-25T15_04_28_hdr10.mkv`：144 个 SEI（只多 5.8 KB）；30/120/250s 三帧 raw MD5 与原文件**完全一致**；
+  容器时长从错误的 295.595s 修正为 **287.725s**（原文件容器头比实际内容长 7.9s：视频末包 287.692s、音频 287.573s）。
+* 以后 x265 编码可以直接带（不用后处理）：`-x265-params "master-display=G(8500,39850)B(6550,2300)R(35400,14600)WP(15635,16450)L(10000000,1):max-cll=867,84"`；
+  **hevc_nvenc 没有这个开关** → 走本工具后处理。
+
+### 5.4 音画偏移：视频是对的，音频早了 340ms
+
+| 事件 | 视频实测 | 谱面 | 结论 |
+|---|---|---|---|
+| 第一颗音的特效粒子出现 | **3.900s**（逐帧帧差最大处，144 帧里唯一天然尖峰） | 3.917s | 视频锁在谱面（差 1 帧内） |
+| 音轨第一个声音 | **3.577s** | 3.917s | **音频早 340ms**（≈ Flashback 音频桥的偏移） |
+
+修法（**不重编码**）：
+```bash
+mkvmerge -i in.mkv                       # 先确认轨道 id（一般 0=video, 1=audio）
+mkvmerge --sync 1:340 -o out.mkv in.mkv  # 音频整体后移 340ms
+```
+或按用户原计划在剪辑软件里对齐音频轨（对齐量 **+340ms**）。
