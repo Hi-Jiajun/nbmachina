@@ -135,6 +135,11 @@ public final class NbmExportAudio {
 		if (src == null || frames <= 0) {
 			return;
 		}
+		if (!fillLogged) {
+			fillLogged = true;
+			NbmachinaMod.LOGGER.info("[nbmachina] 导出音频桥已接管：回放 {}s 起、{}Hz / {}ch，音轨 {}",
+				String.format("%.3f", startSeconds), sampleRate, channels, audioPath);
+		}
 		int srcFrames = src.length / 2;
 		double pos = (startSeconds - offsetSec) * srcRate;
 		double step = (double) srcRate / Math.max(1, sampleRate);
@@ -167,6 +172,7 @@ public final class NbmExportAudio {
 	}
 
 	private static volatile int lastReadRate = 48000;
+	private static volatile boolean fillLogged = false;
 
 	/**
 	 * 极简 WAV 读取：支持 PCM 16/24/32 与 IEEE float32/64、单/双声道。
