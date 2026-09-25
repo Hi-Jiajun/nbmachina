@@ -134,3 +134,20 @@ mkvmerge -i in.mkv                       # 先确认轨道 id（一般 0=video, 
 mkvmerge --sync 1:340 -o out.mkv in.mkv  # 音频整体后移 340ms
 ```
 或按用户原计划在剪辑软件里对齐音频轨（对齐量 **+340ms**）。
+
+#### 5.4.1 本机实际执行（2026-09-25，mkvmerge 未安装 → 用 ffmpeg）
+
+本机没有 mkvmerge，改成 ffmpeg 的 `adelay`（视频 `-c:v copy` 不动，音频 PCM 重编但**逐样本一致**）：
+
+```bash
+ffmpeg -i in.mkv -map 0:v -map 0:a -c:v copy -c:a pcm_s24le -af "adelay=340|340" \
+  -color_primaries bt2020 -color_trc smpte2084 -colorspace bt2020nc -color_range pc \
+  -f matroska out.mkv
+```
+
+* ⚠ `-itsoffset 0.34 -c copy` **不管用**（实测：不配 `-copyts` 时 ffmpeg 会把时间戳重新归零，音频仍是 3.577s）。
+* `adelay` 是唯一改动 = 前面补 340ms 静音：逐字节比对过 —— 原 20s 的 PCM 与移位后偏移 **16320 样本**
+  （= 340ms @48k）处的窗口 `Buffer.compare === 0`，**完全一致**。
+* 成品：`C:\Users\hiliang\Videos\2026-09-25T15_04_28_hdr10_sync.mkv`
+  （≈ +96 KB，只多出静音；视频包数 34525 与末包 287.700s 不变；HDR 静态元数据与色彩标记都在；
+  音频末包 287.590 → 287.930s；**音频第一声 3.577s → 3.917s**，与视频的第一颗音特效 3.900s 对齐）。
