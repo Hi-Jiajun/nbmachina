@@ -59,3 +59,14 @@
 | CSV 谱面方案（默认） | `nbmachina\machine.json` 改名/删除即可（当前为 `machine.json.off`） |
 | Flashback 官方原版 | `mods\Flashback-0.39.9-for-MC1.21.10.jar.upstream` 覆盖回 `.jar` |
 | HDR mod 官方原版 | `mods\hdr_mod-fabric-2.5.1-1.21.10.jar.upstream` 覆盖回 `.jar` |
+
+## 附：导出窗口逐项口径（2026-09-25 用户截图问询后补）
+
+| 选项 | 口径 | 依据 |
+|---|---|---|
+| **SSAA** | **关**（开 HDR 时绝对不能开） | 代码里 SSAA = 渲染分辨率 ×2（4K → 8K 渲染，4× 像素）；更要命的是 **HDR 通路读不回来**：`ColorTransformRenderer` 的 dst 纹理固定按**源分辨率**创建（`srcTextureView.getWidth(0)`），而 `SaveableFramebuffer.startDownloadHdr` 按 **输出分辨率** 读 `glReadPixels(0,0,w,h)` → 开 SSAA+HDR 只会拿到**左下 1/4 画面**（等价 2× 放大裁切）。要用 SSAA 得先修那条桥 |
+| **无界面** | **开** | 移除 hotbar / 准星 / 聊天 / 调试层，只渲染世界；开场卡片与音符盒特效都是**世界内粒子**，不受影响 |
+| **码率 20m** | 太低，改 **150m** 或勾 **使用最大码率** | `AsyncFFmpegVideoWriter`：`maxBitrate = min(288_000_000, 4096 + av_image_get_buffer_size(fmt,w,h,1)*8*fps)`；4K120 10bit 下等于 **288 Mbps 上限**；勾"使用最大码率" → `numBitrate = 0` → 用满 288M。20 Mbps 在粒子+HDR 渐变上会糊 |
+| **开始/结束 Tick** | 起 **67**、止 **5828** | 音乐 0s = tick 67（封面 0.35s 起淡入）；回放末尾 5828 |
+| 封装/编码 | MKV + H265(HEVC) + hevc_nvenc | 10-bit 只有 hevc_nvenc / av1_nvenc 可用（自带 ffmpeg 没有 libx265） |
+| 音频 | 录制音频 ✓ + 立体声 ✓ + PCM 24-bit + 48 kHz | `AsyncFFmpegVideoWriter` 只在 `recordAudio=true` 时建音频流；导出音频桥写的就是这条流 |
